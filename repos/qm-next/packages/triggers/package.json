@@ -1,0 +1,23 @@
+{
+  "name": "@qm/triggers",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cron store, tick-lease scheduler, fire idempotency, and the trigger→turn sink; consumes the frozen DirectoryStore for delivery visibility",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@qm/directory": "workspace:^",
+    "@qm/im-core": "workspace:^",
+    "@qm/store": "workspace:^",
+    "@qm/types": "workspace:^",
+    "croner": "^10.0.1",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0"
+  }
+}
