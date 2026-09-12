@@ -13,6 +13,12 @@ import type { FeishuChannelLike, FeishuProviderConfig, FeishuProviderDeps } from
 
 const PROVIDER = 'feishu'
 
+/** The SDK's `domain` takes an enum or a full base URL — never the short key. */
+const LARK_BASE_URLS = {
+  feishu: 'https://open.feishu.cn',
+  lark: 'https://open.larksuite.com',
+} as const
+
 function unsupported(op: OutboundOperation['op'], detail: string): Error {
   const error = new Error(`feishu: operation "${op}" unsupported: ${detail}`) as Error & { code: typeof IM_UNSUPPORTED_OP }
   error.code = IM_UNSUPPORTED_OP
@@ -37,7 +43,7 @@ function defaultChannelFactory(config: FeishuProviderConfig): FeishuChannelLike 
   return createLarkChannel({
     appId: config.appId,
     appSecret: config.appSecret,
-    domain: config.domain ?? 'feishu',
+    domain: LARK_BASE_URLS[config.domain ?? 'feishu'],
     transport: 'websocket',
     ...(config.verificationToken || config.encryptKey
       ? { webhook: { ...(config.verificationToken ? { verificationToken: config.verificationToken } : {}), ...(config.encryptKey ? { encryptKey: config.encryptKey } : {}) } }
