@@ -24,11 +24,13 @@ export async function bootProfile(profile: string, cwd: string = process.cwd()):
   const ctx = new Context()
   ctx.baseUrl = new URL('.', pathToFileURL(filename)).href
   await ctx.plugin(Loader)
+  // `ensureId` honors a caller-supplied id; the upstream `Omit<..., 'id'>`
+  // signature is narrower than the runtime contract, hence the cast.
   await ctx.loader.create({
     id: 'include',
     name: '@qm/cordis-plugin-include',
     config: { path: `./${basename(filename)}` },
-  })
+  } as Parameters<Context['loader']['create']>[0])
   await ctx.loader.await()
   return ctx
 }

@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-count=$(grep -r '@deepseek-ai' vendor --include='*.ts' --include='*.js' --include='*.json' | wc -l | tr -d ' ')
+count=$(grep -r '@deepseek-ai' vendor --include='*.ts' --include='*.js' --include='*.json' | wc -l | tr -d ' ' || true)
 if [ "$count" != "0" ]; then
   echo "rescope-check FAILED: $count @deepseek-ai references remain"
   grep -rn '@deepseek-ai' vendor --include='*.ts' --include='*.js' --include='*.json'

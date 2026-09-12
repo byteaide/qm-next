@@ -22,6 +22,7 @@
     "noUnusedParameters": true,
     "types": ["node"],
     "paths": {
+      "@qm/types": ["./packages/types/src"],
       "@qm/cordis": ["./vendor/cordis/src"],
       "@qm/cosmokit": ["./vendor/cosmokit/src"],
       "@qm/schemastery": ["./vendor/schemastery/src"],

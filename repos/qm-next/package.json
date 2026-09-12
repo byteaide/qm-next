@@ -11,7 +11,7 @@
     "build": "bash scripts/build-vendor.sh",
     "test": "node --import tsx/esm --test packages/*/tests/*.test.ts",
     "rescope-check": "bash scripts/rescope-check.sh",
-    "typecheck": "tsc -b tsconfig.json"
+    "typecheck": "tsc -b vendor/cosmokit vendor/schemastery vendor/cordis vendor/loader vendor/include vendor/timer && tsc -b tsconfig.json"
   },
   "devDependencies": {
     "@qm/boot": "workspace:*",

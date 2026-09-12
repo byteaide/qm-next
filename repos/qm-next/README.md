@@ -10,6 +10,7 @@
 ```sh
 pnpm install          # pnpm workspaces（vendor/* + packages/*）
 pnpm build            # 构建 vendor 内核（tsc → lib）
+pnpm typecheck        # 严格类型门禁（packages/* strict，vendor 消费构建产物 d.ts）
 pnpm test             # 冒烟 + 单测
 pnpm rescope-check    # 门禁：vendor 无 @deepseek-ai 残留
 ```

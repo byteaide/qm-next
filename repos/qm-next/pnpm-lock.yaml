@@ -54,6 +54,8 @@ importers:
         specifier: workspace:^
         version: link:../../vendor/schemastery
 
+  packages/types: {}
+
   vendor/cordis:
     dependencies:
       '@qm/cordis-plugin-include':

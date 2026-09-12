@@ -92,7 +92,10 @@ test('dispatch: serial stops at the first bail value', async () => {
   let reached = false
   ctx.on('smoke/serial', () => undefined)
   ctx.on('smoke/serial', () => 'hit')
-  ctx.on('smoke/serial', () => { reached = true })
+  ctx.on('smoke/serial', () => {
+    reached = true
+    return undefined
+  })
   assert.equal(await ctx.serial('smoke/serial'), 'hit')
   assert.equal(reached, false)
 })
@@ -103,7 +106,10 @@ test('dispatch: bail stops synchronously at the first bail value', async () => {
   ctx.on('smoke/bail', () => null)
   ctx.on('smoke/bail', () => false)
   ctx.on('smoke/bail', () => 'sync-hit')
-  ctx.on('smoke/bail', () => { reached = true })
+  ctx.on('smoke/bail', () => {
+    reached = true
+    return undefined
+  })
   assert.equal(ctx.bail('smoke/bail'), 'sync-hit')
   assert.equal(reached, false)
 })
@@ -111,11 +117,11 @@ test('dispatch: bail stops synchronously at the first bail value', async () => {
 test('dispatch: waterfall composes listeners around next()', async () => {
   const ctx = new Context()
   const order: string[] = []
-  ctx.on('smoke/waterfall', (value, next) => {
+  ctx.on('smoke/waterfall', (_value, next) => {
     order.push('first')
     return next() + '!'
   })
-  ctx.on('smoke/waterfall', (value, next) => {
+  ctx.on('smoke/waterfall', (value, _next) => {
     order.push('second')
     return value + 'a'
   })
@@ -147,5 +153,5 @@ test('effects: disposers run on fiber unload and inactive fibers reject new effe
 
   await fiber.dispose()
   assert.equal(cleaned, true)
-  assert.throws(() => pluginCtx!.fiber.effect(() => {}), /cannot create effect on inactive context/)
+  assert.throws(() => pluginCtx!.fiber.effect(() => () => {}), /cannot create effect on inactive context/)
 })
