@@ -98,14 +98,19 @@ tasks-qm-next,qm-next（Cordis 重写 + 飞书 IM）,prd-qm-next,in_progress,~11
     - 落地（spike/feishu-sdk `1d5bcf5`）：worker 池仍 entitlement exhausted，主会话执行；SDK **v1.73.3** 高层 `createLarkChannel`（WS 传输）三件套类型面+实现面全验证：收事件（自动重连/ping 看门狗/getConnectionStatus 五态）、发消息（send/stream/edit/recall + replyTo/replyInThread + file=image uploadFile 位）、卡片回调（`card.action.trigger` 经 WS 可达 + 内置去重 + updateCard 回写）；离线 surface 冒烟 15/15 PASS + strict typecheck 绿；真连三脚本就绪待凭据
   - [x] 6.2 结论回写 PRD Open Question（SDK 选型定案）~0.5h
     - 结论：**用 SDK，不直连 OpenAPI**；流式回复/准入策略/SSRF 防护可白嫖；坑：卡片回调须应用侧改"长连接接收"、editMessage 仅 text/post、流式滚卡要跟新 messageId；详见 `packages/spike-feishu/README.md`
-- [ ] 7.0 【串行门】`@qm/im-core` 契约冻结 ~0.5d (ai:0.4d test:0.1d)
-  - [ ] 7.1 `InboundEvent` 判别联合 / `Destination{provider,chatId,threadId?}` / 出站操作（send/edit/delete/uploadFile/react 位保留）/ `Interaction` / `DirectorySync` / 格式管道接口；`ctx.im` 注册表；delivery 认领接口 ~3h
-  - [ ] 7.2 主会话开并行 ~0.5h
-- [ ] 8.0 【A】投递与注册表 core 侧 `packages/im-core` ~1d (ai:0.7d test:0.3d)
+- [x] 7.0 【串行门】`@qm/im-core` 契约冻结 ~0.5d (ai:0.4d test:0.1d)
+  - [x] 7.1 `InboundEvent` 判别联合 / `Destination{provider,chatId,threadId?}` / 出站操作（send/edit/delete/uploadFile/react 位保留）/ `Interaction` / `DirectorySync` / 格式管道接口；`ctx.im` 注册表；delivery 认领接口 ~3h
+    - 落地（feature/qm-next-m2 `85b2325`+`2465fde`）：`packages/im-core` 7 契约模块。决策：`Destination` 复用 `@qm/types`（`type`=provider、`target`=chatId，不造双形状）；出站与队列同形状（队列直接携带 `OutboundOperation`）；卡片载荷 opaque；`register` 改 async（intake live 后 resolve）；`fail` 增 `park` 终态。typecheck 绿 + 全测绿后提交
+  - [x] 7.2 主会话开并行 ~0.5h
+    - worker 池仍 entitlement exhausted → 降级主会话串行（spike → 7.1 → 8.0 → 9.0），spike 分支已并入 m2
+- [x] 8.0 【A】投递与注册表 core 侧 `packages/im-core` ~1d (ai:0.7d test:0.3d)
   - > brief：只写 `packages/im-core/`；平移 `qm/src/delivery/` 认领语义（claim/ack/重试）为通用 surface 版；参考 `dsh/packages/webhook/webhook` 的 register/dispatch 形状；验证：认领循环 + 重试 + 卸载排空单测
-  - [ ] 8.1 渠道注册表 + 生命周期 ~2h
-  - [ ] 8.2 delivery 认领循环（平移）~3h
-  - [ ] 8.3 单测 ~2h
+  - [x] 8.1 渠道注册表 + 生命周期 ~2h
+    - 落地（`9ce0fb4`）：`createImRegistry`（validate/start/abort 排空/eventId 去重/幂等 disposer）+ `ImRegistryService`（ctx.im，fiber dispose 排空）
+  - [x] 8.2 delivery 认领循环（平移）~3h
+    - 落地：`createMemoryDeliveryQueue`（幂等 enqueue/TTL lease/ack/fail+retryInMs/park）+ `createDeliveryLoop`（enqueue 唤醒 + tick、指数退避、maxAttempts 停机、stop 排空）
+  - [x] 8.3 单测 ~2h
+    - 落地：16 用例（registry 6 + queue 5 + loop 5），覆盖认领循环/退避重试/终态停机/卸载排空；全仓 61 pass + 2 PG skip
 - [ ] 9.0 【B】`im-feishu` Provider `packages/im-feishu` ~1.5d (ai:1d test:0.5d)
   - > brief：只写 `packages/im-feishu/`；对 7.1 契约编程；接入复用 6.0 spike 结论；参考 `qm/src/slack/{events,turn-handler,deliveries,approvals,attachments,directory}.ts` 的能力映射（不是照抄，是对契约重实现）；验证：录制事件 fixture 回放 + 真机冒烟清单
   - [ ] 9.1 WS 长连接接入 + 事件映射 ~2h
