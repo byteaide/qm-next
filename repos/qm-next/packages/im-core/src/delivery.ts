@@ -28,6 +28,8 @@ export interface ImDelivery {
   leaseExpiresAt?: number
   attempts: number
   deliveredAt: number | null
+  /** Terminal-failure timestamp; parked deliveries are never claimed again. */
+  parkedAt?: number
   lastError?: string
 }
 
@@ -46,8 +48,10 @@ export interface ImDeliveryClaimOptions {
 }
 
 export interface ImDeliveryFailOptions {
-  /** Delay before the delivery is claimable again; defaults to backoff. */
+  /** Delay before the delivery is claimable again; defaults to immediate. */
   retryInMs?: number
+  /** Terminal failure: the delivery is parked and never claimed again. */
+  park?: boolean
 }
 
 /**
