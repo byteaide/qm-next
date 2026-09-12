@@ -120,9 +120,11 @@ export interface DirectoryStore {
 /**
  * Visibility filter: a dm or a private/external space is visible only to
  * its members; a public non-external channel is visible to everyone.
+ * Takes the structural member-check slice only, so reach and any store
+ * implementation satisfy it directly.
  */
 export async function isVisible(
-  store: DirectoryStore,
+  store: { spaceMember(provider: string, spaceId: string, providerUserId: string): Promise<boolean> },
   provider: string,
   actorProviderUserId: string,
   space: DirectorySpaceRecord,

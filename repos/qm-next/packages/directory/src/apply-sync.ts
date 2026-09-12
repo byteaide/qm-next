@@ -4,6 +4,7 @@
  * table surface. Both the memory and Postgres stores are thin `DirectoryTables`
  * adapters, so the two implementations are parity-checked by construction.
  */
+import type { DirectorySyncPush } from '@qm/im-core'
 import type { DirectoryPersonRecord, DirectorySpaceRecord } from './contract.ts'
 import { principalIdFor } from './contract.ts'
 

@@ -5,7 +5,7 @@
  */
 import type { DirectorySyncPush } from '@qm/im-core'
 import type { PrincipalType } from '@qm/types'
-import { createPgPool, withPgTransaction, type PgPool, type Rows } from '@qm/store'
+import { createPgPool, type PgPool, type Rows } from '@qm/store'
 import type { DirectoryPersonRecord, DirectorySpaceRecord, DirectoryStore } from './contract.ts'
 import { pickMatch } from './contract.ts'
 import { applyPush, type DirectoryTables } from './apply-sync.ts'
