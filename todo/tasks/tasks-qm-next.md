@@ -58,24 +58,28 @@ tasks-qm-next,qm-next（Cordis 重写 + 飞书 IM）,prd-qm-next,in_progress,~11
   - [x] 1.6 `cordis.yml` profile 启动：bootstrap + loader/include 加载，含 `!!js` 配置插值用例 ~2h
     - 落地：`packages/boot/src/index.ts`（模板 `vendor/cordis/bin.js`，include 入口固定 id `include`）、`profiles/cordis.yml`、`packages/boot/tests/profile.test.ts`（4 用例：挂载/插值/坏导入/仓库 profile）全绿
     - 关键语义：profile entries 挂在 include 嵌套 tree（id `include:<entry-id>`）；卸载 `include` 入口级联清理；根 devDeps 需 `@qm/demo`/`@qm/cordis-plugin-include`（baseUrl 从根解析）
-  - [ ] 1.7 【串行门验收】`pnpm test` 全绿 + profile 启停通过；打 tag `m0` ~0.5h
-    - 测试已全绿（15/15）；待用户终端 `git merge --ff-only chore/gitignore-repos` 后打 tag `m0`
+  - [x] 1.7 【串行门验收】`pnpm test` 全绿 + profile 启停通过；打 tag `m0` ~0.5h
+    - 测试全绿（15/15）；tag `m0` 已打（main `3e28813`）
 
 ### M1 核心回路（1 串行门 + 2 并行 + 汇合，~3d/墙钟 ~2d）
 
-- [ ] 2.0 【串行门】契约冻结 ~0.5d (ai:0.4d test:0.1d)
-  - [ ] 2.1 定义 `packages/types`：`TurnInput`/`TurnResult`/`Session`/`Run`/`Destination{type:string}`（surface 显式，无默认值）；store 接口（enqueue/claim/heartbeat/complete/fail）；orchestrator 输入输出；提交冻结 ~2h
-  - [ ] 2.2 主会话执行 `pnpm install`，开并行 ~0.5h
-- [ ] 3.0 【A】存储层 `packages/store` ~1d (ai:0.7d test:0.3d)
-  - > brief：只写 `packages/store/`；对 2.1 冻结接口编程；参考 `qm/src/runs/{run-store,postgres-run-store}.ts`、`qm/src/sessions/session-store.ts`、`qm/src/persistence/pg-pool.ts`；验证：内存/Postgres 双实现对拍（同用例跑两实现）+ 租约/心跳/并发 claim 测试
-  - [ ] 3.1 内存实现（Map 版 store）~2h
-  - [ ] 3.2 Postgres 实现（平移 qm schema）~3h
-  - [ ] 3.3 对拍测试 + 并发语义测试 ~2h
-- [ ] 4.0 【B】编排层 `packages/orchestrator` ~1d (ai:0.7d test:0.3d)
-  - > brief：只写 `packages/orchestrator/`；对 2.1 冻结接口编程（store 用接口 stub/内存假件）；平移 `qm/src/core/orchestrator.ts` 的 handleTurn 骨架（身份/限流/会话解析/harness 调用/投递），**剥离全部 Slack 分支**；harness router + mock harness 参考 `qm/src/harness/{harness,harness-router,mock-harness}.ts`；验证：mock harness 全回路单测
-  - [ ] 4.1 orchestrator Service 化（平移 + 去 Slack 化）~3h
-  - [ ] 4.2 harness router + mock harness ~2h
-  - [ ] 4.3 回路单测（含限流/预算/会话解析）~2h
+- [x] 2.0 【串行门】契约冻结 ~0.5d (ai:0.4d test:0.1d)
+  - [x] 2.1 定义 `packages/types`：`TurnInput`/`TurnResult`/`Session`/`Run`/`Destination{type:string}`（surface 显式，无默认值）；store 接口（enqueue/claim/heartbeat/complete/fail）；orchestrator 输入输出；提交冻结 ~2h
+    - 落地（`feature/qm-next-m1` `579da02`）：`packages/types` 10 模块；surface 必填、`Destination.threadId` 替代 threadTs、Slack 符号零残留；`SessionStore` 冻结为 qm 的 M1 子集（tape/LLM 记录/搜索归 M3 增量）
+    - 顺带补齐根 `tsconfig.json` 严格 typecheck 门禁（M0 从未真正跑过 tsc）并修复暴露的 boot/test/rescope-check 违规
+  - [x] 2.2 主会话执行 `pnpm install`，开并行 ~0.5h
+    - worker 池额度耗尽（rpm/entitlement exhausted），降级为主会话串行双车道；每车道独立 worktree（`feature/qm-next-m1-lane-{a,b}`）避免并发 tsc/test 干扰
+- [x] 3.0 【A】存储层 `packages/store` ~1d (ai:0.7d test:0.3d)
+  - [x] 3.1 内存实现（Map 版 store）~2h
+  - [x] 3.2 Postgres 实现（平移 qm schema）~3h
+  - [x] 3.3 对拍测试 + 并发语义测试 ~2h
+    - 落地（`4789e36`）：13 用例 ×2 实现对拍；PG claim 用 `FOR UPDATE SKIP LOCKED` + one-running-per-session 部分唯一索引；`QM_NEXT_PG_URL` 可达才跑 PG 用例否则 skip
+- [x] 4.0 【B】编排层 `packages/orchestrator` ~1d (ai:0.7d test:0.3d)
+  - [x] 4.1 orchestrator Service 化（平移 + 去 Slack 化）~3h
+  - [x] 4.2 harness router + mock harness ~2h
+  - [x] 4.3 回路单测（含限流/预算/会话解析）~2h
+    - 落地（lane-b `c9f8eee`）：`OrchestratorService`（准入→会话解析→lease→entries→harness→映射）、`createHarnessRouter`、可脚本化 `createMockHarness`；23 用例全绿
+- [x] 汇合预检（`ce64893`+`9be63c8`）：lockfile 冲突按预期出现并重装解决；合并树 typecheck + 53/53 全绿（含一次性 PG 容器真实对拍）
 - [ ] 5.0 【汇合】API 插件与端到端 ~1d (ai:0.6d test:0.4d)
   - [ ] 5.1 `packages/api`：Fastify + `POST /v1/turns`（同步/`?async=1`）+ signed-token 鉴权（平移 `qm/src/auth/`）~3h
   - [ ] 5.2 cordis.yml 组装全链路 profile ~1h
