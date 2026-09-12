@@ -12,6 +12,7 @@ import { randomBytes } from 'node:crypto'
 import { copyFile, mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
+import { mintSignedPayload } from '@qm/api'
 import { bootProfile } from '@qm/boot'
 
 async function stageFixture(name: string): Promise<string> {
@@ -53,6 +54,37 @@ test('the repository profile boots end to end', async () => {
   const ctx = await bootProfile(profile)
   assert.equal(ctx.demo.greet('qm'), 'hello-2, qm! hello-2, qm! hello-2, qm!')
 
+  const { port } = ctx.api.address
+  const health = await fetch(`http://127.0.0.1:${port}/healthz`)
+  assert.equal(health.status, 200)
+  const token = await mintSignedPayload({ p: 'user-1' }, 'dev-m1-secret')
+  const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' }
+  const turn = (body: Record<string, unknown>, query = '') =>
+    fetch(`http://127.0.0.1:${port}/v1/turns${query}`, { method: 'POST', headers, body: JSON.stringify(body) })
+  const sync = await turn({ text: 'hi profile', surface: 'api', conversation: { kind: 'dm', threadRef: 'thread:profile' } })
+  assert.equal(sync.status, 200)
+  assert.equal(((await sync.json()) as { reply?: string }).reply, 'echo: hi profile')
+
+  const queued = await turn(
+    { text: 'hi profile async', surface: 'api', conversation: { kind: 'dm', threadRef: 'thread:profile-async' } },
+    '?async=1',
+  )
+  assert.equal(queued.status, 202)
+  const { runId } = (await queued.json()) as { runId?: string }
+  assert.ok(runId)
+  let run: { status?: string; result?: { reply?: string } } | undefined
+  for (let i = 0; i < 100; i += 1) {
+    const poll: Response = await fetch(`http://127.0.0.1:${port}/v1/runs/${runId}`, { headers })
+    assert.equal(poll.status, 200)
+    run = (await poll.json()) as { status?: string; result?: { reply?: string } }
+    if (run.status === 'done' || run.status === 'failed') break
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  assert.equal(run?.status, 'done')
+  assert.equal(run?.result?.reply, 'echo: hi profile async')
+
   await ctx.loader.remove('include')
   assert.equal(ctx.reflect.get('demo'), undefined)
+  assert.equal(ctx.reflect.get('api'), undefined)
+  await assert.rejects(() => fetch(`http://127.0.0.1:${port}/healthz`))
 })

@@ -1,7 +1,13 @@
-# qm-next M0 profile: a single demo entry.
-# (Two Demo instances would double-provide the `demo` service and fail.)
+# qm-next profile: the M0 demo smoke entry plus the M1 full loop —
+# memory stores, mock harness, orchestrator and the HTTP API on an
+# ephemeral port (secrets are dev-only).
 - id: demo
   name: '@qm/demo'
   config:
     greeting: !!js "'hello-' + (1 + 1)"
     times: 3
+- id: api
+  name: '@qm/api'
+  config:
+    port: 0
+    secrets: ['dev-m1-secret']

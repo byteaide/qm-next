@@ -14,6 +14,7 @@
     "typecheck": "tsc -b vendor/cosmokit vendor/schemastery vendor/cordis vendor/loader vendor/include vendor/timer && tsc -b tsconfig.json"
   },
   "devDependencies": {
+    "@qm/api": "workspace:*",
     "@qm/boot": "workspace:*",
     "@qm/cordis-plugin-include": "workspace:*",
     "@qm/demo": "workspace:*",
