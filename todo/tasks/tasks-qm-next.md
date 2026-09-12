@@ -134,14 +134,16 @@ tasks-qm-next,qm-next（Cordis 重写 + 飞书 IM）,prd-qm-next,in_progress,~11
 
 ### M3 企业能力回归（5 包全并行，~3d/墙钟 ~2d）
 
-- [ ] 11.0 【串行门】能力清单与包边界确认 ~2h
+- [x] 11.0 【串行门】能力清单与包边界确认 ~2h
   - [x] 11.1 对照 qm 功能清单划定 5 包范围与验收项 ~2h
-    - 草案落地：`repos/qm-next/docs/m3-scope.md`（qm 各子系统源点清单、5 包 IN/OUT 边界、验收项、车道依赖序、5 个待拍板问题：审批 pg 恢复、ambient 最小切片或砍除、skills 仅注册表、web-ui 最小 admin、pg 对拍门禁）
+    - 草案落地：`repos/qm-next/docs/m3-scope.md`（qm 各子系统源点清单、5 包 IN/OUT 边界、验收项、车道依赖序）
+  - [x] 11.2 门禁确认（用户拍板，2026-09-13）：①审批 pg 恢复进 M3（恢复=耐久决策+携带 approval 的后续 turn，harness 侧 pause/resume 随 real harness 包）；②ambient 保留最小切片（策略存储+judge 端口，judge 模型砍除）；③skills 仅注册表+查找；④web-ui 修正为对话 surface（SPA 整包平移+server 重写+SSE，评估 ~1.5-2d）；⑤`pnpm test:pg` 容器对拍在串行门/17.0/M4 强制
+  - [x] 11.3 冻结横切契约：`RunEventBus`（`packages/types/src/run-events.ts`）+ 内存实现（`packages/store`）+ `OrchestratorDeps.runEvents` 可选依赖接线（delta/progress/status 全链路，向后兼容）；`DirectoryStore` 契约由 15.0 首提交冻结（13.0/web-ui 消费方开道前就位）；其余包端口由各车道首提交冻结
 - [ ] 12.0 【A1】approvals/ambient `packages/approvals` ~0.5d — brief：对 im-core `Interaction` 编程；参考 `qm/src/slack/{approvals,approval-cards}.ts` 语义
 - [ ] 13.0 【A2】cron/triggers `packages/triggers` ~0.5d — brief：pg-boss 队列平移 `qm/src/cron/`；触发创建 turn
 - [ ] 14.0 【B1】memory + skills `packages/{memory,skills}` ~0.5d — brief：平移 `qm/src/{memory,skills}/`，含 pg 与内存双实现
 - [ ] 15.0 【B2】reach + directory `packages/{reach,directory}` ~0.5d — brief：destination 解析去 Slack 化；平移 `qm/src/{reach,directory}/`
-- [ ] 16.0 【A3】web-ui 插件化 `packages/web-ui` ~1d — brief：`qm/plugins/web-ui` 迁为 cordis 插件（Lit SPA + SSE 保留）；admin 简版跟进
+- [ ] 16.0 【A3】web-ui 插件化 `packages/web-ui` ~1.5-2d — brief（11.2 修订）：qm `plugins/web-ui` 的 Lit SPA 整包平移（含 pi-web-ui/pi-agent-core 依赖），server 半重写为薄 cordis 插件（挂 dist + principal cookie + turns/runs 代理 + SSE run-events 端点读 `ctx.api.runEvents`）；skills/crons/contexts 视图接 M3 真后端，webhooks/files/connectors/deploys stub 空态；绑 127.0.0.1 无鉴权（admin 简版跟进）
 - [ ] 17.0 【汇合】M3 回归验收 ~1d (ai:0.3d test:0.7d)
   - [ ] 17.1 对照功能清单逐项回归 ~4h
   - [ ] 17.2 【串行门验收】打 tag `m3` ~0.5h
