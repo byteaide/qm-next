@@ -26,11 +26,12 @@ export type ImProviderStatus = 'registered' | 'starting' | 'running' | 'stopped'
 
 export interface ImRegistry {
   /**
-   * Validate, register, and start one provider. Resolves once intake is live.
+   * Validate, register, and start one provider. Resolves once intake is
+   * live; rejects (and removes the registration) when startup fails.
    * @returns disposer that stops the provider, drains in-flight work, and
    * removes the registration; idempotent.
    */
-  register(provider: ImProvider): () => Promise<void>
+  register(provider: ImProvider): Promise<() => Promise<void>>
   get(provider: string): ImProvider | undefined
   listProviderIds(): string[]
   list(): readonly ImProvider[]
