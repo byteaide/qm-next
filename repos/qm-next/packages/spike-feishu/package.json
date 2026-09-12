@@ -1,0 +1,27 @@
+{
+  "name": "@qm/spike-feishu",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Scratch spike: verify @larksuiteoapi/node-sdk WS long-connection feasibility (M2 6.0). Not a product package; conclusion feeds im-feishu implementation.",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "spike": "tsx src/index.ts",
+    "spike:receive": "tsx src/ws-receive.ts",
+    "spike:send": "tsx src/send-message.ts",
+    "spike:card": "tsx src/card-callback.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.44.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
