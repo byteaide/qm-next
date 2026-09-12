@@ -7,6 +7,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Context } from '@qm/cordis'
 import { createTurnRunner } from '@qm/api'
+import { createMemoryApprovalStore } from '@qm/approvals'
 import type { ImCapabilities, ImProvider, ImProviderStartContext, InboundInteractionEvent, InboundMessageEvent, OutboundOperation, SendOperation } from '@qm/im-core'
 import { createImRegistry } from '@qm/im-core/runtime'
 import { createHarnessRouter, createMockHarness, OrchestratorService, type MockTurnStep } from '@qm/orchestrator'
@@ -85,7 +86,11 @@ function messageEvent(overrides: Partial<InboundMessageEvent> = {}): InboundMess
   }
 }
 
-function interactionEvent(value: ApprovalActionValue, eventId = 'e2'): InboundInteractionEvent {
+function interactionEvent(
+  value: ApprovalActionValue,
+  eventId = 'e2',
+  actor: InboundInteractionEvent['actor'] = { providerUserId: 'u1', displayName: 'User One' },
+): InboundInteractionEvent {
   return {
     kind: 'interaction',
     provider: 'feishu',
@@ -94,7 +99,7 @@ function interactionEvent(value: ApprovalActionValue, eventId = 'e2'): InboundIn
     occurredAt: 3,
     receivedAt: 4,
     ref: { destination: { type: 'feishu', target: 'oc_chat1', threadId: 'om_thread1' }, messageId: 'om_card1' },
-    actor: { providerUserId: 'u1', displayName: 'User One' },
+    actor,
     action: { value },
   }
 }
@@ -135,9 +140,13 @@ async function setup(opts: { script?: MockTurnStep[]; actorType?: 'internal' | '
   const cells: RecorderCells = {}
   let bridge: ImTurnBridge | undefined
   const registry = createImRegistry({ onEvent: (events) => (bridge ? bridge.sink(events) : Promise.resolve()) })
+  const approvalStore = createMemoryApprovalStore()
   bridge = createImTurnBridge(
     { runs, sessions, resolution: devResolution(), im: registry },
-    { ...(opts.actorType ? { actorType: opts.actorType } : {}) },
+    {
+      ...(opts.actorType ? { actorType: opts.actorType } : {}),
+      approvalStore,
+    },
   )
   await bridge.start()
   const disposer = await registry.register(recorderProvider(sent, cells))
@@ -192,7 +201,7 @@ test('a failed run delivers the failure notice', async () => {
   }
 })
 
-test('pending approval delivers a card; clicking approve and reject submits approval turns', async () => {
+test('pending approval records durably; approve resumes and a duplicate click is deduped', async () => {
   const t = await setup({
     script: [{ reply: '', pausedOnApproval: true, pendingApprovals: [{ command: 'deploy', reason: 'needs sign-off' }] }],
   })
@@ -218,24 +227,90 @@ test('pending approval delivers a card; clicking approve and reject submits appr
     assert.equal(firstRun.result?.status, 'pending_approval')
     assert.equal(approveValue.requestId, firstRun.result?.pendingApprovals?.[0]?.requestId)
 
+    const recorded = await t.bridge.approvals.get(approveValue.requestId)
+    assert.ok(recorded, 'pending approval was recorded before the card went out')
+    assert.equal(recorded.status, 'pending')
+    assert.equal(recorded.requesterId, 'feishu:u1')
+    assert.equal(recorded.runId, firstRun.id)
+    assert.equal(recorded.threadId, 'om_thread1')
+
     await t.cells.ctx!.emit(interactionEvent(approveValue))
     assert.ok(await waitFor(() => t.sent.length === 2), 'expected approve reply delivery')
+    assert.ok(await waitFor(async () => (await t.runs.list()).length === 2), 'expected approval follow-up turn')
+
     await t.cells.ctx!.emit(interactionEvent(rejectValue, 'e3'))
-    assert.ok(await waitFor(() => t.sent.length === 3), 'expected reject reply delivery')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.equal((await t.runs.list()).length, 2, 'duplicate click on a decided approval submits nothing')
+    assert.equal(t.sent.length, 2, 'duplicate click delivers nothing')
+
+    const decided = await t.bridge.approvals.get(approveValue.requestId)
+    assert.ok(decided)
+    assert.equal(decided.status, 'approved')
 
     const all = await t.runs.list()
-    assert.equal(all.length, 3)
     const approveRun = all.find((run) => run.request.text === 'Approve: deploy')
-    const rejectRun = all.find((run) => run.request.text === 'Reject: deploy')
-    assert.ok(approveRun && rejectRun)
+    assert.ok(approveRun)
     assert.deepEqual(approveRun.request.approval, { requestId: approveValue.requestId, approved: true })
-    assert.equal(approveRun.request.text, 'Approve: deploy')
-    assert.deepEqual(rejectRun.request.approval, { requestId: rejectValue.requestId, approved: false })
-    assert.equal(rejectRun.request.conversation.threadRef, 'feishu:oc_chat1:om_thread1')
+    assert.equal(approveRun.request.conversation.threadRef, 'feishu:oc_chat1:om_thread1')
     const approveReply = t.sent[1] as SendOperation | undefined
-    const rejectReply = t.sent[2] as SendOperation | undefined
     assert.equal(approveReply?.body.markdown, 'echo: Approve: deploy')
-    assert.equal(rejectReply?.body.markdown, 'echo: Reject: deploy')
+  } finally {
+    await t.dispose()
+  }
+})
+
+test('a click by anyone but the requester is refused with a notice and the approval stays pending', async () => {
+  const t = await setup({
+    script: [{ reply: '', pausedOnApproval: true, pendingApprovals: [{ command: 'deploy', reason: 'needs sign-off' }] }],
+  })
+  try {
+    await t.cells.ctx!.emit(messageEvent())
+    assert.ok(await waitFor(() => t.sent.length === 1), 'expected approval card delivery')
+    const cardOp = t.sent[0] as SendOperation
+    const elements = (cardOp.body.card as { elements: Array<{ tag: string; actions?: Array<{ value: ApprovalActionValue }> }> })['elements']
+    const approveValue = elements.find((element) => element.tag === 'action')?.actions?.[0]?.value
+    assert.ok(approveValue)
+
+    await t.cells.ctx!.emit(interactionEvent(approveValue, 'e-click-2', { providerUserId: 'u2', displayName: 'User Two' }))
+    assert.ok(await waitFor(() => t.sent.length === 2), 'expected refusal notice delivery')
+    const notice = t.sent[1] as SendOperation
+    assert.match((notice.body as { text: string })['text'], /Only the person who requested/)
+    assert.equal((await t.runs.list()).length, 1, 'non-requester click submits no turn')
+
+    const stillPending = await t.bridge.approvals.get(approveValue.requestId)
+    assert.ok(stillPending)
+    assert.equal(stillPending.status, 'pending')
+
+    await t.cells.ctx!.emit(interactionEvent(approveValue, 'e-click-3'))
+    assert.ok(await waitFor(async () => (await t.runs.list()).length === 2), 'requester can still decide afterwards')
+    const decided = await t.bridge.approvals.get(approveValue.requestId)
+    assert.ok(decided)
+    assert.equal(decided.status, 'approved')
+  } finally {
+    await t.dispose()
+  }
+})
+
+test('a click on an unknown approval is answered with an expired notice', async () => {
+  const t = await setup()
+  try {
+    await t.cells.ctx!.emit(
+      interactionEvent(
+        {
+          kind: APPROVAL_VALUE_KIND,
+          runId: 'run-missing',
+          sessionId: 'sess-missing',
+          requestId: 'req-missing',
+          command: 'deploy',
+          decision: 'approve',
+        },
+        'e-unknown',
+      ),
+    )
+    assert.ok(await waitFor(() => t.sent.length === 1), 'expected expired notice delivery')
+    const notice = t.sent[0] as SendOperation
+    assert.match((notice.body as { text: string })['text'], /could not be found/)
+    assert.equal((await t.runs.list()).length, 0)
   } finally {
     await t.dispose()
   }

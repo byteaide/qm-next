@@ -9,7 +9,6 @@ import type {
   AmbientRoute,
   AmbientService,
   AmbientServiceOptions,
-  AmbientJudge,
   ChannelPolicy,
   ChannelPolicyStore,
 } from './contract.ts'

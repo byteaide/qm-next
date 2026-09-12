@@ -1,16 +1,20 @@
 /**
  * @qm/im-bridge — the M2 convergence bridge between the IM contract
  * (`@qm/im-core`) and the turn pipeline (`@qm/api` composition root).
+ * Since 12.0 approval semantics are owned by `@qm/approvals`; the bridge
+ * records pending approvals durably and routes clicks through the decision
+ * state machine.
  */
+export { APPROVAL_VALUE_KIND, parseApprovalValue } from '@qm/approvals'
+export type { ApprovalActionValue } from '@qm/approvals'
 export {
-  APPROVAL_VALUE_KIND,
   approvalRequestCard,
   createImTurnBridge,
+  defaultApprovalCardRenderer,
   imRunResultDelivery,
-  parseApprovalValue,
+  isPendingApprovalResult,
 } from './bridge.ts'
 export type {
-  ApprovalActionValue,
   ImReplyRoute,
   ImTurnBridge,
   ImTurnBridgeDeps,

@@ -5,15 +5,30 @@
  * and `src/delivery/run-result-delivery.ts`, generalized over the im-core
  * contract.
  *
- * M2 scope notes:
- * - Reply routes (runId → destination/thread) are in-memory; they follow the
- *   memory-store dev path and move durable in M3 alongside the Postgres queue.
- * - The pending-approval card is a minimal placeholder until
- *   `packages/approvals` (12.0) owns approval semantics and rendering.
+ * M3 scope notes (12.0):
+ * - Approval semantics live in `@qm/approvals`: pending approvals are
+ *   recorded durably before the card goes out, clicks run through the
+ *   decision state machine (requester-only, double-click dedup), and a
+ *   first decision submits the approval-carrying follow-up turn. Without an
+ *   injected store the bridge uses an in-memory one, so restart-safe
+ *   recovery means configuring the Postgres store.
+ * - Card rendering stays provider-side (`OutboundBody.card` is opaque);
+ *   `approvalCards` swaps the built-in default renderer.
+ * - Ambient: when an `AmbientService` is provided, non-mention messages are
+ *   offered to it after the human turn is submitted (policy default off).
  * - Refused turns deliver a short notice; qm's run-result delivery drops
  *   refusals. On a chat surface silence reads as breakage, so the bridge
  *   answers.
  */
+import {
+  APPROVAL_VALUE_KIND,
+  createMemoryApprovalStore,
+  parseApprovalValue,
+  type ApprovalActionValue,
+  type ApprovalCardRenderer,
+  type ApprovalStore,
+  type AmbientService,
+} from '@qm/approvals'
 import type {
   ImDeliveryEnqueueInput,
   ImDeliveryQueue,
@@ -38,17 +53,8 @@ import type {
   TurnInput,
 } from '@qm/types'
 
-export const APPROVAL_VALUE_KIND = 'qm.approval.v1'
-
-/** Value round-tripped through the approval card buttons. */
-export interface ApprovalActionValue {
-  kind: typeof APPROVAL_VALUE_KIND
-  runId: string
-  sessionId: string
-  requestId: string
-  command: string
-  decision: 'approve' | 'reject'
-}
+export { APPROVAL_VALUE_KIND, parseApprovalValue }
+export type { ApprovalActionValue }
 
 /** Where replies for a run go, captured from the inbound event. */
 export interface ImReplyRoute {
@@ -73,6 +79,12 @@ export interface ImTurnBridgeOptions {
   replyAs?: 'markdown' | 'text'
   /** Retained reply routes before the oldest are dropped. */
   maxRoutes?: number
+  /** Durable approval registry; defaults to an in-memory store. */
+  approvalStore?: ApprovalStore
+  /** Approval card renderer; defaults to the built-in Feishu-shaped card. */
+  approvalCards?: ApprovalCardRenderer
+  /** Ambient minimal slice; absent means ambient is fully inert. */
+  ambient?: AmbientService
   loop?: ImTurnBridgeLoopOptions
 }
 
@@ -87,6 +99,8 @@ export interface ImTurnBridgeDeps {
 
 export interface ImTurnBridge {
   readonly queue: ImDeliveryQueue
+  /** The approval registry this bridge records pending approvals into. */
+  readonly approvals: ApprovalStore
   sink: ImInboundSink
   start(): Promise<void>
   stop(): Promise<void>
@@ -100,6 +114,7 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
   const queue = deps.queue ?? createMemoryDeliveryQueue()
   const routes = new Map<string, ImReplyRoute>()
   const maxRoutes = options.maxRoutes ?? DEFAULT_MAX_ROUTES
+  const approvalStore = options.approvalStore ?? createMemoryApprovalStore()
 
   function rememberRoute(runId: string, route: ImReplyRoute): void {
     routes.set(runId, route)
@@ -156,14 +171,63 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
     await enqueueTurn(input, route)
   }
 
+  async function deliverNotice(event: InboundInteractionEvent, text: string): Promise<void> {
+    await queue.enqueue({
+      provider: event.ref.destination.type,
+      op: {
+        op: 'send',
+        destination: event.ref.destination,
+        body: { text },
+        ...(event.ref.destination.threadId ? { threadId: event.ref.destination.threadId } : {}),
+        replyToMessageId: event.ref.messageId,
+      },
+      idempotencyKey: `approval-click:${event.eventId}`,
+    })
+  }
+
+  async function rememberPendingApprovals(run: Run, route: ImReplyRoute): Promise<void> {
+    const pending = run.result?.pendingApprovals ?? []
+    for (const approval of pending) {
+      await approvalStore.record({
+        requestId: approval.requestId,
+        runId: run.id,
+        sessionId: run.sessionId,
+        command: approval.command,
+        reason: approval.reason,
+        ...(approval.kind ? { kind: approval.kind } : {}),
+        requester: run.request.actor,
+        destination: route.destination,
+        ...(route.threadId ? { threadId: route.threadId } : {}),
+      })
+    }
+  }
+
   async function submitInteraction(event: InboundInteractionEvent): Promise<void> {
     const value = parseApprovalValue(event.action.value)
     if (!value) {
       logger.debug(`im-bridge: interaction ${event.eventId} carries no approval value; ignored`)
       return
     }
-    const approved = value.decision === 'approve'
     const actor = principalOf(event.provider, event.actor)
+    const decided = await approvalStore.decide(value.requestId, {
+      approved: value.decision === 'approve',
+      decidedBy: actor.id,
+    })
+    if (decided.outcome === 'not_found') {
+      logger.info(`im-bridge: approval ${value.requestId} not found; click treated as expired`)
+      await deliverNotice(event, 'That approval request could not be found — it may have expired.')
+      return
+    }
+    if (decided.outcome === 'forbidden') {
+      logger.info(`im-bridge: approval ${value.requestId} clicked by non-requester ${actor.id}; refused`)
+      await deliverNotice(event, 'Only the person who requested this command can approve or deny it.')
+      return
+    }
+    if (decided.outcome === 'already_decided') {
+      logger.info(`im-bridge: approval ${value.requestId} already decided; duplicate click ignored`)
+      return
+    }
+    const approved = decided.approved
     const prior = routes.get(value.runId)
     const conversation = prior?.conversation ?? conversationOf(event.ref.destination, actor)
     const input: TurnInput = {
@@ -184,9 +248,11 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
 
   const sink: ImInboundSink = async (events) => {
     for (const event of events) {
-      if (event.kind === 'message') await submitMessage(event)
-      else if (event.kind === 'interaction') await submitInteraction(event)
-      else logger.debug(`im-bridge: ${event.kind} event ${event.eventId} observed; no M2 action`)
+      if (event.kind === 'message') {
+        if (options.ambient) void options.ambient.observe(event)
+        await submitMessage(event)
+      } else if (event.kind === 'interaction') await submitInteraction(event)
+      else logger.debug(`im-bridge: ${event.kind} event ${event.eventId} observed; no bridge action`)
     }
   }
 
@@ -194,7 +260,8 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
     void (async () => {
       const route = routes.get(run.id)
       if (!route) return
-      const delivery = imRunResultDelivery(run, route, options.replyAs ?? 'markdown')
+      if (isPendingApprovalResult(run)) await rememberPendingApprovals(run, route)
+      const delivery = imRunResultDelivery(run, route, options.replyAs ?? 'markdown', options.approvalCards)
       if (!delivery) return
       await queue.enqueue(delivery)
     })().catch((err) => {
@@ -207,6 +274,7 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
 
   return {
     queue,
+    approvals: approvalStore,
     sink,
     start: () => loop.start(),
     stop: () => loop.stop(),
@@ -223,13 +291,18 @@ export function imRunResultDelivery(
   run: Run,
   route: ImReplyRoute,
   replyAs: 'markdown' | 'text' = 'markdown',
+  cards?: ApprovalCardRenderer,
 ): ImDeliveryEnqueueInput | null {
   const result = run.result
   let body: OutboundBody | undefined
   if (run.status === 'failed' || result?.status === 'failed') {
     body = { text: `⚠️ I couldn't finish that turn: ${result?.reason ?? 'unknown error'}` }
   } else if (result?.status === 'pending_approval' || (result?.status === 'ok' && result.pendingApprovals?.length)) {
-    body = { card: approvalRequestCard(run.id, result.sessionId ?? '', result.pendingApprovals ?? []) }
+    body = {
+      card: cards
+        ? cards.render({ runId: run.id, sessionId: result.sessionId ?? '', approvals: result.pendingApprovals ?? [] })
+        : approvalRequestCard(run.id, result.sessionId ?? '', result.pendingApprovals ?? []),
+    }
   } else if (result?.status === 'ok' && result.reply !== undefined) {
     body = replyAs === 'text' ? { text: result.reply } : { markdown: result.reply }
   } else if (result?.status === 'refused') {
@@ -246,10 +319,16 @@ export function imRunResultDelivery(
   return { provider: route.destination.type, op, idempotencyKey: `run:${run.id}`, origin: { runId: run.id } }
 }
 
+/** True when the run's result carries approvals still waiting on a human. */
+export function isPendingApprovalResult(run: Run): boolean {
+  const result = run.result
+  return result?.status === 'pending_approval' || (result?.status === 'ok' && !!result.pendingApprovals?.length)
+}
+
 /**
- * Minimal interactive approval card. Provider-native payloads are opaque by
- * contract; this Feishu-shaped placeholder exists so the M2 smoke can click
- * an approval end to end. `packages/approvals` (12.0) replaces it.
+ * Built-in interactive approval card. Provider-native payloads are opaque
+ * by contract; this Feishu-shaped default covers the M2/M3 smoke path and
+ * is swapped per provider via the `ApprovalCardRenderer` port.
  */
 export function approvalRequestCard(
   runId: string,
@@ -284,20 +363,7 @@ export function approvalRequestCard(
   }
 }
 
-export function parseApprovalValue(value: unknown): ApprovalActionValue | null {
-  if (typeof value !== 'object' || value === null) return null
-  const candidate = value as Record<string, unknown>
-  if (candidate.kind !== APPROVAL_VALUE_KIND) return null
-  if (typeof candidate.runId !== 'string' || !candidate.runId) return null
-  if (typeof candidate.requestId !== 'string') return null
-  if (typeof candidate.command !== 'string') return null
-  if (candidate.decision !== 'approve' && candidate.decision !== 'reject') return null
-  return {
-    kind: APPROVAL_VALUE_KIND,
-    runId: candidate.runId,
-    sessionId: typeof candidate.sessionId === 'string' ? candidate.sessionId : '',
-    requestId: candidate.requestId,
-    command: candidate.command,
-    decision: candidate.decision,
-  }
+/** `ApprovalCardRenderer` adapter over the built-in card. */
+export const defaultApprovalCardRenderer: ApprovalCardRenderer = {
+  render: ({ runId, sessionId, approvals }) => approvalRequestCard(runId, sessionId, approvals),
 }

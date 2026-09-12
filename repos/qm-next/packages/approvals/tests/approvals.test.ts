@@ -19,6 +19,7 @@ import {
   parseApprovalValue,
   type AmbientJudge,
   type AmbientRoute,
+  type ApprovalActionValue,
   type ApprovalRecordInput,
   type ApprovalStore,
 } from '../src/index.ts'
@@ -237,13 +238,13 @@ test('approval decisions survive a restart on postgres', { skip: pgUrl ? false :
 })
 
 test('approval value codec round-trips objects and JSON strings', () => {
-  const value = {
+  const value: ApprovalActionValue = {
     kind: APPROVAL_VALUE_KIND,
     runId: 'run-1',
     sessionId: 'sess-1',
     requestId: 'req-1',
     command: 'deploy',
-    decision: 'approve' as const,
+    decision: 'approve',
   }
   assert.deepEqual(parseApprovalValue(value), value)
   assert.deepEqual(parseApprovalValue(JSON.stringify(value)), value)
