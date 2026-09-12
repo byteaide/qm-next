@@ -1,0 +1,21 @@
+{
+  "name": "@qm/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HTTP surface: signed-token auth, POST /v1/turns (sync and async queue) and the M1 composition root wiring stores, mock harness and the orchestrator",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@qm/cordis": "workspace:^",
+    "@qm/orchestrator": "workspace:^",
+    "@qm/schemastery": "workspace:^",
+    "@qm/store": "workspace:^",
+    "@qm/types": "workspace:^",
+    "fastify": "^5.12.1",
+    "jose": "^6.2.3"
+  }
+}
