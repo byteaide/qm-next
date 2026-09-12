@@ -15,6 +15,7 @@
   },
   "devDependencies": {
     "@qm/api": "workspace:*",
+    "@qm/approvals": "workspace:*",
     "@qm/boot": "workspace:*",
     "@qm/cordis-plugin-include": "workspace:*",
     "@qm/demo": "workspace:*",
