@@ -5,6 +5,6 @@
 .aidevops.json
 .beads
 
-# nested repos
-repos/deepseek-harness/
-repos/qm/
+# nested repos (standalone projects workspace)
+repos/
+.DS_Store
