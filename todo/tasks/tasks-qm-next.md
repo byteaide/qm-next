@@ -111,13 +111,18 @@ tasks-qm-next,qm-next（Cordis 重写 + 飞书 IM）,prd-qm-next,in_progress,~11
     - 落地：`createMemoryDeliveryQueue`（幂等 enqueue/TTL lease/ack/fail+retryInMs/park）+ `createDeliveryLoop`（enqueue 唤醒 + tick、指数退避、maxAttempts 停机、stop 排空）
   - [x] 8.3 单测 ~2h
     - 落地：16 用例（registry 6 + queue 5 + loop 5），覆盖认领循环/退避重试/终态停机/卸载排空；全仓 61 pass + 2 PG skip
-- [ ] 9.0 【B】`im-feishu` Provider `packages/im-feishu` ~1.5d (ai:1d test:0.5d)
+- [x] 9.0 【B】`im-feishu` Provider `packages/im-feishu` ~1.5d (ai:1d test:0.5d)
   - > brief：只写 `packages/im-feishu/`；对 7.1 契约编程；接入复用 6.0 spike 结论；参考 `qm/src/slack/{events,turn-handler,deliveries,approvals,attachments,directory}.ts` 的能力映射（不是照抄，是对契约重实现）；验证：录制事件 fixture 回放 + 真机冒烟清单
-  - [ ] 9.1 WS 长连接接入 + 事件映射 ~2h
-  - [ ] 9.2 出站：线程回复/编辑/文件 ~3h
-  - [ ] 9.3 审批卡片 + 回调校验 ~2h
-  - [ ] 9.4 目录同步 + lark_md 格式 ~2h
-  - [ ] 9.5 fixture 回放测试 ~2h
+  - [x] 9.1 WS 长连接接入 + 事件映射 ~2h
+    - 落地（`fbf6601`）：`createFeishuProvider` 包 `createLarkChannel`（WS 传输，pingTimeout/handshakeTimeout/includeRawEvent）；`createInboundMapper` 纯函数映射 message/cardAction/reaction/botAdded → InboundEvent，event_id 提取内聚于 mapper（raw 优先，`msg:<id>:<ts>` 兜底）
+  - [x] 9.2 出站：线程回复/编辑/文件 ~3h
+    - 落地：replyToMessageId/threadId → `replyInThread` 线程回复；text/markdown/card → send；edit → editMessage（text）+ updateCard（card）；delete → recallMessage；附件经 ImBlobs.read 字节 → image/file 消息（receipt 指向最后一条）
+  - [x] 9.3 审批卡片 + 回调校验 ~2h
+    - 落地：审批卡出站走 OutboundBody.card（opaque）；cardAction `action.value` 原样往返（approve/reject + runId）；回调校验由 config verificationToken/encryptKey 注入 channel（spike：card.action.trigger 经 WS + 内置点击去重）
+  - [x] 9.4 目录同步 + lark_md 格式 ~2h
+    - 落地：`collectDirectory()` 经 rawClient chat.list 分页拉 spaces 快照（dm/group/external）；格式管道 `format()` 透传 markdown，channel builtin converter 转 lark 格式；react/uploadFile 为保留位，抛 `IM_UNSUPPORTED_OP`
+  - [x] 9.5 fixture 回放测试 ~2h
+    - 落地：10 用例——canned SDK fixture 经捕获的 channel handler 走真实线路到 emit；出站对录 mock channel 断言（含线程 opts、blob 读、sentinel 码）；全仓 73 tests / 71 pass / 2 PG skip
 - [ ] 10.0 【汇合】真机冒烟 ~0.5d (ai:0.2d test:0.3d)
   - [ ] 10.1 飞书 @机器人 → 线程回复 ~1h
   - [ ] 10.2 审批卡片点击 → turn 恢复/终止 ~1h
