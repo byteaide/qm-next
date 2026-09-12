@@ -80,11 +80,15 @@ tasks-qm-next,qm-next（Cordis 重写 + 飞书 IM）,prd-qm-next,in_progress,~11
   - [x] 4.3 回路单测（含限流/预算/会话解析）~2h
     - 落地（lane-b `c9f8eee`）：`OrchestratorService`（准入→会话解析→lease→entries→harness→映射）、`createHarnessRouter`、可脚本化 `createMockHarness`；23 用例全绿
 - [x] 汇合预检（`ce64893`+`9be63c8`）：lockfile 冲突按预期出现并重装解决；合并树 typecheck + 53/53 全绿（含一次性 PG 容器真实对拍）
-- [ ] 5.0 【汇合】API 插件与端到端 ~1d (ai:0.6d test:0.4d)
-  - [ ] 5.1 `packages/api`：Fastify + `POST /v1/turns`（同步/`?async=1`）+ signed-token 鉴权（平移 `qm/src/auth/`）~3h
-  - [ ] 5.2 cordis.yml 组装全链路 profile ~1h
-  - [ ] 5.3 端到端：HTTP → run 队列 → orchestrator → mock harness → 回复；起服冒烟 ~2h
-  - [ ] 5.4 【串行门验收】e2e 全绿；打 tag `m1` ~0.5h
+- [x] 5.0 【汇合】API 插件与端到端 ~1d (ai:0.6d test:0.4d)
+  - [x] 5.1 `packages/api`：Fastify + `POST /v1/turns`（同步/`?async=1`）+ signed-token 鉴权（平移 `qm/src/auth/`）~3h
+    - 落地：`packages/api`（signed-token 平移含遗留 hmac 格式与 kid 轮换、bearer→Principal、`POST /v1/turns`、`GET /v1/runs/:id`、`GET /healthz`、TurnRunner claim 循环、ApiService 组合根：memory store + mock harness + dev 准入默认）；`c0cffe6`
+  - [x] 5.2 cordis.yml 组装全链路 profile ~1h
+    - 落地：profile 增 `@qm/api` 入口（port 0 + dev secret）；根 devDeps 增 `@qm/api`（loader 从根解析）；`171b55d`
+  - [x] 5.3 端到端：HTTP → run 队列 → orchestrator → mock harness → 回复；起服冒烟 ~2h
+    - 证据：api 包 7 用例（token 轮换/篡改/遗留格式/过期、401/400/403、sync 200+entries、async 202→runner→done）；profile 测试真实起服走通 sync+async 全链（202→GET run→done+回复）；typecheck 绿；60/60 全绿（含真 PG 对拍，容器一次性）
+  - [x] 5.4 【串行门验收】e2e 全绿；打 tag `m1` ~0.5h
+    - 测试已全绿；待用户终端 `git merge --ff-only feature/qm-next-m1` 后打 tag `m1`
 
 ### M2 IM 契约 + 飞书（1 提前 spike + 2 并行 + 汇合，~3d/墙钟 ~2d）
 
