@@ -132,7 +132,8 @@ tasks-qm-next,qm-next（Cordis 重写 + 飞书 IM）,prd-qm-next,in_progress,~11
 ### M3 企业能力回归（5 包全并行，~3d/墙钟 ~2d）
 
 - [ ] 11.0 【串行门】能力清单与包边界确认 ~2h
-  - [ ] 11.1 对照 qm 功能清单划定 5 包范围与验收项 ~2h
+  - [x] 11.1 对照 qm 功能清单划定 5 包范围与验收项 ~2h
+    - 草案落地：`repos/qm-next/docs/m3-scope.md`（qm 各子系统源点清单、5 包 IN/OUT 边界、验收项、车道依赖序、5 个待拍板问题：审批 pg 恢复、ambient 最小切片或砍除、skills 仅注册表、web-ui 最小 admin、pg 对拍门禁）
 - [ ] 12.0 【A1】approvals/ambient `packages/approvals` ~0.5d — brief：对 im-core `Interaction` 编程；参考 `qm/src/slack/{approvals,approval-cards}.ts` 语义
 - [ ] 13.0 【A2】cron/triggers `packages/triggers` ~0.5d — brief：pg-boss 队列平移 `qm/src/cron/`；触发创建 turn
 - [ ] 14.0 【B1】memory + skills `packages/{memory,skills}` ~0.5d — brief：平移 `qm/src/{memory,skills}/`，含 pg 与内存双实现
