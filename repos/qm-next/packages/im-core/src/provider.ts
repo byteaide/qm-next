@@ -7,7 +7,7 @@ import type { Destination } from '@qm/types'
 import type { InboundEvent } from './inbound.ts'
 import type { DirectorySyncPush } from './directory.ts'
 import type { OutboundOperation } from './outbound.ts'
-import type { ImCapabilities, OutboundBody, OutboundReceipt } from './types.ts'
+import type { ImBlobs, ImCapabilities, OutboundBody, OutboundReceipt } from './types.ts'
 
 /** Minimal logger port; satisfied by any cordis logger. */
 export interface ImLogger {
@@ -26,6 +26,8 @@ export interface ImProviderStartContext {
   readonly signal: AbortSignal
   /** Push inbound events into the core; core dedups on `eventId`. */
   emit(events: InboundEvent | readonly InboundEvent[]): Promise<void>
+  /** Blob port for inbound staging / outbound reads; absent when core runs without a blob store. */
+  readonly blobs?: ImBlobs
 }
 
 /**
@@ -46,8 +48,8 @@ export interface ImProvider {
   outbound(ops: readonly OutboundOperation[]): Promise<OutboundReceipt[]>
   /** Canonical markdown → provider body. Pure; no network. */
   format(markdown: string): OutboundBody
-  /** Push a directory snapshot into the provider's platform (capabilities.directorySync). */
-  directorySync?(push: DirectorySyncPush): Promise<void>
+  /** Pull a directory snapshot from the platform (capabilities.directorySync). */
+  collectDirectory?(): Promise<DirectorySyncPush>
   /** Provider-native destination for a chat id (mainly tests and tooling). */
   destination(chatId: string, threadId?: string): Destination
 }

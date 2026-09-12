@@ -5,13 +5,23 @@
  * FROZEN at 7.1 (serial gate). Provider adapters program against these types;
  * changes go back through the main session, never inside a parallel lane.
  */
-import type { Destination, OutgoingAttachment } from '@qm/types'
+import type { Destination, IncomingAttachment, OutgoingAttachment } from '@qm/types'
 
 /** Provider key. Equal to `Destination.type` for all events and operations. */
 export type ImProviderId = string
 
 /** One configured channel instance (e.g. "feishu-prod"). Provider-scoped. */
 export type ImInstanceId = string
+
+/**
+ * Blob port: how a provider reaches attachment bytes. `stage` persists
+ * provider-downloaded bytes into the core blob store (inbound files);
+ * `read` dereferences a core `blobId` (outbound attachments).
+ */
+export interface ImBlobs {
+  stage(content: Uint8Array, meta?: { name?: string; mimetype?: string }): Promise<IncomingAttachment>
+  read(blobId: string): Promise<Uint8Array>
+}
 
 /** Provider-native message identity plus the destination it lives in. */
 export interface MessageRef {
