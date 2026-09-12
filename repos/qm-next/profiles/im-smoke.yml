@@ -1,0 +1,21 @@
+# qm-next M2 real-machine smoke profile: full IM loop — HTTP API + bridge
+# + Feishu WS provider. Credentials come from the environment (export
+# FEISHU_APP_ID / FEISHU_APP_SECRET from aidevops secrets before booting;
+# optional FEISHU_VERIFICATION_TOKEN / FEISHU_ENCRYPT_KEY for card
+# callbacks). The Feishu app must be set to receive card callbacks over
+# long connection (open-platform console).
+- id: api
+  name: '@qm/api'
+  config:
+    port: 0
+    secrets: ['dev-m2-smoke-secret']
+- id: im-bridge
+  name: '@qm/im-bridge'
+- id: feishu
+  name: '@qm/im-feishu'
+  config:
+    appId: !!js "process.env.FEISHU_APP_ID"
+    appSecret: !!js "process.env.FEISHU_APP_SECRET"
+    instanceId: smoke
+    verificationToken: !!js "process.env.FEISHU_VERIFICATION_TOKEN"
+    encryptKey: !!js "process.env.FEISHU_ENCRYPT_KEY"

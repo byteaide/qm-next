@@ -8,7 +8,7 @@ import { Context, Service } from '@qm/cordis'
 import { createHarnessRouter, createMockHarness, OrchestratorService } from '@qm/orchestrator'
 import Schema from '@qm/schemastery'
 import { createMemoryRunStore, createMemorySessionStore } from '@qm/store'
-import type { IdentityService, RateLimiter, ResolutionService, ScopeId } from '@qm/types'
+import type { IdentityService, RateLimiter, ResolutionService, RunStore, ScopeId, SessionStore } from '@qm/types'
 import { createApiServer } from './server.ts'
 import { createTurnRunner } from './runner.ts'
 
@@ -65,6 +65,18 @@ export class ApiService extends Service<ApiConfig> {
   /** Listen address; available once the plugin fiber is active. */
   address = { port: 0, host: '' }
 
+  /** Queued-turn store; shared by HTTP intake and IM-originated turns. */
+  runs!: RunStore
+
+  /** Session store behind the orchestrator. */
+  sessions!: SessionStore
+
+  /** Dev resolution (system prompt + scope) used for API and IM turns. */
+  resolution!: ResolutionService
+
+  /** The orchestrator driving every turn. */
+  orchestrator!: OrchestratorService
+
   constructor(ctx: Context, public config: ApiConfig) {
     super(ctx, 'api')
   }
@@ -84,6 +96,10 @@ export class ApiService extends Service<ApiConfig> {
       resolution,
       rateLimiter: allowLimiter(),
     })
+    this.runs = runs
+    this.sessions = sessions
+    this.resolution = resolution
+    this.orchestrator = orchestrator
     const runner = createTurnRunner(
       { orchestrator, runs },
       this.config.tickMs !== undefined ? { tickMs: this.config.tickMs } : {},

@@ -1,6 +1,7 @@
 # qm-next profile: the M0 demo smoke entry plus the M1 full loop —
 # memory stores, mock harness, orchestrator and the HTTP API on an
-# ephemeral port (secrets are dev-only).
+# ephemeral port (secrets are dev-only) — plus the M2 汇合 bridge
+# (IM registry on ctx.im, memory delivery queue + claim loop).
 - id: demo
   name: '@qm/demo'
   config:
@@ -11,3 +12,5 @@
   config:
     port: 0
     secrets: ['dev-m1-secret']
+- id: im-bridge
+  name: '@qm/im-bridge'

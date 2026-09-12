@@ -20,6 +20,12 @@ importers:
       '@qm/demo':
         specifier: workspace:*
         version: link:packages/demo
+      '@qm/im-bridge':
+        specifier: workspace:*
+        version: link:packages/im-bridge
+      '@qm/im-feishu':
+        specifier: workspace:*
+        version: link:packages/im-feishu
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.2
@@ -80,6 +86,31 @@ importers:
       '@qm/schemastery':
         specifier: workspace:^
         version: link:../../vendor/schemastery
+
+  packages/im-bridge:
+    dependencies:
+      '@qm/cordis':
+        specifier: workspace:^
+        version: link:../../vendor/cordis
+      '@qm/im-core':
+        specifier: workspace:^
+        version: link:../im-core
+      '@qm/schemastery':
+        specifier: workspace:^
+        version: link:../../vendor/schemastery
+      '@qm/types':
+        specifier: workspace:^
+        version: link:../types
+    devDependencies:
+      '@qm/api':
+        specifier: workspace:^
+        version: link:../api
+      '@qm/orchestrator':
+        specifier: workspace:^
+        version: link:../orchestrator
+      '@qm/store':
+        specifier: workspace:^
+        version: link:../store
 
   packages/im-core:
     dependencies:
