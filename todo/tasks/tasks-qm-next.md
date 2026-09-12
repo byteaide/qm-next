@@ -139,7 +139,8 @@ tasks-qm-next,qm-next（Cordis 重写 + 飞书 IM）,prd-qm-next,in_progress,~11
     - 草案落地：`repos/qm-next/docs/m3-scope.md`（qm 各子系统源点清单、5 包 IN/OUT 边界、验收项、车道依赖序）
   - [x] 11.2 门禁确认（用户拍板，2026-09-13）：①审批 pg 恢复进 M3（恢复=耐久决策+携带 approval 的后续 turn，harness 侧 pause/resume 随 real harness 包）；②ambient 保留最小切片（策略存储+judge 端口，judge 模型砍除）；③skills 仅注册表+查找；④web-ui 修正为对话 surface（SPA 整包平移+server 重写+SSE，评估 ~1.5-2d）；⑤`pnpm test:pg` 容器对拍在串行门/17.0/M4 强制
   - [x] 11.3 冻结横切契约：`RunEventBus`（`packages/types/src/run-events.ts`）+ 内存实现（`packages/store`）+ `OrchestratorDeps.runEvents` 可选依赖接线（delta/progress/status 全链路，向后兼容）；`DirectoryStore` 契约由 15.0 首提交冻结（13.0/web-ui 消费方开道前就位）；其余包端口由各车道首提交冻结
-- [ ] 12.0 【A1】approvals/ambient `packages/approvals` ~0.5d — brief：对 im-core `Interaction` 编程；参考 `qm/src/slack/{approvals,approval-cards}.ts` 语义
+- [x] 12.0 【A1】approvals/ambient `packages/approvals` ~0.5d — brief：对 im-core `Interaction` 编程；参考 `qm/src/slack/{approvals,approval-cards}.ts` 语义
+  - 落地（feature/auto-20260912-225137 `d054dd2`/`81e2c46`/`fde8150`）：首提交冻结契约（`ApprovalStore` 端口 + 决策状态机 pending→approved/rejected + `ApprovalActionValue` 编解码 + `ApprovalCardRenderer` 端口 + ambient 端口族：`ChannelPolicyStore`/`AmbientJudge`/`AmbientService`）；memory/pg 双实现（keep-first record、单次迁移 decide、pg 条件 UPDATE 去重、重启恢复实测）；im-bridge 接线（pending 先入库再发卡、非请求者/过期点击回通知、二次点击去重、ambient 挂非提及消息、卡片渲染可注入）。验证：全仓 102 tests / 98 pass / 4 PG skip + 一次性 PG16 容器对拍 123/123 全过（含重启恢复用例）。遗留：bridge 内置卡片仍含 `lark_md`（M4 各 provider 自带 renderer 时移除，21.1 门禁前必须清）；`run:pg` 测试脚本与 `test:pg` 命令在 17.0 固化
 - [ ] 13.0 【A2】cron/triggers `packages/triggers` ~0.5d — brief：pg-boss 队列平移 `qm/src/cron/`；触发创建 turn
 - [ ] 14.0 【B1】memory + skills `packages/{memory,skills}` ~0.5d — brief：平移 `qm/src/{memory,skills}/`，含 pg 与内存双实现
 - [ ] 15.0 【B2】reach + directory `packages/{reach,directory}` ~0.5d — brief：destination 解析去 Slack 化；平移 `qm/src/{reach,directory}/`
