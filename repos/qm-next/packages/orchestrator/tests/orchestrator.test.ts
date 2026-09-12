@@ -24,6 +24,7 @@ import type {
   TurnResolution,
 } from '@qm/types'
 import { Context } from '@qm/cordis'
+import { createMemoryRunEventBus } from '@qm/store'
 import { createHarnessRouter, createMockHarness, OrchestratorService } from '../src/index.ts'
 
 const SCOPE: ScopeId = 'org:test'
@@ -346,4 +347,34 @@ test('async queue path: enqueue, claim, handleTurn, complete', async () => {
   const stored = await runs.get(run.id)
   assert.equal(stored?.status, 'done')
   assert.equal(stored?.result?.reply, 'echo: hello')
+})
+
+test('run events: deltas, progress and terminal status publish for runId turns only', async () => {
+  const bus = createMemoryRunEventBus()
+  const harness = createMockHarness({ defaultReply: 'streamed', deltas: ['he', 'llo'] })
+  const registry = createHarnessRouter({ defaultId: 'mock' })
+  registry.register(harness)
+  const orch = boot(buildDeps({ harness: registry, runEvents: bus }))
+
+  const live: string[] = []
+  bus.subscribe('run-1', (event) => live.push(`${event.kind}@${event.seq}`))
+  const result = await orch.handleTurn(turnInput({ runId: 'run-1' }))
+  assert.equal(result.status, 'ok')
+
+  const events = bus.replay('run-1')
+  const describe = (e: (typeof events)[number]): string =>
+    e.kind === 'delta' ? `delta:${e.text}` : e.kind === 'status' ? `status:${e.status}` : `progress:${e.toolCalls}`
+  assert.deepEqual(
+    events.map(describe),
+    ['status:running', 'delta:he', 'delta:llo', 'status:ok'],
+  )
+  assert.deepEqual(live, events.map((e) => `${e.kind}@${e.seq}`))
+  for (const [index, event] of events.entries()) {
+    assert.equal(event.seq, index)
+    assert.equal(event.runId, 'run-1')
+    assert.equal(event.sessionId, result.sessionId)
+  }
+
+  await orch.handleTurn(turnInput())
+  assert.equal(bus.replay('run-1').length, 4)
 })

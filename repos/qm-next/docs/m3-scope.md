@@ -103,13 +103,49 @@ Destination; external spaces filtered by visibility; parity test impls.
 qm sources: `plugins/web-ui` (Lit SPA, ~60 modules: sessions, crons, skills,
 memory, files, deploys, ambient-policy, playground, webhooks, connectors...).
 
-qm-next M3 boundary:
-- IN: cordis plugin serving a minimal admin SPA: sessions list, run list +
-  transcript view, cron list; SSE or poll against the api package.
-- OUT: files/deploys/playground/connectors/webhooks/ambient-policy UI.
+Confirmed at the gate (2026-09-13): web-ui is a **conversation surface**, not
+an admin panel — qm's web app is a first-class chat client over the pi agent.
 
-Acceptance: boots via profile entry; renders live sessions/runs/crons from
-the composition root stores.
+qm-next M3 boundary:
+- IN: **SPA ports wholesale** — `plugins/web-ui/src/` + its pi deps
+  (`pi-web-ui`, `pi-agent-core`) move as-is; the backend coupling is
+  concentrated in `src/core-bridge.ts` (`streamFn`: `POST /v1/turns?async=1`
+  + SSE `GET /api/runs/:id/events` + polling fallback), and qm-next's async
+  turn API already speaks that shape. The **server half is rewritten** as a
+  thin cordis plugin: serve `dist`, principal cookie (dev mode), proxy
+  turns/runs, and the **SSE run-events endpoint** backed by the frozen
+  `RunEventBus` (`@qm/types`, wired through `OrchestratorDeps.runEvents`).
+  Views whose backends land in M3 (skills picker, crons, contexts) go live;
+  webhooks/files/connectors/deploys render stub-empty states.
+- OUT: playground, deploys, files, connectors, webhooks UI, ambient-policy
+  UI, portal SSO (bind 127.0.0.1, no auth — admin hardening is follow-up).
+
+Estimate: ~1.5–2d (was ~1d; +SSE run-events seam). Independent lane.
+
+## Frozen at the gate (11.0, 2026-09-13)
+
+- `RunEventBus` port (`packages/types/src/run-events.ts`) + memory
+  implementation (`packages/store`) + optional `OrchestratorDeps.runEvents`
+  wiring — the only cross-cutting contract change; backwards compatible.
+- Per-package ports (`ApprovalStore`, `CronStore`/`TriggerSink`,
+  `ScopeMemory`, `SkillRegistry`, `DirectoryStore`) are committed by each
+  lane as its first commit, mirroring the im-core 7.1 pattern — no lane
+  consumes another package's internals, except **DirectoryStore**, which
+  13.0 (triggers) and web-ui (contexts) consume: 15.0 commits its contract
+  file before those two start reading it.
+- Lane-opening protocol: contracts committed → `pnpm install` by the main
+  session → lane works only in its package directory → contract gaps stop
+  the lane and return to the main session.
+
+## Open questions for gate confirmation
+
+RESOLVED 2026-09-13: (1) approvals pg recovery IN (restart-safe pending
+approvals; "resume" = durable decision + approval-carrying follow-up turn —
+harness-side pause/resume lands with the real harness package); (2) ambient
+minimal slice IN (policy store + judge port, judge model OUT); (3) skills
+registry + lookup confirmed; (4) web-ui = chat surface + SSE (revised from
+minimal-admin at the gate, see 16.0); (5) `pnpm test:pg` container parity
+gate runs at serial gates (11.x/17.x) and M4 close, not per-edit.
 
 ## Dependency order for lanes
 
@@ -118,13 +154,3 @@ directory (15) feeds approvals-card-destination + triggers; memory/skills
 can lane against the frozen DirectoryStore contract; web-ui (16) last (needs
 api surfaces stable). Suggested lane split stays as planned (A1/A2/A3,
 B1/B2) with contracts frozen first.
-
-## Open questions for gate confirmation
-
-1. Approvals: pg-backed restart recovery IN or memory-only for M3?
-2. Ambient: minimal slice (policy + judge port) as scoped — or drop ambient
-   from M3 entirely (push to M4)?
-3. Skills: registry + lookup only — confirm.
-4. web-ui minimal admin scope — confirm.
-5. pg parity: run PG containers in CI-style local gate for the three pg
-   impls (store/queue already support `QM_NEXT_PG_URL`)?

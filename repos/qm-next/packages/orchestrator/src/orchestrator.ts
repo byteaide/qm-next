@@ -13,6 +13,10 @@ import type {
   Orchestrator,
   OrchestratorDeps,
   PendingApproval,
+  RunDeltaEvent,
+  RunEvent,
+  RunEventDraft,
+  RunProgressEvent,
   SessionEntry,
   TurnInput,
   TurnResult,
@@ -73,6 +77,13 @@ export class OrchestratorService extends Service implements Orchestrator {
       return { status: 'refused', reason: 'another turn is active for this session' }
     }
     const lease = leaseAttempt.lease
+    const events = deps.runEvents && input.runId ? deps.runEvents : undefined
+    let seq = 0
+    const publish = (event: RunEventDraft): void => {
+      events?.publish({ ...event, runId: input.runId!, sessionId: session.id, seq } as RunEvent)
+      seq += 1
+    }
+    if (events) publish({ kind: 'status', status: 'running' })
     try {
       const history = await deps.sessions.getEntries(session.id)
       const userEntry = await deps.sessions.append(lease, {
@@ -102,6 +113,12 @@ export class OrchestratorService extends Service implements Orchestrator {
         scopeLabel: scopeId,
         orgScopeId: resolution.orgScopeId,
         recordModelCall: () => undefined,
+        ...(events
+          ? {
+              onDelta: (text: string) => publish({ kind: 'delta', text } satisfies Omit<RunDeltaEvent, 'runId' | 'sessionId' | 'seq'>),
+              onProgress: (p: { toolCalls: number }) => publish({ kind: 'progress', toolCalls: p.toolCalls } satisfies Omit<RunProgressEvent, 'runId' | 'sessionId' | 'seq'>),
+            }
+          : {}),
       })
       const sourceAssistantEntrySeq = [...emitted].reverse().find((e) => e.type === 'assistant')?.seq
       let finalResult: TurnResult
@@ -132,9 +149,18 @@ export class OrchestratorService extends Service implements Orchestrator {
           ...(sourceAssistantEntrySeq !== undefined ? { sourceAssistantEntrySeq } : {}),
         }
       }
+      if (events) {
+        publish({ kind: 'status', status: finalResult.status })
+        events.close(input.runId!)
+      }
       return finalResult
     } catch (err) {
-      return { status: 'failed', sessionId: session.id, reason: errMessage(err) }
+      const failed: TurnResult = { status: 'failed', sessionId: session.id, reason: errMessage(err) }
+      if (events) {
+        publish({ kind: 'status', status: 'failed' })
+        events.close(input.runId!)
+      }
+      return failed
     } finally {
       await deps.sessions.releaseLease(lease)
     }

@@ -21,6 +21,8 @@ export interface MockHarnessOptions {
   /** Consumed in order; an Error step is thrown to the orchestrator. */
   script?: MockTurnStep[]
   detect?: (input: HarnessDetectInput) => Promise<HarnessDetectResult>
+  /** Delta chunks streamed through `onDelta` before every reply. */
+  deltas?: readonly string[]
 }
 
 export const mockProfile: HarnessAdapterProfile = {
@@ -48,6 +50,9 @@ export function createMockHarness(opts: MockHarnessOptions = {}): MockHarness {
         if (next instanceof Error) throw next
         const result: HarnessTurnResult = next ?? {
           reply: opts.defaultReply ?? `echo: ${input.input}`,
+        }
+        for (const chunk of opts.deltas ?? []) {
+          await input.onDelta?.(chunk)
         }
         if (!result.silent) {
           await input.emit({ type: 'assistant', payload: { text: result.reply }, scopeLabel: input.scopeLabel })

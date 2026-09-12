@@ -7,8 +7,16 @@
 import { Context, Service } from '@qm/cordis'
 import { createHarnessRouter, createMockHarness, OrchestratorService } from '@qm/orchestrator'
 import Schema from '@qm/schemastery'
-import { createMemoryRunStore, createMemorySessionStore } from '@qm/store'
-import type { IdentityService, RateLimiter, ResolutionService, RunStore, ScopeId, SessionStore } from '@qm/types'
+import { createMemoryRunEventBus, createMemoryRunStore, createMemorySessionStore } from '@qm/store'
+import type {
+  IdentityService,
+  RateLimiter,
+  ResolutionService,
+  RunEventBus,
+  RunStore,
+  ScopeId,
+  SessionStore,
+} from '@qm/types'
 import { createApiServer } from './server.ts'
 import { createTurnRunner } from './runner.ts'
 
@@ -77,6 +85,9 @@ export class ApiService extends Service<ApiConfig> {
   /** The orchestrator driving every turn. */
   orchestrator!: OrchestratorService
 
+  /** Run event stream (deltas/progress/status); the SSE surface reads this. */
+  runEvents!: RunEventBus
+
   constructor(ctx: Context, public config: ApiConfig) {
     super(ctx, 'api')
   }
@@ -85,6 +96,7 @@ export class ApiService extends Service<ApiConfig> {
     if (!this.config.secrets?.length) throw new Error('api requires at least one signing secret')
     const sessions = createMemorySessionStore()
     const runs = createMemoryRunStore()
+    const runEvents = createMemoryRunEventBus()
     const registry = createHarnessRouter({ defaultId: this.config.defaultHarness ?? 'mock' })
     registry.register(createMockHarness())
     const resolution = devResolution(this.config)
@@ -95,11 +107,13 @@ export class ApiService extends Service<ApiConfig> {
       identity: devIdentity(),
       resolution,
       rateLimiter: allowLimiter(),
+      runEvents,
     })
     this.runs = runs
     this.sessions = sessions
     this.resolution = resolution
     this.orchestrator = orchestrator
+    this.runEvents = runEvents
     const runner = createTurnRunner(
       { orchestrator, runs },
       this.config.tickMs !== undefined ? { tickMs: this.config.tickMs } : {},

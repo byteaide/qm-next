@@ -12,5 +12,8 @@
   "dependencies": {
     "@qm/cordis": "workspace:^",
     "@qm/types": "workspace:^"
+  },
+  "devDependencies": {
+    "@qm/store": "workspace:^"
   }
 }

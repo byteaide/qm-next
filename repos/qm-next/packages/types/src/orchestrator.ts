@@ -10,6 +10,7 @@ import type { Conversation } from './conversation.ts'
 import type { HarnessRegistry } from './harness.ts'
 import type { Principal, ScopeId } from './identity.ts'
 import type { BudgetTracker, RateLimiter } from './ratelimit.ts'
+import type { RunEventBus } from './run-events.ts'
 import type { RunStore } from './run.ts'
 import type { SessionStore } from './session-store.ts'
 import type { TurnInput, TurnResult } from './turn.ts'
@@ -37,6 +38,8 @@ export interface OrchestratorDeps {
   resolution: ResolutionService
   rateLimiter: RateLimiter
   budget?: BudgetTracker
+  /** Optional run event stream (M3): harness deltas/progress surface here. */
+  runEvents?: RunEventBus
 }
 
 export interface Orchestrator {
