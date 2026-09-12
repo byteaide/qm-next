@@ -12,7 +12,6 @@
 import type { Destination, ScopeId } from '@qm/types'
 import type { DirectoryPersonRecord, DirectorySpaceRecord } from '@qm/directory'
 import { isVisible, principalIdFor } from '@qm/directory'
-
 export const MAX_GROUP_PARTICIPANTS = 8
 
 /** What the caller asks reach to resolve — exactly one field at a time. */
@@ -55,6 +54,19 @@ export interface ReachDirectory {
   ): Promise<{ kind: 'one'; space: DirectorySpaceRecord } | { kind: 'none' }>
   getPerson(provider: string, providerUserId: string): Promise<DirectoryPersonRecord | null>
   isVisible(provider: string, actorProviderUserId: string, space: DirectorySpaceRecord): Promise<boolean>
+}
+
+/** Adapt a full `DirectoryStore` to the structural `ReachDirectory` slice. */
+export function reachDirectory(
+  store: Pick<
+    ReachDirectory,
+    'resolvePerson' | 'resolveSpace' | 'spaceMember' | 'resolveGroupByParticipants' | 'getPerson'
+  >,
+): ReachDirectory {
+  return {
+    ...store,
+    isVisible: (provider, actorProviderUserId, space) => isVisible(store, provider, actorProviderUserId, space),
+  }
 }
 
 export function principalDestination(principalId: string, onBehalfOf: string): Destination {
