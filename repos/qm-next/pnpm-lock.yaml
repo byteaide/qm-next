@@ -54,6 +54,15 @@ importers:
         specifier: workspace:^
         version: link:../../vendor/schemastery
 
+  packages/orchestrator:
+    dependencies:
+      '@qm/cordis':
+        specifier: workspace:^
+        version: link:../../vendor/cordis
+      '@qm/types':
+        specifier: workspace:^
+        version: link:../types
+
   packages/types: {}
 
   vendor/cordis:
