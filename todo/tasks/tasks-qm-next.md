@@ -123,11 +123,14 @@ tasks-qm-next,qm-next（Cordis 重写 + 飞书 IM）,prd-qm-next,in_progress,~11
     - 落地：`collectDirectory()` 经 rawClient chat.list 分页拉 spaces 快照（dm/group/external）；格式管道 `format()` 透传 markdown，channel builtin converter 转 lark 格式；react/uploadFile 为保留位，抛 `IM_UNSUPPORTED_OP`
   - [x] 9.5 fixture 回放测试 ~2h
     - 落地：10 用例——canned SDK fixture 经捕获的 channel handler 走真实线路到 emit；出站对录 mock channel 断言（含线程 opts、blob 读、sentinel 码）；全仓 73 tests / 71 pass / 2 PG skip
-- [ ] 10.0 【汇合】真机冒烟 ~0.5d (ai:0.2d test:0.3d)
+- [x] 10.0 【汇合】真机冒烟 ~0.5d (ai:0.2d test:0.3d)
   - [x] 10.0a 汇合接线 ~2h — 落地（feature/auto-20260912-225137 `ac7a2e0`）：`packages/im-bridge`（`ImTurnBridgeService`：持有 ctx.im 注册表 + 内存 delivery 队列 + claim loop；inbound message/interaction → 会话解析 → run 入队并保留回复路由；run 终态 → ok 回复/失败/拒绝/待审批卡投递；审批按钮 `qm.approval.v1` 值往返，卡片为 12.0 前占位）。`@qm/api` 暴露 runs/sessions/resolution/orchestrator；`im-feishu` 增 `FeishuProviderService`（start 注册进 ctx.im / dispose 注销）；主 profile 挂 im-bridge；`profiles/im-smoke.yml` 为真机 profile（凭据走 `!!js` env）。全仓 83 tests / 81 pass / 2 PG skip，typecheck 绿
-  - [ ] 10.1 飞书 @机器人 → 线程回复 ~1h
-  - [ ] 10.2 审批卡片点击 → turn 恢复/终止 ~1h
-  - [ ] 10.3 【串行门验收】M2 清单全过；打 tag `m2` ~0.5h
+  - [x] 10.1 飞书 @机器人 → 线程回复 ~1h
+    - 通过（2026-09-12 真机）：@机器人 → 线程内收到 `smoke 10.1 echo: thread reply is live`（用户客户端实测确认）
+  - [x] 10.2 审批卡片点击 → turn 恢复/终止 ~1h
+    - 通过（2026-09-12 真机）：第二条消息触发 Approval needed 卡片（smoke-approve），Approve/Reject 点击均收到对应 `echo: ...: smoke-approve` 回复（用户客户端实测确认）
+  - [x] 10.3 【串行门验收】M2 清单全过；打 tag `m2` ~0.5h
+    - M2 清单全过；tag `m2` 已由用户在合并时打上。遗留改进（不阻塞）：boot-im-smoke.ts 的 stdout 经 pnpm 管道缓冲，SIGTERM 后日志丢失——后续重跑前加文件落盘；发现并修复 im-feishu SDK domain 需完整 URL（`4b5fcff`，此前 fixture 测试注入 channelFactory 未覆盖 default factory）
 
 ### M3 企业能力回归（5 包全并行，~3d/墙钟 ~2d）
 
