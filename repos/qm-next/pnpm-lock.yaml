@@ -90,6 +90,24 @@ importers:
         specifier: workspace:^
         version: link:../types
 
+  packages/im-feishu:
+    dependencies:
+      '@larksuiteoapi/node-sdk':
+        specifier: ^1.44.0
+        version: 1.73.3
+      '@qm/cordis':
+        specifier: workspace:^
+        version: link:../../vendor/cordis
+      '@qm/im-core':
+        specifier: workspace:^
+        version: link:../im-core
+      '@qm/schemastery':
+        specifier: workspace:^
+        version: link:../../vendor/schemastery
+      '@qm/types':
+        specifier: workspace:^
+        version: link:../types
+
   packages/orchestrator:
     dependencies:
       '@qm/cordis':

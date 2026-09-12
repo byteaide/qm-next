@@ -1,0 +1,19 @@
+{
+  "name": "@qm/im-feishu",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Feishu (Lark) IM provider adapter implementing the @qm/im-core contract over @larksuiteoapi/node-sdk WS long connection",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.44.0",
+    "@qm/cordis": "workspace:^",
+    "@qm/im-core": "workspace:^",
+    "@qm/schemastery": "workspace:^",
+    "@qm/types": "workspace:^"
+  }
+}
