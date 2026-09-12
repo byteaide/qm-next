@@ -47,6 +47,7 @@ tasks-qm-next,qm-next（Cordis 重写 + 飞书 IM）,prd-qm-next,in_progress,~11
 
 - [ ] 1.0 M0 仓库脚手架与内核 ~1d (ai:0.5d test:0.5d)
   - [ ] 1.1 创建 `repos/qm-next`：git init、pnpm workspace（`vendor/*` + `packages/*/*`）、`tsconfig.base.json`（strict、NodeNext、ESM）、`.gitignore`、README ~1h
+    - 位置约束：canonical guard 禁止在 `~/Git` 下直接引导新仓。方案：M0 先在 aa worktree 内以普通目录 `repos/qm-next/` 承载（随 aa 分支提交），文档从 `todo/qm-next-architecture.md` 迁入；独立成仓时再迁移（需 canonical ignore 合并后或用户协助执行 git init）
   - [ ] 1.2 vendor 拷贝 6 包：`cosmokit`、`schemastery`、`cordis`、`loader`、`include`、`timer`（自 dsh `vendor/`）；group/hmr/logger-console 暂缓 ~0.5h
   - [ ] 1.3 rescope：`@deepseek-ai` → `@qm`（包名、内部依赖键、源码 import；`cordis:` 协议前缀与 `Symbol.for('schemastery')` 不改）；映射表写入 `vendor/README.md` ~1h
   - [ ] 1.4 构建：单阶段 tsc emit `lib/`（JS + d.ts；有意偏离 dsh 的 tsdown 双段构建，记录于 README）~1h
