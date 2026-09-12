@@ -1,0 +1,6 @@
+# Smoke fixture: !!js expressions evaluate against the loader context.
+- id: demo-interp
+  name: '@qm/demo'
+  config:
+    greeting: !!js "'greeting-' + (1 + 1)"
+    times: 1

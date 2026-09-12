@@ -1,0 +1,3 @@
+# Smoke fixture: an entry whose module does not exist must fail the boot.
+- id: demo-bad
+  name: '@qm/nonexistent-plugin'

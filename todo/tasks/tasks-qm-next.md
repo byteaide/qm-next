@@ -52,11 +52,14 @@ tasks-qm-next,qm-next（Cordis 重写 + 飞书 IM）,prd-qm-next,in_progress,~11
   - [x] 1.2 vendor 拷贝 6 包：`cosmokit`、`schemastery`、`cordis`、`loader`、`include`、`timer`（自 dsh `vendor/`）；group/hmr/logger-console 暂缓 ~0.5h
   - [x] 1.3 rescope：`@deepseek-ai` → `@qm`（25 文件，残留 0，`scripts/rescope-check.sh` 门禁）；映射与本地改动记录于 `vendor/README.md` ~1h
   - [x] 1.4 构建：`scripts/build-vendor.sh`（`tsc -b` → `lib/types` + JS 同步 `lib/`）；schemastery 入口改 ESM-only；构建通过，`Context`/`Service` node 加载验证通过 ~1h
-  - [ ] 1.5 冒烟测试：插件挂载/卸载、`inject` 等待、Config 校验、五种事件派发（emit/waterfall/parallel/serial/bail）、`ctx.effect()` 可逆 ~2h
-    - 已核实 API：Service 构造器自动 `ctx.reflect.provide` 注册；Config 经 `runtime.Config['~standard'].validate` 校验（schemastery 兼容 standard-schema）
-    - 需建：`packages/demo`（Config 示例）、`packages/boot`（bootProfile：`new Context()` → `ctx.plugin(Loader)` → include 加载 cordis.yml，模板见 `vendor/cordis/bin.js`）、`profiles/cordis.yml`、`packages/boot/tests/*.test.ts`
-  - [ ] 1.6 `cordis.yml` profile 启动：bootstrap + loader/include 加载，含 `!!js` 配置插值用例 ~2h
+  - [x] 1.5 冒烟测试：插件挂载/卸载、`inject` 等待、Config 校验、五种事件派发（emit/waterfall/parallel/serial/bail）、`ctx.effect()` 可逆 ~2h
+    - 落地：`packages/demo`（Demo Service + schemastery Config）、`packages/boot`（`bootProfile`）、`packages/boot/tests/kernel.test.ts`（11 用例）全绿
+    - 已核实 API：Service 构造器自动 `ctx.reflect.provide` 注册；Config 经 `runtime.Config['~standard'].validate` 校验（schemastery 兼容标准 schema）；`FiberState` 是 const enum（运行时无导出，测试用字面量）
+  - [x] 1.6 `cordis.yml` profile 启动：bootstrap + loader/include 加载，含 `!!js` 配置插值用例 ~2h
+    - 落地：`packages/boot/src/index.ts`（模板 `vendor/cordis/bin.js`，include 入口固定 id `include`）、`profiles/cordis.yml`、`packages/boot/tests/profile.test.ts`（4 用例：挂载/插值/坏导入/仓库 profile）全绿
+    - 关键语义：profile entries 挂在 include 嵌套 tree（id `include:<entry-id>`）；卸载 `include` 入口级联清理；根 devDeps 需 `@qm/demo`/`@qm/cordis-plugin-include`（baseUrl 从根解析）
   - [ ] 1.7 【串行门验收】`pnpm test` 全绿 + profile 启停通过；打 tag `m0` ~0.5h
+    - 测试已全绿（15/15）；待用户终端 `git merge --ff-only chore/gitignore-repos` 后打 tag `m0`
 
 ### M1 核心回路（1 串行门 + 2 并行 + 汇合，~3d/墙钟 ~2d）
 

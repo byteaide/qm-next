@@ -8,6 +8,15 @@ importers:
 
   .:
     devDependencies:
+      '@qm/boot':
+        specifier: workspace:*
+        version: link:packages/boot
+      '@qm/cordis-plugin-include':
+        specifier: workspace:*
+        version: link:vendor/include
+      '@qm/demo':
+        specifier: workspace:*
+        version: link:packages/demo
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.2
@@ -17,6 +26,33 @@ importers:
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
+
+  packages/boot:
+    dependencies:
+      '@qm/cordis':
+        specifier: workspace:^
+        version: link:../../vendor/cordis
+      '@qm/cordis-plugin-include':
+        specifier: workspace:^
+        version: link:../../vendor/include
+      '@qm/cordis-plugin-loader':
+        specifier: workspace:^
+        version: link:../../vendor/loader
+      '@qm/demo':
+        specifier: workspace:^
+        version: link:../demo
+      '@qm/schemastery':
+        specifier: workspace:^
+        version: link:../../vendor/schemastery
+
+  packages/demo:
+    dependencies:
+      '@qm/cordis':
+        specifier: workspace:^
+        version: link:../../vendor/cordis
+      '@qm/schemastery':
+        specifier: workspace:^
+        version: link:../../vendor/schemastery
 
   vendor/cordis:
     dependencies:

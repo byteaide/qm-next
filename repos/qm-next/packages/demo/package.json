@@ -1,0 +1,16 @@
+{
+  "name": "@qm/demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Example cordis plugin with a schemastery Config schema; provides the `demo` service",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@qm/cordis": "workspace:^",
+    "@qm/schemastery": "workspace:^"
+  }
+}

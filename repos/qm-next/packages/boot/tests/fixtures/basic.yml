@@ -1,0 +1,6 @@
+# Smoke fixture: plain entry with a literal config.
+- id: demo-basic
+  name: '@qm/demo'
+  config:
+    greeting: config-loaded
+    times: 2

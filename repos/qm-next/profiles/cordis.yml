@@ -1,0 +1,7 @@
+# qm-next M0 profile: a single demo entry.
+# (Two Demo instances would double-provide the `demo` service and fail.)
+- id: demo
+  name: '@qm/demo'
+  config:
+    greeting: !!js "'hello-' + (1 + 1)"
+    times: 3
