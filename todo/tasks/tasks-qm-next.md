@@ -4,7 +4,7 @@ Based on [ai-dev-tasks](https://github.com/snarktank/ai-dev-tasks) task format, 
 
 **PRD:** [prd-qm-next.md](prd-qm-next.md)
 **Created:** 2026-09-12
-**Status:** Not Started
+**Status:** In Progress（M0/M1 done，M2 进行中）
 **Estimate:** ~11d 总工作量；双 agent 并行后墙钟 ~7-8d (ai:~7d test:~3d)
 
 <!--TOON:tasks_meta{id,feature,prd,status,est,est_ai,est_test,est_read,logged,started,completed}:
@@ -92,10 +92,12 @@ tasks-qm-next,qm-next（Cordis 重写 + 飞书 IM）,prd-qm-next,in_progress,~11
 
 ### M2 IM 契约 + 飞书（1 提前 spike + 2 并行 + 汇合，~3d/墙钟 ~2d）
 
-- [ ] 6.0 【B'·可提前至 M1 期间】飞书 SDK spike `packages/spike-feishu` ~0.5d (ai:0.3d test:0.2d)
+- [x] 6.0 【B'·可提前至 M1 期间】飞书 SDK spike `packages/spike-feishu` ~0.5d (ai:0.3d test:0.2d)
   - > brief：独立 scratch 包，不依赖 qm-next 其他代码；验证 `@larksuiteoapi/node-sdk` WS 长连接（收事件/发消息/卡片回调三件事）；产出：可行性结论 + 最小示例；**此结论是 6.2 的输入**
-  - [ ] 6.1 SDK 验证三件套 ~3h
-  - [ ] 6.2 结论回写 PRD Open Question（SDK 选型定案）~0.5h
+  - [x] 6.1 SDK 验证三件套 ~3h
+    - 落地（spike/feishu-sdk `1d5bcf5`）：worker 池仍 entitlement exhausted，主会话执行；SDK **v1.73.3** 高层 `createLarkChannel`（WS 传输）三件套类型面+实现面全验证：收事件（自动重连/ping 看门狗/getConnectionStatus 五态）、发消息（send/stream/edit/recall + replyTo/replyInThread + file=image uploadFile 位）、卡片回调（`card.action.trigger` 经 WS 可达 + 内置去重 + updateCard 回写）；离线 surface 冒烟 15/15 PASS + strict typecheck 绿；真连三脚本就绪待凭据
+  - [x] 6.2 结论回写 PRD Open Question（SDK 选型定案）~0.5h
+    - 结论：**用 SDK，不直连 OpenAPI**；流式回复/准入策略/SSRF 防护可白嫖；坑：卡片回调须应用侧改"长连接接收"、editMessage 仅 text/post、流式滚卡要跟新 messageId；详见 `packages/spike-feishu/README.md`
 - [ ] 7.0 【串行门】`@qm/im-core` 契约冻结 ~0.5d (ai:0.4d test:0.1d)
   - [ ] 7.1 `InboundEvent` 判别联合 / `Destination{provider,chatId,threadId?}` / 出站操作（send/edit/delete/uploadFile/react 位保留）/ `Interaction` / `DirectorySync` / 格式管道接口；`ctx.im` 注册表；delivery 认领接口 ~3h
   - [ ] 7.2 主会话开并行 ~0.5h

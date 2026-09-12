@@ -171,7 +171,7 @@ m4-multi-platform,0.5d,0.5d,-,1d
 
 ## Open Questions
 
-- [ ] 飞书 SDK 选型：`@larksuiteoapi/node-sdk` 长连接是否满足（M2 首日验证，否则直连 OpenAPI）
+- [x] 飞书 SDK 选型：**已定，用 `@larksuiteoapi/node-sdk` v1.73.3**（spike 6.0/6.1，分支 `spike/feishu-sdk` 随 M2 合入）。高层 `createLarkChannel`（WS 传输）覆盖三件套：收事件（自动重连+ping 看门狗+状态五态查询）、发消息（send/stream/edit/recall、`replyTo+replyInThread` 线程回复、file/image 即 uploadFile 位）、卡片回调（`card.action.trigger` 经 WS 可达 + 内置点击去重 + `updateCard` 状态回写）。另有流式回复（超长自动滚卡）、准入策略（PolicyConfig/RejectEvent）、SSRF 防护内置——9.x 无需直连 OpenAPI。证据与坑清单：`repos/qm-next/packages/spike-feishu/README.md`。真连验证并入 10.0 冒烟。
 - [ ] web-ui in-process 后的进程资源隔离是否满足部署要求（不满足则拆回独立进程插件）
 - [ ] `im-wecom` 回调模式需要公网 HTTPS 入口，部署形态待定（M4 前）
 - [ ] qm 数据迁移（schema 兼容层）是否纳入 qm-next 范围（当前 Non-Goal，待现网切换时再议）
