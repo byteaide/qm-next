@@ -46,13 +46,16 @@ tasks-qm-next,qm-next（Cordis 重写 + 飞书 IM）,prd-qm-next,in_progress,~11
 ### M0 基座（串行，~1d）
 
 - [ ] 1.0 M0 仓库脚手架与内核 ~1d (ai:0.5d test:0.5d)
-  - [ ] 1.1 创建 `repos/qm-next`：git init、pnpm workspace（`vendor/*` + `packages/*/*`）、`tsconfig.base.json`（strict、NodeNext、ESM）、`.gitignore`、README ~1h
-    - 位置约束：canonical guard 禁止在 `~/Git` 下直接引导新仓。方案：M0 先在 aa worktree 内以普通目录 `repos/qm-next/` 承载（随 aa 分支提交），文档从 `todo/qm-next-architecture.md` 迁入；独立成仓时再迁移（需 canonical ignore 合并后或用户协助执行 git init）
-  - [ ] 1.2 vendor 拷贝 6 包：`cosmokit`、`schemastery`、`cordis`、`loader`、`include`、`timer`（自 dsh `vendor/`）；group/hmr/logger-console 暂缓 ~0.5h
-  - [ ] 1.3 rescope：`@deepseek-ai` → `@qm`（包名、内部依赖键、源码 import；`cordis:` 协议前缀与 `Symbol.for('schemastery')` 不改）；映射表写入 `vendor/README.md` ~1h
-  - [ ] 1.4 构建：单阶段 tsc emit `lib/`（JS + d.ts；有意偏离 dsh 的 tsdown 双段构建，记录于 README）~1h
+  - [x] 1.1 创建 `repos/qm-next`：pnpm workspace（`vendor/*` + `packages/*/*`）、`tsconfig.base.json`（strict、NodeNext、ESM）、`.gitignore`、README ~1h
+    - 位置决策（用户拍板）：**选项 1，随 aa 走**——qm-next 为 aa tracked 子树，worktree 开发 + 用户 FF 合并；`.gitignore` 已改 `repos/*` + `!repos/qm-next`
+    - 架构文档已落 `repos/qm-next/docs/architecture.md`
+  - [x] 1.2 vendor 拷贝 6 包：`cosmokit`、`schemastery`、`cordis`、`loader`、`include`、`timer`（自 dsh `vendor/`）；group/hmr/logger-console 暂缓 ~0.5h
+  - [x] 1.3 rescope：`@deepseek-ai` → `@qm`（25 文件，残留 0，`scripts/rescope-check.sh` 门禁）；映射与本地改动记录于 `vendor/README.md` ~1h
+  - [x] 1.4 构建：`scripts/build-vendor.sh`（`tsc -b` → `lib/types` + JS 同步 `lib/`）；schemastery 入口改 ESM-only；构建通过，`Context`/`Service` node 加载验证通过 ~1h
   - [ ] 1.5 冒烟测试：插件挂载/卸载、`inject` 等待、Config 校验、五种事件派发（emit/waterfall/parallel/serial/bail）、`ctx.effect()` 可逆 ~2h
-  - [ ] 1.6 `cordis.yml` profile 启动：bootstrap 脚本 + loader/include 加载，含 `!!js` 配置插值用例 ~2h
+    - 已核实 API：Service 构造器自动 `ctx.reflect.provide` 注册；Config 经 `runtime.Config['~standard'].validate` 校验（schemastery 兼容 standard-schema）
+    - 需建：`packages/demo`（Config 示例）、`packages/boot`（bootProfile：`new Context()` → `ctx.plugin(Loader)` → include 加载 cordis.yml，模板见 `vendor/cordis/bin.js`）、`profiles/cordis.yml`、`packages/boot/tests/*.test.ts`
+  - [ ] 1.6 `cordis.yml` profile 启动：bootstrap + loader/include 加载，含 `!!js` 配置插值用例 ~2h
   - [ ] 1.7 【串行门验收】`pnpm test` 全绿 + profile 启停通过；打 tag `m0` ~0.5h
 
 ### M1 核心回路（1 串行门 + 2 并行 + 汇合，~3d/墙钟 ~2d）

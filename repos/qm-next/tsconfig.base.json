@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "es2024",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "declaration": true,
+    "sourceMap": true,
+    "declarationMap": true,
+    "composite": true,
+    "incremental": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": false,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "types": ["node"],
+    "paths": {
+      "@qm/cordis": ["./vendor/cordis/src"],
+      "@qm/cosmokit": ["./vendor/cosmokit/src"],
+      "@qm/schemastery": ["./vendor/schemastery/src"],
+      "@qm/cordis-plugin-loader": ["./vendor/loader/src"],
+      "@qm/cordis-plugin-include": ["./vendor/include/src"],
+      "@qm/cordis-plugin-timer": ["./vendor/timer/src"]
+    }
+  }
+}

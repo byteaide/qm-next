@@ -1,0 +1,7 @@
+packages:
+  - vendor/*
+  - packages/*
+
+# Vendored framework packages keep upstream semver ranges; local builds must
+# resolve matching names to these pinned workspace sources.
+linkWorkspacePackages: true

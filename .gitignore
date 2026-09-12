@@ -5,6 +5,7 @@
 .aidevops.json
 .beads
 
-# nested repos (standalone projects workspace)
-repos/
+# nested repos (standalone projects workspace); qm-next tracked as project subtree
+repos/*
+!repos/qm-next
 .DS_Store
