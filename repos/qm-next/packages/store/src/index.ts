@@ -10,3 +10,9 @@ export {
 export { RUN_SCHEMA_STATEMENTS, SESSION_SCHEMA_STATEMENTS } from './schema.ts'
 export { createPgPool, withPgTransaction, errMessage } from './pg-pool.ts'
 export type { PgPool, Pool, PoolClient, Rows } from './pg-pool.ts'
+export {
+  createMemoryMap,
+  createPostgresMap,
+  jsonbStringify,
+  type DurableMap,
+} from './durable-map.ts'
