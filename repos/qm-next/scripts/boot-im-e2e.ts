@@ -50,6 +50,18 @@ base.turns.runTurn = async (input) => {
 }
 api.orchestrator.deps.harness.register(base)
 
+// Terminal-run evidence into the file log: shows which path each turn
+// took (echo vs pending_approval card vs approval follow-up).
+api.runs.onTerminal((run) => {
+  const result = run.result
+  const approvals = result?.pendingApprovals?.length ?? 0
+  log(
+    `im-e2e: run ${run.id} terminal surface=${run.request?.surface} origin=${String(run.request?.origin?.kind)} status=${run.status} result=${result?.status ?? 'n/a'}` +
+      (typeof result?.reply === 'string' ? ` reply=${JSON.stringify(result.reply.slice(0, 120))}` : '') +
+      (approvals > 0 ? ` pendingApprovals=${approvals}` : ''),
+  )
+})
+
 const { port } = api.address
 log(`im-e2e: booted, api 127.0.0.1:${port}, healthz ${(await fetch(`http://127.0.0.1:${port}/healthz`)).status}`)
 
