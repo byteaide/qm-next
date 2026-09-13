@@ -1,0 +1,20 @@
+{
+  "name": "@qm/skills",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Skill registry + lookup with collision-checked names across an ordered scope chain; in-process + Postgres implementations and the orchestrator resolution seam",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@qm/store": "workspace:^",
+    "@qm/types": "workspace:^",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0"
+  }
+}
