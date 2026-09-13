@@ -11,6 +11,9 @@
   },
   "dependencies": {
     "@qm/cordis": "workspace:^",
+    "@qm/harness-claude": "workspace:^",
+    "@qm/harness-codex": "workspace:^",
+    "@qm/harness-opencode": "workspace:^",
     "@qm/harness-pi": "workspace:^",
     "@qm/model": "workspace:^",
     "@qm/orchestrator": "workspace:^",

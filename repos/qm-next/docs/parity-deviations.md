@@ -188,3 +188,56 @@ Each entry names the qm source shape, the qm-next shape, and why.
 28. **No per-turn tool ledger** — qm caches tool results per (run, attempt,
     call index) through a ledger store; P1 executes every call live (no
     replay dedupe). The `once()` seam lands with the runs/replay lane.
+
+## P2 convergence / multi-engine + runs (2026-09-13)
+
+29. **Engine harness options drop the qm `Config` adapters** — qm exposes
+    `claudeHarnessConfigOptions(config)` / `codexHarnessConfigOptions(config)`
+    / `openCodeHarnessConfigOptions(config)` over the qm global `Config`;
+    qm-next assembles engine options directly in the composition root
+    (`packages/api/src/service.ts`) and the profile YAML. The adapters are
+    re-created from the config seam when the P3 control plane lands.
+
+30. **Per-package narrow task-store interfaces** — qm's harnesses consume the
+    shared `TaskStore` (src/tasks/task-store.ts) for subagent task tracking;
+    the tasks subsystem is P4. The ports type the narrow used surface
+    (`create`/`get`/`transitionStatus`) per harness package
+    (ClaudeTaskStore/CodexTaskStore/OpenCodeTaskStore) and accept `undefined`.
+    These fold into the real store when P4 lands.
+
+31. **Claude/codex/opencode tool options default `surfaceName: 'api'`** — qm's
+    unreachable no-turn fallback names surface `"slack"`; qm-next keeps the
+    platform-neutral surface vocabulary (P1 check:im discipline). The branch
+    is unreachable (single-call runs pass a turn); recorded for traceability.
+
+32. **Codex `recordLlmRequest` drops the abort-signal argument** — the frozen
+    `@qm/types` recorder signature is `(rec)`; qm passes a 5s-timeout signal.
+    The 5s timeout race stays (it rejects the race), the callee-side cancel
+    is dropped until the contract grows the signal parameter.
+
+33. **Run-signal contract lifted into `@qm/types`; poll helper moved to
+    `@qm/runs`** — P1 parked the memory store + `startSignalPoll` inside
+    `@qm/harness-pi`; with the P2 PG store arriving, the port contract lives
+    next to the other run contracts and the poll helper lives with the other
+    run runtime pieces; harness-pi re-exports both for compatibility.
+    `RunSignal.request` is typed as `TurnInput` (qm: `TurnRequest`).
+
+34. **Reaper error sink and leader lease are structural** — qm's reaper
+    imports the admin `ErrorLog` and `persistence/leader-lease`; qm-next
+    types the used surface locally (`ReaperErrorSink`, `LeaderLease`) so the
+    admin sinks (P3) and triggers lease implementation satisfy it
+    structurally. `REAPER_LEASE_KEY` keeps the qm value.
+
+35. **Worker drops `resolveTurnOrigin`** — qm derives `TurnOrigin` from the
+    raw request; qm-next `TurnInput` carries `origin` as a required field, so
+    the worker replays `run.request` verbatim and only stamps
+    runId/attempt/finalAttempt/background/cancel/queueMs. The turn-runner
+    swap (api runner → `@qm/runs` worker) lands with the composition pass.
+
+36. **Engine real-task smokes are credential-gated** — P2 acceptance calls
+    for one real-task smoke per engine. pi is proven (P1 4.2, feishu +
+    glm-5.2 over the SenseNova custom provider). claude/codex/opencode smokes
+    need provider credentials (Anthropic key/OAuth, ChatGPT auth or
+    OPENAI_API_KEY, opencode provider keys) that this environment does not
+    hold; the P1-established skip-until-key pattern applies. Registration,
+    profile switching, and the contract gates are the interim evidence.

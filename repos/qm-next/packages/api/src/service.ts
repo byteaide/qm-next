@@ -6,8 +6,12 @@
  * deployments swap each piece without touching the others.
  */
 import { Context, Service } from '@qm/cordis'
+import { createClaudeHarness } from '@qm/harness-claude'
+import { createCodexHarness } from '@qm/harness-codex'
+import { createOpenCodeHarness } from '@qm/harness-opencode'
 import { createPiHarness } from '@qm/harness-pi'
 import { createModelGateway, setCustomProviders, validateCustomProviderSpec, type CustomProviderSpec } from '@qm/model'
+import type { RuntimeRouteConfig } from '@qm/orchestrator'
 import { createHarnessRouter, createMockHarness, createSandboxToolContext, OrchestratorService } from '@qm/orchestrator'
 import Schema from '@qm/schemastery'
 import { createLocalSandbox } from '@qm/sandbox'
@@ -38,7 +42,11 @@ export interface ApiConfig {
   /** Async run-queue poll interval in ms. */
   tickMs?: number
   /** Harness id used when a turn does not name one; 'pi' boots the real engine. */
-  defaultHarness?: 'mock' | 'pi'
+  defaultHarness?: 'mock' | 'pi' | 'claude' | 'codex' | 'opencode'
+  /** Engines instantiated beside mock at boot; defaults to defaultHarness when it names a real engine. */
+  engines?: Array<'mock' | 'pi' | 'claude' | 'codex' | 'opencode'>
+  /** Routing config: approved harnesses, deployment default, per-scope overrides (per-surface/per-model choice). */
+  harnessRoutes?: RuntimeRouteConfig
   /** Base model id for the pi harness (a model registry entry). */
   modelId?: string
   /** Provider keys handed to the pi harness (env/config injection; keychain-backed resolution arrives with the control plane). */
@@ -71,7 +79,15 @@ export const Config = Schema.object({
   host: Schema.string().default('127.0.0.1').description('Listen host'),
   secrets: Schema.array(Schema.string()).required().description('Signing secrets; the first mints, every entry verifies'),
   tickMs: Schema.number().default(25).description('Async run-queue poll interval in ms'),
-  defaultHarness: Schema.union(['mock', 'pi']).default('mock').description("Harness id used when a turn does not name one; 'pi' boots the real engine"),
+  defaultHarness: Schema.union(['mock', 'pi', 'claude', 'codex', 'opencode'])
+    .default('mock')
+    .description("Harness id used when a turn does not name one; 'pi' boots the real engine"),
+  engines: Schema.array(Schema.union(['mock', 'pi', 'claude', 'codex', 'opencode'])).description(
+    'Engines instantiated beside mock at boot; defaults to defaultHarness when it names a real engine',
+  ),
+  harnessRoutes: Schema.any().description(
+    'Routing config: approved harnesses, deployment default, per-scope overrides',
+  ),
   modelId: Schema.string().description('pi base model id (a model registry entry)'),
   customProviders: Schema.array(Schema.any()).description('Custom model providers (OpenAI/Anthropic-compatible); specs validated at boot'),
   customProviderKeys: Schema.dict(Schema.string()).description('Keys for custom providers, by provider id'),
@@ -148,11 +164,19 @@ export class ApiService extends Service<ApiConfig> {
     for (const spec of customProviders) validateCustomProviderSpec(spec)
     if (customProviders.length) setCustomProviders(customProviders)
     const harnessId = this.config.defaultHarness ?? 'mock'
-    const registry = createHarnessRouter({ defaultId: harnessId })
-    registry.register(createMockHarness())
     let engine: Harness | undefined
-    if (harnessId === 'pi') {
-      engine = createPiHarness({
+    const registry = createHarnessRouter({
+      defaultId: harnessId,
+      ...(this.config.scopeId ? { orgScope: this.config.scopeId } : {}),
+      ...(this.config.modelId ? { fallbackModelId: this.config.modelId } : {}),
+      ...(this.config.harnessRoutes ? { routes: this.config.harnessRoutes } : {}),
+    })
+    registry.register(createMockHarness())
+    const engineIds =
+      this.config.engines?.length ?? false ? this.config.engines! : harnessId !== 'mock' ? [harnessId] : []
+    const booted: Harness[] = []
+    if (engineIds.includes('pi')) {
+      const engine = createPiHarness({
         ...(this.config.modelId ? { modelId: this.config.modelId } : {}),
         ...(Object.keys(this.config.customProviderKeys ?? {}).length
           ? {
@@ -169,7 +193,35 @@ export class ApiService extends Service<ApiConfig> {
         ...(this.config.openrouterApiKey ? { openrouterApiKey: this.config.openrouterApiKey } : {}),
       })
       registry.register(engine)
+      booted.push(engine)
     }
+    if (engineIds.includes('claude')) {
+      const engine = createClaudeHarness({
+        ...(this.config.modelId ? { defaultModelId: this.config.modelId } : {}),
+        ...(this.config.anthropicApiKey
+          ? { env: { ANTHROPIC_API_KEY: this.config.anthropicApiKey } }
+          : {}),
+      })
+      registry.register(engine)
+      booted.push(engine)
+    }
+    if (engineIds.includes('codex')) {
+      const engine = createCodexHarness({
+        ...(this.config.modelId ? { defaultModelId: this.config.modelId } : {}),
+      })
+      registry.register(engine)
+      booted.push(engine)
+    }
+    if (engineIds.includes('opencode')) {
+      const engine = createOpenCodeHarness({
+        ...(this.config.modelId ? { defaultModelId: this.config.modelId } : {}),
+        ...(this.config.anthropicApiKey ? { apiKey: this.config.anthropicApiKey } : {}),
+        ...(this.config.openaiApiKey ? { openaiApiKey: this.config.openaiApiKey } : {}),
+      })
+      registry.register(engine)
+      booted.push(engine)
+    }
+    engine = booted.find((candidate) => candidate.profile.id === harnessId) ?? booted[booted.length - 1]
     const resolution = devResolution(this.config)
     let toolFactory: OrchestratorDeps['tools'] | undefined
     const sandboxHandles = new Map<ScopeId, SandboxHandle>()

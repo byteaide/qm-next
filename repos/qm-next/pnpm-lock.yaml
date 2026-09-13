@@ -56,6 +56,15 @@ importers:
       '@qm/cordis':
         specifier: workspace:^
         version: link:../../vendor/cordis
+      '@qm/harness-claude':
+        specifier: workspace:^
+        version: link:../harness-claude
+      '@qm/harness-codex':
+        specifier: workspace:^
+        version: link:../harness-codex
+      '@qm/harness-opencode':
+        specifier: workspace:^
+        version: link:../harness-opencode
       '@qm/harness-pi':
         specifier: workspace:^
         version: link:../harness-pi
@@ -340,6 +349,9 @@ importers:
       '@qm/cordis':
         specifier: workspace:^
         version: link:../../vendor/cordis
+      '@qm/model':
+        specifier: workspace:^
+        version: link:../model
       '@qm/types':
         specifier: workspace:^
         version: link:../types

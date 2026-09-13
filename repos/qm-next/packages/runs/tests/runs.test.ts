@@ -27,7 +27,7 @@ import {
   startSignalPoll,
 } from '@qm/runs'
 import { createMemoryRunStore, createMemorySessionStore } from '@qm/store'
-import type { Orchestrator, RunSignalStore, TurnInput, TurnResult } from '@qm/types'
+import type { Orchestrator, RunSignal, RunSignalStore, TurnInput, TurnResult } from '@qm/types'
 
 const pgUrl = process.env.QM_NEXT_PG_URL
 
@@ -88,7 +88,7 @@ test('memory run-signal store: send/take ordering, pending ids, live notificatio
 })
 
 test('startSignalPoll drains steer/abort and settles after stop with drainOnStop', async () => {
-  const pending: Array<{ kind: string; text?: string; ts?: string }> = []
+  const pending: RunSignal[] = []
   const silent: RunSignalStore = {
     async send(_runId, signal) {
       pending.push(signal)

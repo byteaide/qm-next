@@ -60,8 +60,17 @@ export class OrchestratorService extends Service implements Orchestrator {
     const resolution = await deps.resolution.resolve(conversation, actor)
     const scopeId = deps.resolution.scopeFor(conversation, actor)
     let harness
+    let choiceModel: string | undefined
     try {
-      harness = deps.harness.resolve(input.harness)
+      const configured = deps.harness as Partial<
+        import('./router.ts').ConfiguredHarnessRegistry
+      >
+      const choice = configured.resolveChoice?.(conversation.threadRef, scopeId, {
+        ...(input.harness ? { harness: input.harness } : {}),
+        ...(input.model ? { model: input.model } : {}),
+      })
+      harness = deps.harness.resolve(choice?.harnessId ?? input.harness)
+      choiceModel = choice?.modelId
     } catch (err) {
       return { status: 'refused', reason: errMessage(err) }
     }
@@ -100,8 +109,8 @@ export class OrchestratorService extends Service implements Orchestrator {
         input: input.text,
         ...(input.priorTurns?.length ? { priorTurns: input.priorTurns } : {}),
         ...(input.attachments?.length ? { attachments: input.attachments } : {}),
-        ...(input.model ? { model: input.model } : {}),
-        ...(input.harness ? { harness: input.harness } : {}),
+        ...(input.model || choiceModel ? { model: input.model ?? choiceModel! } : {}),
+        ...(input.harness || (harness && choiceModel) ? { harness: harness.profile.id } : {}),
         ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
         ...(input.readOnly ? { readOnly: true } : {}),
         ...(tools ? { tools } : {}),

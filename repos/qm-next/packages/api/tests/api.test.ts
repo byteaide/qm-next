@@ -184,29 +184,31 @@ test('ApiService: real listen, healthz and sync turn over HTTP, clean dispose', 
 test('ApiService: defaultHarness pi registers the real engine beside mock; explicit mock turns still work', async () => {
   const ctx = new Context()
   const fiber = await ctx.plugin(ApiService, { secrets: [SECRET], port: 0, defaultHarness: 'pi' })
-  const deps = ctx.api.orchestrator.deps
-  assert.deepEqual(deps.harness.ids().sort(), ['mock', 'pi'])
-  assert.ok(deps.harness.get('pi'))
-  assert.ok(deps.modelGateway)
-  const { port } = ctx.api.address
-  const base = `http://127.0.0.1:${port}`
-  const res = await fetch(`${base}/v1/turns`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${await mint({ p: 'user-1' })}`, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      text: 'hi mock',
-      surface: 'api',
-      harness: 'mock',
-      conversation: { kind: 'dm', threadRef: 'thread:pi-registered' },
-    }),
-  })
-  assert.equal(res.status, 200)
-  assert.equal(((await res.json()) as TurnResult).reply, 'echo: hi mock')
-  await fiber.dispose()
+  try {
+    const deps = ctx.api.orchestrator.deps
+    assert.deepEqual(deps.harness.ids().sort(), ['mock', 'pi'])
+    assert.ok(deps.harness.get('pi'))
+    assert.ok(deps.modelGateway)
+    const { port } = ctx.api.address
+    const base = `http://127.0.0.1:${port}`
+    const res = await fetch(`${base}/v1/turns`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${await mint({ p: 'user-1' })}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        text: 'hi mock',
+        surface: 'api',
+        harness: 'mock',
+        conversation: { kind: 'dm', threadRef: 'thread:pi-registered' },
+      }),
+    })
+    assert.equal(res.status, 200)
+    assert.equal(((await res.json()) as TurnResult).reply, 'echo: hi mock')
+  } finally {
+    await fiber.dispose()
+  }
 })
 
-test('ApiService: custom providers register into the model registry before the pi harness boots', async () => {
-  const ctx = new Context()
+test('ApiService: custom providers register into the model registry before the pi harness boots', async () => {  const ctx = new Context()
   const fiber = await ctx.plugin(ApiService, {
     secrets: [SECRET],
     port: 0,
@@ -246,4 +248,49 @@ test('ApiService: an invalid custom provider spec rejects boot', async () => {
     },
     /lowercase slug/,
   )
+})
+
+test('ApiService: multi-engine registration with routing config stays switchable per turn', async () => {
+  const ctx = new Context()
+  const fiber = await ctx.plugin(ApiService, {
+    secrets: [SECRET],
+    port: 0,
+    defaultHarness: 'pi',
+    engines: ['pi', 'claude', 'codex', 'opencode'],
+    harnessRoutes: {
+      approved: ['mock', 'pi', 'claude', 'codex', 'opencode'],
+      default: { harness: 'pi', model: 'claude-opus-5' },
+    },
+  })
+  try {
+    const deps = ctx.api.orchestrator.deps
+    assert.deepEqual(deps.harness.ids().sort(), ['claude', 'codex', 'mock', 'opencode', 'pi'])
+    const { port } = ctx.api.address
+    const base = `http://127.0.0.1:${port}`
+    const res = await fetch(`${base}/v1/turns`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${await mint({ p: 'user-1' })}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        text: 'hi mock',
+        surface: 'api',
+        harness: 'mock',
+        conversation: { kind: 'dm', threadRef: 'thread:multi-mock' },
+      }),
+    })
+    assert.equal(res.status, 200)
+    assert.equal(((await res.json()) as TurnResult).reply, 'echo: hi mock')
+    const refused = await fetch(`${base}/v1/turns`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${await mint({ p: 'user-1' })}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        text: 'hi nobody',
+        surface: 'api',
+        harness: 'nope',
+        conversation: { kind: 'dm', threadRef: 'thread:multi-nope' },
+      }),
+    })
+    assert.equal(refused.status, 403)
+  } finally {
+    await fiber.dispose()
+  }
 })
