@@ -54,3 +54,30 @@ Each entry names the qm source shape, the qm-next shape, and why.
 10. **Goal hooks as vocabulary only** — `GoalRecord`/`GoalStatus`/`GrindBudget`
     are frozen in `@qm/types`; goal enforcement machinery stays internal to
     the harness package (same layering as qm).
+
+## Lane A1/A2 (2026-09-13, local implementation)
+
+11. **DurableMap lives in @qm/store** — qm keeps `persistence/durable-map.ts`
+    in core; the qm-next translation lands in the store package as the shared
+    KV substrate. The optional per-pool `schema` hook is dropped — qm-next
+    applies DDL through `createPgPool` statements.
+
+12. **orgId injected, not global** — qm's keychain reads `configOrgId()` at
+    write sites; qm-next has no config module, so `createKeychain` takes an
+    optional `orgId` provider and org fields are omitted when absent.
+
+13. **secret-source rebuilt from usage** — the qm original file was
+    unreadable under the source-access guard (secret-bearing basename); the
+    consumer-visible surface (`get(name)`) was rebuilt with env and map
+    implementations. Byte-level fidelity is not claimed.
+
+14. **Keychain manifest/ask-notice renderers deferred** —
+    `renderKeychainManifest`, `renderAskNotice`, and the SAVE_HINT copy are
+    IM-prompt/API-contract consumers; they arrive with the P4 IM domain and
+    P3 keychain routes, not with the store.
+
+15. **Model stores staged** — `custom-provider-store`,
+    `model-credential-store`, `user-model-credential-store`, and
+    `subscription-oauth` follow with their P3 routes; the P1 core ships the
+    resolution layer (pi-models, provider-endpoints, custom-providers
+    runtime registry, gateway) that harnesses consume.

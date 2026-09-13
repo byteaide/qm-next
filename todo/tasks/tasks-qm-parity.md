@@ -45,6 +45,7 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
 - 数据迁移从 v0.1.0 non-goal 转正（替身目标隐含）；先 schema diff 报告，再写迁移器。
 - v0.1.0 tasks 12-16 的 OUT 项清单是 P4 回填 checklist 的直接来源（见 `tasks-qm-next.md`）。
 - 1.1 冻结记录：新增 `@qm/types` 的 model/credentials/sandbox/tools 四个契约文件；harness 增 tools/tape/goal/compaction/每轮 auth 挂钩；session-store 增 tape + LLM request 记录组（memory+PG 双实现同步落地）；偏差 10 条记 `repos/qm-next/docs/parity-deviations.md`（含 check:im 逼出的 surface-search/webhook-scheme 平台中性化）。门禁：typecheck/test/test:pg(容器)/check:im/rescope-check 全绿。
+- 车道 A1/A2（2026-09-13，worktree `aa-feature-auto-20260913-155602`）：子代理派发因 token plan 配额耗尽失败，转主会话本地实现。A1 credentials 核心提交 `18abcc6`（keychain 全量 + secret-cipher + DurableMap→@qm/store + resolver）；A2 model 核心随后（pi-models/provider-endpoints/custom-providers/gateway）。pi-coding-agent tgz 因 github.com 不可达暂缓（3.2 的前置）。deviations 增：orgId 注入、secret-source 从用面重建（原文件被 source-access guard 拦截）、manifest 渲染件随 P4 延后。
 
 ## Tasks
 
@@ -53,11 +54,11 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
 - [x] 1.0 【串行门】Harness/model/credentials/sandbox 契约冻结 ~0.5d（2026-09-13 实际 ~0.5d）
   - [x] 1.1 以 qm-next orchestrator 已消费的 `runTurn` 形状为基线，补 `@qm/types`：`ModelGateway`/`CredentialResolver`/`Sandbox`/harness 扩展位（compaction/tape/goal 钩子）；`OrchestratorDeps` 增量接线（向后兼容） ~3h
   - [x] 1.2 `pnpm install` 开并行 ~0.5h（worktree + canonical 均可装；lockfile 未动）
-- [ ] 2.0 【A】credentials + model ~1.5d
-  - [ ] 2.1 `packages/credentials`：keychain/secret-source/harness-auth-env/connector-token（memory+PG 双实现，PG 强制生产） ~4h
-  - [ ] 2.2 secret-drop/device-flow/resident-auth 按引用跟进 ~3h
-  - [ ] 2.3 `packages/model`：catalog/gateway/pi-models/custom-providers/subscription-oauth/user-model-credential-store ~4h
-  - [ ] 2.4 parity 对拍测试（对照 qm `test/postgres-*` 相关用例形状） ~2h
+- [ ] 2.0 【A】credentials + model ~1.5d（2026-09-13 主会话本地执行：子代理配额耗尽）
+  - [x] 2.1 `packages/credentials`：keychain/secret-source/harness-auth-env/connector-token（memory+PG 双实现，PG 强制生产） ~4h（keychain 全量 + DurableMap 落 @qm/store；12 测试过）
+  - [ ] 2.2 secret-drop/device-flow/resident-auth 按引用跟进 ~3h（resident-paths/renderUseScript 已随 2.1 落地；resident-auth/device-flow/secret-drop 待跟进）
+  - [x] 2.3 `packages/model` 核心：pi-models/catalog-gateway/provider-endpoints/custom-providers ~4h（11 测试过；custom-provider-store/model-credential-store/subscription-oauth 待跟进）
+  - [ ] 2.4 parity 对拍测试（对照 qm `test/postgres-*` 相关用例形状） ~2h（契约测试已写；PG 对拍待容器轮次）
 - [ ] 3.0 【B】pi-harness 平移 ~2.5d
   - [ ] 3.1 `packages/sandbox`：接口 + local-sandbox（qm `src/sandbox/local-sandbox.ts`）+ process-poll/liveness ~4h
   - [ ] 3.2 `packages/harness-pi`：pi-harness 主体（2190L）+ pi-tools（3097L） ~8h
