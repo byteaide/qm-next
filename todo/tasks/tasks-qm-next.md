@@ -4,11 +4,11 @@ Based on [ai-dev-tasks](https://github.com/snarktank/ai-dev-tasks) task format, 
 
 **PRD:** [prd-qm-next.md](prd-qm-next.md)
 **Created:** 2026-09-12
-**Status:** In Progress（M0-M3 done，M4 收尾完成——范围拍板 2026-09-13：v1 只做飞书；待用户 FF 合并 + tag v0.1.0）
+**Status:** Done（M0-M4 全部完成——范围拍板 2026-09-13：v1 只做飞书，slack/钉钉/企微延期；用户 FF 合并 + tag `v0.1.0` @ `e245b5d`，2026-09-13）
 **Estimate:** ~11d 总工作量；双 agent 并行后墙钟 ~7-8d (ai:~7d test:~3d)
 
 <!--TOON:tasks_meta{id,feature,prd,status,est,est_ai,est_test,est_read,logged,started,completed}:
-tasks-qm-next,qm-next（Cordis 重写 + 飞书 IM）,prd-qm-next,in_progress,~11d,~7d,~3d,,2026-09-12T15:00Z,,
+tasks-qm-next,qm-next（Cordis 重写 + 飞书 IM）,prd-qm-next,done,~11d,~7d,~3d,,2026-09-12T15:00Z,,2026-09-13
 -->
 
 ## 并行执行规程（双 subagent）
@@ -149,23 +149,23 @@ tasks-qm-next,qm-next（Cordis 重写 + 飞书 IM）,prd-qm-next,in_progress,~11
   - 落地（feature/auto-20260912-225137 `e00185e`/`4c54bfe`/`f7e3266`）：首提交冻结双契约——`DirectoryStore` 端口（`apply(DirectorySyncPush)` 单写路径：按 section 陈旧守卫 + upsert + `replace` 撤销语义；provider 域内 people/spaces/spaceMembers 三表合一；`resolvePerson`/`resolveSpace`/`spaceMemberIds`（roster 未知返回 undefined）/`resolveGroupByParticipants`/`listVisibleSpaces`）+ 纯函数 `pickMatch`/`normDirectoryQuery`/`isVisible`（结构切片，reach 直用）；reach 契约 `ReachTarget`（recipient/channel/participants 三选一）→ `ReachResolution`（recipient→principal 目的地、channel/group→provider 目的地 + 成员校验/可见性过滤/identity_unverified 区分；openGroup 写回 OUT→group_not_found）。实现：共享 `applyPush` 驱动 + memory/pg 各自薄表适配（parity by construction），pg `apply` 单事务。验证：单包 17 tests（15 过/2 PG skip）+ 全仓 119/113/6 skip + 一次性 PG16 容器对拍 148/148 全过（含 roster 跨重启）。13.0/web-ui 现可消费已冻结的 `DirectoryStore`
 - [x] 16.0 【A3】web-ui 插件化 `packages/web-ui` ~1.5-2d — brief（11.2 修订）：qm `plugins/web-ui` 的 Lit SPA 整包平移（含 pi-web-ui/pi-agent-core 依赖），server 半重写为薄 cordis 插件（挂 dist + principal cookie + turns/runs 代理 + SSE run-events 端点读 `ctx.api.runEvents`）；skills/crons/contexts 视图接 M3 真后端，webhooks/files/connectors/deploys stub 空态；绑 127.0.0.1 无鉴权（admin 简版跟进）
   - 落地（feature/auto-20260912-225137 `6446a8d`）：SPA 66 文件整包平移至 `packages/web-ui/app/`（字节级不变；`chassis/src/errors.ts` 按相对路径 vendored，core-bridge 零改动）；server 半重写为 fastify `WebUiService`（`static inject = ['api']`，消费 `ctx.api` 的 orchestrator/sessions/runs/resolution/runEvents）：静态 dist-web + SPA 深链回退、dev principal cookie（signin/signout/me，permissions 数组含 admin）、`POST /api/turn` 落 run 队列（threadRef `web:${user}:*` 守卫、channel:/group: scope → ch:/g: 会话、clientTurnId → dedupKey）、`/api/runs/:id` RunPoll 映射 + withdraw + active、SSE `/api/runs/:id/events` 翻译冻结 `RunEventBus`（先订阅后 replay 按 seq 去重、delta→partial 累积帧、progress→alive、终态→done 帧 + 心跳注释）；live 视图：skills（SkillStore visibleFor/注册/更新/归档恢复/删除，碰撞→409）、crons（CronStore 列表/patch task→action/enable/disable/run-now 走 createFireEngine + manualFireKey + fire log/runs 分页/删除）、contexts（DirectoryStore visible spaces + personal 上下文）；stub 空态：files/webhooks/deployments/connectors/keychain/user-model-auth/search/memory（GET 空 + POST 501）/blobs/fork 501；ui-state 内存 Map、runtime-config 静态 dev 配置（mock harness + claude-sonnet-4-6 目录）。验证：typecheck 绿 + typecheck:app 绿 + vite build 绿 + rescope-check OK + 全仓无 PG 185 tests/175 pass/10 skip/0 fail（新增 6 个 server 半用例：auth 门、turn→SSE 全流程、会话转录、skills/crons live、stubs）；`scripts/dev-web-ui.ts` 真监听冒烟（signin→turn→SSE done 帧→sessions→skills→静态 index + 深链回退）全过，profiles/cordis.yml 已挂 web-ui（boot 端到端测试覆盖）。冒烟抓出并修复 SSE finish() 重入竞态（replay 终态与 initial-terminal 检查双触发 → write-after-end 崩进程；改为同步置位 teardown + writableEnded 守卫）。注：memory 视图按 11.0 冻结清单保持 stub 空态，17.0 组合根把 `wrapResolutionWithMemory` 接进 resolution 时可顺带改为真 ScopeMemory 后端；crons 视图只读+管理，SPA 无创建路由（qm 由聊天工具侧建），17.0 接调度器后即可全链路
-- [ ] 17.0 【汇合】M3 回归验收 ~1d (ai:0.3d test:0.7d)
+- [x] 17.0 【汇合】M3 回归验收 ~1d (ai:0.3d test:0.7d) — tag `m3` 已打，串行门验收完成
   - [x] 固化 `test:pg` 命令（12.0 遗留）~0.5h
     - 落地：`scripts/run-pg.sh` 一次性 `postgres:16-alpine` 容器（动态端口 + `pg_isready` 就绪等待 + EXIT/INT/TERM trap 强制清理，`KEEP=1` 可留容器调试）+ 根 `pnpm test:pg`；自动补装 workspace 依赖与 vendor 构建（fresh worktree 可直接跑）；`--test-concurrency=1` 串行化测试文件，避免各包 reset 共享 schema 竞态。验证：无 PG 基线 185/175/10 skip 与 lane 记录一致；`test:pg` 239/239 全过 0 skip（含 pg claimSlot 并发串行化、跨包 schema 自举）；容器退出后无残留；typecheck 绿 + rescope-check OK
   - [x] 17.1 对照功能清单逐项回归 ~4h
     - 自动化切片已过（2026-09-13）：`pnpm test:pg` 239/239 全过 0 skip——覆盖 12.0 验收（approve 恢复/reject 终止/双击去重/pg 重启恢复）、13.0（claimSlot 并发串行化、fire log 跨重启、directory 投递可见性门）、14.0（memory/skills pg parity 跨实现收敛）、15.0（roster 跨重启）、16.0（server 半 auth/turn→SSE/live 视图/stubs）；无 PG 基线 185/175/10 与各 lane 记录一致；typecheck 绿 + rescope-check OK；web-ui loopback 冒烟复现 16.0 全链路（boot→静态 index+深链回退→signin/me→turn→done echo→SSE done 帧+心跳→sessions/skills/crons/contexts 真数据→会话转录→SIGTERM 优雅卸载）
     - 真机飞书 e2e 通过（2026-09-13，用户客户端实测 + `.im-e2e.log` 终态文件日志）：①卡片点击——真实卡片送达，Approve→`echo: Approve: e2e-approval`、Reject→`echo: Reject: e2e-approval-1` 回复达线程，重复决定静默去重（途中修复：审批命令按轮次唯一化，requestId=`sessionId:command` 否则同会话第二张卡变僵尸卡；另需控制台开启卡片回调长连接）；②ambient 真频道——未@群聊消息经 judge→ambient turn→回复送达（`origin=ambient reply="echo: 测试 ambient"`；途中修复：飞书 SDK 默认 `requireMention:true` 在 SDK 层丢弃未@消息，channel factory 关闭之，bridge 收归寻址分诊：@/私信→人转、未@有 ambient 策略→judge、无策略→丢弃=旧行为）；③cron fire→真实 IM 投递——auto-arm（首条入站消息的 threadRef 自动发现 chat id，im-bridge 暴露 ambientPolicy 供 boot 后开容器）→一次性 cron fire→`echo: !run e2e cron fire` 送达真实群。新引导：`profiles/im-e2e.yml` + `scripts/boot-im-e2e.ts`（唯一审批命令 + auto-arm + 终态文件日志，10.x 遗留的 pnpm 管道缓冲丢日志已解），runbook `docs/e2e-feishu.md`；接线新增 approvals 关键词 stub judge、im-core containerKind、im-bridge ambient 配置+queue 暴露、TriggersService 调度器挂载（cordis.yml）；最终无 PG 192/182/10 skip 0 fail
-  - [ ] 17.2 【串行门验收】打 tag `m3` ~0.5h
+  - [x] 17.2 【串行门验收】打 tag `m3` ~0.5h — 已打
 
 ### M4 收尾（2026-09-13 拍板：v1 只做飞书，slack/钉钉/企微延期）
 
 - [-] 18.0 【A】`im-slack`：qm `src/slack/` 按契约改造 ~0.5d — **延期不做**（用户拍板 2026-09-13）。当次实现（`@slack/socket-mode` + web-api、诚实寻址 mapper、mrkdwn 管道、Block Kit 审批卡、目录分页同步）已移出包集，完整代码存 git `d7d2db3`，可按 `ImProvider` 契约复活。该车道沉淀的**契约增补保留**：`ImProvider.approvalCardRenderer?`（渲染归 provider，additive）——im-feishu 自带 lark 卡（自 bridge 迁出，M3 遗留清零），bridge 解析链 = 注入覆盖 → provider 自带 → 中性文本兜底（`approvalRequestNotice`）
 - [-] 19.0 【B】`im-dingtalk` Stream 模式起步（可选）~0.5d — **延期**（同上拍板）
 - [-] 20.0 双渠道并存验收 ~2h — **随范围延期**（v1 单渠道飞书；多渠道注册表/投递按 `Destination.type` 认领的机制已由契约保证）
-- [x] 21.0 收尾 ~0.5d (ai:0.3d test:0.2d)（21.3 待用户合并后打 tag）
+- [x] 21.0 收尾 ~0.5d (ai:0.3d test:0.2d) — 全部完成（用户 FF 合并 + tag `v0.1.0` @ `e245b5d`，2026-09-13）
   - [x] 21.1 CI grep 门禁：core services 无 `slack|feishu|lark|wecom|dingtalk` 符号 ~1h — `scripts/check-im-isolation.sh` + `pnpm check:im`：core 服务 src/ 零符号（tests 合法使用平台名做 fixture，不在扫描面）；门禁抓出并移除 web-ui `MeWire.slackWorkspaceUrl` 真实残留耦合（SPA 可选字段优雅降级，app/ 字节级不动）；core 注释措辞中性化
   - [x] 21.2 README/架构文档/CHANGELOG ~2h — README 状态/门禁/组装档表更新；`docs/architecture.md` §5 IM 契约对齐 M2 冻结实貌（InboundEvent/OutboundOperation/ImProvider + 渲染端口）、§7 生命线、§8 组装示例对齐真实 profiles、§12 门禁表；新建 `CHANGELOG.md`（v0.1.0 全里程碑记录 + 范围决策）
-  - [ ] 21.3 最终验收 + tag `v0.1.0` ~0.5h — 待用户：FF 合并本分支后打 tag `v0.1.0`
+  - [x] 21.3 最终验收 + tag `v0.1.0` ~0.5h — 完成：用户 FF 合并后打注释 tag `v0.1.0`，指向 `e245b5d`
 
 ## Time Tracking
 
@@ -180,9 +180,9 @@ tasks-qm-next,qm-next（Cordis 重写 + 飞书 IM）,prd-qm-next,in_progress,~11
 
 ## Completion Checklist
 
-- [ ] 全部任务勾选
-- [ ] M1/M2/M3 串行门验收全过（e2e、真机、功能清单）
-- [ ] 双渠道并存运行
-- [ ] CI 门禁（IM 符号隔离）生效
-- [ ] 文档与 CHANGELOG 更新
-- [ ] 时间实际值回填
+- [x] 全部任务勾选（18.0/19.0/20.0 按范围拍板延期，非遗留）
+- [x] M1/M2/M3 串行门验收全过（e2e、真机、功能清单；tag `m1`/`m2`/`m3`）
+- [-] 双渠道并存运行 — 延期（2026-09-13 拍板：v1 只做飞书，契约已保证多渠道可复活）
+- [x] CI 门禁（IM 符号隔离）生效（`scripts/check-im-isolation.sh` + `pnpm check:im`）
+- [x] 文档与 CHANGELOG 更新（21.2）
+- [ ] 时间实际值回填（可选：Time Tracking「实际」列仍为占位）
