@@ -12,11 +12,26 @@
  * Run from `repos/qm-next/` via `aidevops secret run` so FEISHU_* ride the
  * process environment. `E2E_CRON_CHAT` selects the cron destination chat —
  * without it the boot lists the bot's chats and skips cron registration.
+ * Boot lines also append to `.im-e2e.log` (repo root): pnpm pipes buffer
+ * stdout, so the file is the reliable evidence trail (10.x lesson).
  * Stop with Ctrl-C (or SIGTERM); shutdown unmounts the profile tree.
  */
 import { bootProfile } from '../packages/boot/src/index.ts'
 import { createMockHarness } from '../packages/orchestrator/src/index.ts'
+import { appendFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+
+const LOG_FILE = fileURLToPath(new URL('../.im-e2e.log', import.meta.url))
+
+function log(message: string): void {
+  const line = `${new Date().toISOString()} ${message}`
+  console.log(line)
+  try {
+    appendFileSync(LOG_FILE, `${line}\n`)
+  } catch {
+    // file logging is evidence-only; never block the boot on it
+  }
+}
 
 const ctx = await bootProfile(fileURLToPath(new URL('../profiles/im-e2e.yml', import.meta.url)))
 
@@ -36,17 +51,17 @@ base.turns.runTurn = async (input) => {
 api.orchestrator.deps.harness.register(base)
 
 const { port } = api.address
-console.log(`im-e2e: booted, api 127.0.0.1:${port}, healthz ${(await fetch(`http://127.0.0.1:${port}/healthz`)).status}`)
+log(`im-e2e: booted, api 127.0.0.1:${port}, healthz ${(await fetch(`http://127.0.0.1:${port}/healthz`)).status}`)
 
 const ambientContainers = (process.env.E2E_AMBIENT_CONTAINER ?? '')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean)
 if (ambientContainers.length > 0) {
-  console.log(`im-e2e: ambient ON for ${ambientContainers.join(', ')} (keyword '${process.env.E2E_AMBIENT_KEYWORD ?? '*'}')`)
-  console.log('im-e2e: leg 2 — send a NON-mention message in that chat; expect the bot to reply')
+  log(`im-e2e: ambient ON for ${ambientContainers.join(', ')} (keyword '${process.env.E2E_AMBIENT_KEYWORD ?? '*'}')`)
+  log('im-e2e: leg 2 — send a NON-mention message in that chat; expect the bot to reply')
 } else {
-  console.log('im-e2e: ambient OFF (set E2E_AMBIENT_CONTAINER to enable leg 2)')
+  log('im-e2e: ambient OFF (set E2E_AMBIENT_CONTAINER to enable leg 2)')
 }
 
 const feishu = ctx.im.get('feishu')
@@ -54,9 +69,9 @@ if (feishu?.collectDirectory) {
   try {
     const roster = await feishu.collectDirectory()
     const chats = roster.spaces.filter((s) => s.kind !== 'dm')
-    if (chats.length > 0) console.log('im-e2e: bot chats —', chats.map((s) => `${s.spaceId}${s.name ? ` (${s.name})` : ''}`).join(', '))
+    if (chats.length > 0) log(`im-e2e: bot chats — ${chats.map((s) => `${s.spaceId}${s.name ? ` (${s.name})` : ''}`).join(', ')}`)
   } catch (err) {
-    console.log('im-e2e: chat listing unavailable:', err instanceof Error ? err.message : err)
+    log(`im-e2e: chat listing unavailable: ${err instanceof Error ? err.message : String(err)}`)
   }
 }
 
@@ -73,22 +88,22 @@ if (cronChat) {
     destination: { type: 'feishu', target: cronChat },
     title: everyMs > 0 ? `e2e cron every ${everyMs}ms` : 'e2e one-shot fire',
   })
-  console.log(
+  log(
     everyMs > 0
       ? `im-e2e: leg 3 — cron ${cron.id} fires every ${everyMs}ms into ${cronChat}; expect the echo reply there`
       : `im-e2e: leg 3 — cron ${cron.id} fires once ~${Math.round(delayMs / 1000)}s from now into ${cronChat}; expect the echo reply there`,
   )
 } else {
-  console.log('im-e2e: cron OFF (set E2E_CRON_CHAT to a chat id above to enable leg 3)')
+  log('im-e2e: cron OFF (set E2E_CRON_CHAT to a chat id above to enable leg 3)')
 }
 
-console.log('im-e2e: leg 1 — @机器人 with !approval; expect the card, then click Approve/Reject and watch the follow-up echo')
+log('im-e2e: leg 1 — @机器人 with !approval; expect the card, then click Approve/Reject and watch the follow-up echo')
 
 let stopping = false
 async function shutdown(signal: string): Promise<void> {
   if (stopping) return
   stopping = true
-  console.log(`im-e2e: ${signal} received, unmounting profile tree`)
+  log(`im-e2e: ${signal} received, unmounting profile tree`)
   try {
     await ctx.loader.remove('include')
   } finally {

@@ -5,3 +5,4 @@ dist-web/
 .DS_Store
 .env
 .tmp/
+.im-e2e.log
