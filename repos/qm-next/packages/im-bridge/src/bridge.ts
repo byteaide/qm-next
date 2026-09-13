@@ -1,8 +1,8 @@
 /**
  * The M2 convergence bridge: IM inbound events become run-queue turn
  * submissions, and run terminal states become delivery-queue outbound
- * operations. This is the seam qm solves in `src/api/slack-core-client.ts`
- * and `src/delivery/run-result-delivery.ts`, generalized over the im-core
+ * operations. This is the seam qm solves in its surface-specific core
+ * client and run-result delivery modules, generalized over the im-core
  * contract.
  *
  * M3 scope notes (12.0):

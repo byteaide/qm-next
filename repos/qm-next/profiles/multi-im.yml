@@ -1,0 +1,33 @@
+# qm-next M4 dual-channel profile (20.1): one core running the Feishu and
+# Slack providers side by side over the shared bridge. Feishu credentials
+# come from FEISHU_APP_ID / FEISHU_APP_SECRET (optional
+# FEISHU_VERIFICATION_TOKEN / FEISHU_ENCRYPT_KEY for card callbacks); Slack
+# credentials come from SLACK_APP_TOKEN (xapp-, Socket Mode) and
+# SLACK_BOT_TOKEN (xoxb-). The Slack app needs Socket Mode enabled with the
+# following bot token scopes: chat:write, files:write (attachments),
+# users:read + users:read.email (directory), channels:read, groups:read,
+# im:read, mpim:read (conversations.list), plus the Events API
+# subscriptions app_mention, message.channels, message.groups, message.im,
+# message.mpim, reaction_added, member_joined_channel delivered over
+# Socket Mode, and interactivity ("Block actions") over Socket Mode.
+- id: api
+  name: '@qm/api'
+  config:
+    port: 0
+    secrets: ['dev-m4-dual-secret']
+- id: im-bridge
+  name: '@qm/im-bridge'
+- id: feishu
+  name: '@qm/im-feishu'
+  config:
+    appId: !!js "process.env.FEISHU_APP_ID"
+    appSecret: !!js "process.env.FEISHU_APP_SECRET"
+    instanceId: dual
+    verificationToken: !!js "process.env.FEISHU_VERIFICATION_TOKEN"
+    encryptKey: !!js "process.env.FEISHU_ENCRYPT_KEY"
+- id: slack
+  name: '@qm/im-slack'
+  config:
+    appToken: !!js "process.env.SLACK_APP_TOKEN"
+    botToken: !!js "process.env.SLACK_BOT_TOKEN"
+    instanceId: dual

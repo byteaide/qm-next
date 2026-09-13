@@ -2,7 +2,7 @@
  * Turn orchestration service.
  *
  * Skeleton translation of qm's handleTurn (src/core/orchestrator.ts:401) with
- * every Slack branch and all M3 subsystems stripped: admission (identity,
+ * every surface branch and all M3 subsystems stripped: admission (identity,
  * rate limit, budget), session resolution, entry log, harness dispatch and
  * result mapping. Every turn states its surface explicitly; no default
  * surface exists.

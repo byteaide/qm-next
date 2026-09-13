@@ -111,7 +111,6 @@ interface MeWire {
   user: string
   org: string
   mode: 'dev'
-  slackWorkspaceUrl: string | null
   impersonatedBy: string | null
   permissions: string[]
   individualModelAuth: boolean
@@ -123,7 +122,6 @@ function meWire(user: string, org: string): MeWire {
     user,
     org,
     mode: 'dev',
-    slackWorkspaceUrl: null,
     impersonatedBy: null,
     permissions: ['admin'],
     individualModelAuth: false,

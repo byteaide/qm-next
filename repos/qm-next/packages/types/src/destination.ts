@@ -1,10 +1,10 @@
 /**
  * Delivery destination descriptor.
  *
- * `type` is the surface type (e.g. "feishu", "slack", "web") and is always
+ * `type` is the surface type (an IM provider key, "web", …) and is always
  * explicit — no default surface exists anywhere in the platform. Thread
- * semantics use the surface-neutral `threadId` (replaces qm's Slack-shaped
- * `threadTs`).
+ * semantics use the surface-neutral `threadId` (replaces qm's
+ * platform-shaped `threadTs`).
  */
 import type { ScopeId } from './identity.ts'
 

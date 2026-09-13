@@ -1,6 +1,6 @@
 /**
  * Directory sync: provider → core push of people and space rosters.
- * Generalized from qm's Slack DirectoryPush (members / channels / groups
+ * Generalized from qm's provider directory push (members / channels / groups
  * triple) with platform-neutral naming: people, spaces, space members.
  */
 import type { PrincipalType, ScopeId } from '@qm/types'

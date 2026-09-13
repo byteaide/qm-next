@@ -1,6 +1,6 @@
 /**
  * M2 frozen contract: provider-neutral IM types shared by `im-core` services
- * and every IM provider adapter (`im-feishu`, `im-slack`, …).
+ * and every IM provider adapter (the `im-*` packages).
  *
  * FROZEN at 7.1 (serial gate). Provider adapters program against these types;
  * changes go back through the main session, never inside a parallel lane.
@@ -10,7 +10,7 @@ import type { Destination, IncomingAttachment, OutgoingAttachment } from '@qm/ty
 /** Provider key. Equal to `Destination.type` for all events and operations. */
 export type ImProviderId = string
 
-/** One configured channel instance (e.g. "feishu-prod"). Provider-scoped. */
+/** One configured channel instance (e.g. "prod"). Provider-scoped. */
 export type ImInstanceId = string
 
 /**
@@ -26,13 +26,13 @@ export interface ImBlobs {
 /** Provider-native message identity plus the destination it lives in. */
 export interface MessageRef {
   destination: Destination
-  /** Provider message id (e.g. Slack `ts`, Feishu `message_id`). */
+  /** Provider message id (a platform-native message timestamp or id). */
   messageId: string
 }
 
 /** Sender identity as the provider reports it, before directory resolution. */
 export interface InboundActor {
-  /** Provider-native user id (open_id / Slack user id / …). */
+  /** Provider-native user id. */
   providerUserId: string
   displayName?: string
   /** True when the actor is a bot (including this platform's own bot). */

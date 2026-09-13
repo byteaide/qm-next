@@ -164,6 +164,12 @@ importers:
       '@qm/api':
         specifier: workspace:^
         version: link:../api
+      '@qm/im-feishu':
+        specifier: workspace:^
+        version: link:../im-feishu
+      '@qm/im-slack':
+        specifier: workspace:^
+        version: link:../im-slack
       '@qm/orchestrator':
         specifier: workspace:^
         version: link:../orchestrator

@@ -2,7 +2,7 @@
  * M3 reach contract (15.0, lane-opening freeze): resolve a user-stated
  * target — a recipient (teammate), a channel, or a group's participants —
  * into a `Destination`, with member checks and visibility filtering.
- * De-Slack-ized port of qm's `resolveReachTarget`; the directory slice it
+ * Surface-neutral port of qm's `resolveReachTarget`; the directory slice it
  * needs is structural, so tests can substitute any `DirectoryStore`.
  *
  * OUT of M3: provider write-back — an unknown group resolves to

@@ -1,5 +1,5 @@
 /**
- * Provider port: what an IM adapter (`im-feishu`, `im-slack`, …) implements.
+ * Provider port: what an IM adapter (the `im-*` packages) implements.
  * Inbound flows provider → core via the start context's `emit`; outbound
  * flows core → provider via `outbound` and `format`.
  */
