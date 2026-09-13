@@ -60,6 +60,9 @@ test('mapper: message fixture replays to InboundMessageEvent with dedup id, thre
   assert.deepEqual(event.actor, { providerUserId: 'ou_user1', displayName: 'Alice' })
   assert.equal(event.mentionedBot, true)
   assert.equal(event.threadId, 'omt_root1')
+  assert.equal(event.containerKind, 'channel', 'group chats map to the channel container kind')
+  const dm = await mapper.message(messageFixture({ chatType: 'p2p' }))
+  assert.equal(dm.containerKind, 'dm', 'p2p chats map to the dm container kind')
 })
 
 test('mapper: without raw event_id the fallback id is stable per message+time', async () => {

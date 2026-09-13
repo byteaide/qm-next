@@ -36,6 +36,13 @@ export interface InboundMessageEvent extends InboundEnvelope {
   replyToMessageId?: string
   /** True when the message @-mentions the receiving bot. */
   mentionedBot?: boolean
+  /**
+   * Container kind when the provider knows it: a direct message or a
+   * group/channel. Absent keeps legacy providers fully addressed — core
+   * ambient gating only redirects unaddressed chatter when the kind is
+   * known and an ambient policy covers the container.
+   */
+  containerKind?: 'dm' | 'channel'
 }
 
 /** An interactive-card action (button click, menu select, …). */

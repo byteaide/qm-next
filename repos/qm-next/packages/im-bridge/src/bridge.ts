@@ -14,20 +14,27 @@
  *   recovery means configuring the Postgres store.
  * - Card rendering stays provider-side (`OutboundBody.card` is opaque);
  *   `approvalCards` swaps the built-in default renderer.
- * - Ambient: when an `AmbientService` is provided, non-mention messages are
- *   offered to it after the human turn is submitted (policy default off).
+ * - Ambient: when ambient ingredients are provided, unaddressed group
+ *   chatter (no mention, known `channel` container kind) in a
+ *   policy-enabled container is offered to the judge instead of submitting
+ *   a human turn; an engaging verdict replies over the same delivery
+ *   path. Mentions and DMs always submit human turns. Without the
+ *   ingredients every message submits a human turn (M2 behavior).
  * - Refused turns deliver a short notice; qm's run-result delivery drops
  *   refusals. On a chat surface silence reads as breakage, so the bridge
  *   answers.
  */
 import {
   APPROVAL_VALUE_KIND,
+  createAmbientService,
   createMemoryApprovalStore,
   parseApprovalValue,
+  type AmbientJudge,
+  type AmbientService,
   type ApprovalActionValue,
   type ApprovalCardRenderer,
   type ApprovalStore,
-  type AmbientService,
+  type ChannelPolicyStore,
 } from '@qm/approvals'
 import type {
   ImDeliveryEnqueueInput,
@@ -72,6 +79,17 @@ export interface ImTurnBridgeLoopOptions {
   backoffMs?: number
 }
 
+/**
+ * Ambient ingredients: the container policy plus the engagement judge.
+ * The bridge builds the `AmbientService` internally so the ambient
+ * submit seam enqueues through the same route-recording turn path as
+ * human turns — ambient replies deliver like any other reply.
+ */
+export interface ImTurnBridgeAmbient {
+  policy: ChannelPolicyStore
+  judge: AmbientJudge
+}
+
 export interface ImTurnBridgeOptions {
   /** Principal type assigned to IM actors (directory mapping is M3). */
   actorType?: PrincipalType
@@ -83,8 +101,8 @@ export interface ImTurnBridgeOptions {
   approvalStore?: ApprovalStore
   /** Approval card renderer; defaults to the built-in Feishu-shaped card. */
   approvalCards?: ApprovalCardRenderer
-  /** Ambient minimal slice; absent means ambient is fully inert. */
-  ambient?: AmbientService
+  /** Ambient ingredients; absent means ambient is fully inert. */
+  ambient?: ImTurnBridgeAmbient
   loop?: ImTurnBridgeLoopOptions
 }
 
@@ -202,6 +220,38 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
     }
   }
 
+  /**
+   * Ambient service built from the injected ingredients. Constructed
+   * after `enqueueTurn` is in scope so ambient submissions ride the same
+   * turn + route-recording path; never throws to the inbound loop.
+   */
+  const ambient: AmbientService | undefined = options.ambient
+    ? createAmbientService({
+        policy: options.ambient.policy,
+        judge: options.ambient.judge,
+        submit: (input, route) => enqueueTurn(input, route),
+        ...(options.actorType ? { actorType: options.actorType } : {}),
+        logger,
+      })
+    : undefined
+
+  /**
+   * True when this message is unaddressed group chatter covered by an
+   * enabled ambient policy: no mention, known `channel` container kind,
+   * and the container policy on. Those messages go to the judge instead
+   * of submitting a human turn; mentions, DMs and legacy events without
+   * a container kind always take the human path. Callers pass an ambient
+   * service in — false without one.
+   */
+  async function isAmbientOnly(event: InboundMessageEvent): Promise<boolean> {
+    if (!options.ambient) return false
+    if (event.mentionedBot) return false
+    if (event.containerKind !== 'channel') return false
+    const container = `${event.provider}:${event.destination.target}`
+    const policy = await options.ambient.policy.get(container)
+    return policy?.ambientEnabled === true
+  }
+
   async function submitInteraction(event: InboundInteractionEvent): Promise<void> {
     const value = parseApprovalValue(event.action.value)
     if (!value) {
@@ -249,7 +299,10 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
   const sink: ImInboundSink = async (events) => {
     for (const event of events) {
       if (event.kind === 'message') {
-        if (options.ambient) void options.ambient.observe(event)
+        if (ambient && (await isAmbientOnly(event))) {
+          void ambient.observe(event)
+          continue
+        }
         await submitMessage(event)
       } else if (event.kind === 'interaction') await submitInteraction(event)
       else logger.debug(`im-bridge: ${event.kind} event ${event.eventId} observed; no bridge action`)

@@ -35,6 +35,9 @@ importers:
       '@qm/reach':
         specifier: workspace:*
         version: link:packages/reach
+      '@qm/triggers':
+        specifier: workspace:*
+        version: link:packages/triggers
       '@qm/web-ui':
         specifier: workspace:*
         version: link:packages/web-ui
@@ -277,12 +280,24 @@ importers:
 
   packages/triggers:
     dependencies:
+      '@qm/api':
+        specifier: workspace:^
+        version: link:../api
+      '@qm/cordis':
+        specifier: workspace:^
+        version: link:../../vendor/cordis
       '@qm/directory':
         specifier: workspace:^
         version: link:../directory
+      '@qm/im-bridge':
+        specifier: workspace:^
+        version: link:../im-bridge
       '@qm/im-core':
         specifier: workspace:^
         version: link:../im-core
+      '@qm/schemastery':
+        specifier: workspace:^
+        version: link:../../vendor/schemastery
       '@qm/store':
         specifier: workspace:^
         version: link:../store

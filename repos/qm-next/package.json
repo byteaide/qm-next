@@ -24,6 +24,7 @@
     "@qm/im-bridge": "workspace:*",
     "@qm/im-feishu": "workspace:*",
     "@qm/reach": "workspace:*",
+    "@qm/triggers": "workspace:*",
     "@qm/web-ui": "workspace:*",
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",

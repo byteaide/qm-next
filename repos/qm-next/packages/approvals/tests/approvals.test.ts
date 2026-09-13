@@ -12,6 +12,7 @@ import type { Destination, Principal, TurnInput } from '@qm/types'
 import {
   APPROVAL_VALUE_KIND,
   createAmbientService,
+  createKeywordAmbientJudge,
   createMemoryApprovalStore,
   createMemoryChannelPolicyStore,
   createNoopAmbientJudge,
@@ -347,4 +348,22 @@ test('the default judge port is a no-op', async () => {
     occurredAt: 0,
   })
   assert.deepEqual(verdict, { engage: false })
+})
+
+test('the keyword stub judge engages on case-insensitive matches and star, verbatim text', async () => {
+  const judge = createKeywordAmbientJudge('Deploy')
+  const candidate = {
+    provider: 'feishu',
+    destination: DESTINATION,
+    actor: { providerUserId: 'u9' },
+    text: 'anyone knows the DEPLOY window?',
+    occurredAt: 0,
+  }
+  const hit = await judge.consider(candidate)
+  assert.deepEqual(hit, { engage: true }, 'case-insensitive keyword match engages with the text untouched')
+  assert.equal((await judge.consider({ ...candidate, text: 'lunch anyone?' })).engage, false)
+  const star = createKeywordAmbientJudge('*')
+  assert.deepEqual(await star.consider({ ...candidate, text: 'anything at all' }), { engage: true })
+  assert.equal(createKeywordAmbientJudge('  ').consider === undefined, false)
+  assert.equal((await createKeywordAmbientJudge('   ').consider(candidate)).engage, false, 'blank keyword never engages')
 })

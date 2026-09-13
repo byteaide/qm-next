@@ -3,11 +3,21 @@
  * with this bridge as the inbound sink, plus the memory delivery queue and
  * claim loop. Turn storage comes from the ApiService composition root via
  * injection; production deployments swap each piece independently.
+ *
+ * Ambient (M3 minimal slice): `ambientContainers` + `ambientKeyword`
+ * build a memory channel policy and the keyword stub judge. Both must be
+ * provided for ambient to activate — containers without a judge stay
+ * fully inert so a half-configured deployment cannot silence the bot.
  */
 import { Service, type Context } from '@qm/cordis'
+import {
+  createKeywordAmbientJudge,
+  createMemoryChannelPolicyStore,
+} from '@qm/approvals'
+import type { ImDeliveryQueue } from '@qm/im-core'
 import { ImRegistryService } from '@qm/im-core/runtime'
 import Schema from '@qm/schemastery'
-import { createImTurnBridge, type ImTurnBridge, type ImTurnBridgeLoopOptions } from './bridge.ts'
+import { createImTurnBridge, type ImTurnBridge, type ImTurnBridgeLoopOptions, type ImTurnBridgeOptions } from './bridge.ts'
 
 export interface ImBridgeConfig {
   /** Principal type assigned to IM actors. */
@@ -24,6 +34,10 @@ export interface ImBridgeConfig {
   maxAttempts?: number
   /** Base backoff for failed deliveries in ms. */
   backoffMs?: number
+  /** Containers (`provider:target`) with ambient enabled at boot. */
+  ambientContainers?: string[]
+  /** Stub judge keyword (`*` engages all); required with ambientContainers. */
+  ambientKeyword?: string
 }
 
 export const Config = Schema.object({
@@ -34,6 +48,8 @@ export const Config = Schema.object({
   maxPerClaim: Schema.number().default(10).description('Maximum deliveries per claim'),
   maxAttempts: Schema.number().default(5).description('Give up a delivery after this many attempts'),
   backoffMs: Schema.number().default(1_000).description('Base backoff for failed deliveries in ms'),
+  ambientContainers: Schema.array(Schema.string()).default([]).description('Containers (provider:target) with ambient enabled'),
+  ambientKeyword: Schema.string().description('Ambient stub judge keyword; * engages all'),
 })
 
 export class ImTurnBridgeService extends Service<ImBridgeConfig> {
@@ -42,6 +58,9 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
   static inject = ['api']
 
   private bridge: ImTurnBridge | undefined
+
+  /** The delivery queue the bridge drains; cron/trigger deliveries share it. */
+  queue!: ImDeliveryQueue
 
   constructor(ctx: Context, public config: ImBridgeConfig) {
     super(ctx, 'im-bridge')
@@ -54,6 +73,17 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
       ...(this.config.maxPerClaim !== undefined ? { maxPerClaim: this.config.maxPerClaim } : {}),
       ...(this.config.maxAttempts !== undefined ? { maxAttempts: this.config.maxAttempts } : {}),
       ...(this.config.backoffMs !== undefined ? { backoffMs: this.config.backoffMs } : {}),
+    }
+    const containers = this.config.ambientContainers ?? []
+    let ambient: ImTurnBridgeOptions['ambient'] | undefined
+    if (containers.length > 0 && this.config.ambientKeyword) {
+      const policy = createMemoryChannelPolicyStore()
+      for (const container of containers) await policy.setAmbient(container, true)
+      ambient = { policy, judge: createKeywordAmbientJudge(this.config.ambientKeyword) }
+    } else if (containers.length > 0) {
+      this.ctx.logger.warn('im-bridge: ambientContainers set without ambientKeyword — ambient stays inert')
+    } else if (this.config.ambientKeyword) {
+      this.ctx.logger.warn('im-bridge: ambientKeyword set without ambientContainers — ambient stays inert')
     }
     const registry = new ImRegistryService(this.ctx, {
       onEvent: (events) => (this.bridge ? this.bridge.sink(events) : Promise.resolve()),
@@ -68,9 +98,11 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
       {
         ...(this.config.actorType ? { actorType: this.config.actorType } : {}),
         ...(this.config.replyAs ? { replyAs: this.config.replyAs } : {}),
+        ...(ambient ? { ambient } : {}),
         loop,
       },
     )
+    this.queue = this.bridge.queue
     await this.bridge.start()
     return async () => {
       await this.bridge?.stop()

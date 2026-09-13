@@ -17,6 +17,7 @@ export {
 export type {
   ImReplyRoute,
   ImTurnBridge,
+  ImTurnBridgeAmbient,
   ImTurnBridgeDeps,
   ImTurnBridgeLoopOptions,
   ImTurnBridgeOptions,

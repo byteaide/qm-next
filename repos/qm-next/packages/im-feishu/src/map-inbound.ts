@@ -78,6 +78,7 @@ export function createInboundMapper(config: FeishuProviderConfig, deps: InboundM
       ...(msg.threadId ? { threadId: msg.threadId } : {}),
       ...(msg.replyToMessageId ? { replyToMessageId: msg.replyToMessageId } : {}),
       mentionedBot: msg.mentionedBot,
+      containerKind: msg.chatType === 'p2p' ? 'dm' : 'channel',
     }
   }
 

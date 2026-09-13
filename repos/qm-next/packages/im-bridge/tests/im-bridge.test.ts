@@ -7,13 +7,13 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Context } from '@qm/cordis'
 import { createTurnRunner } from '@qm/api'
-import { createMemoryApprovalStore } from '@qm/approvals'
+import { createMemoryApprovalStore, createMemoryChannelPolicyStore, type AmbientJudge } from '@qm/approvals'
 import type { ImCapabilities, ImProvider, ImProviderStartContext, InboundInteractionEvent, InboundMessageEvent, OutboundOperation, SendOperation } from '@qm/im-core'
 import { createImRegistry } from '@qm/im-core/runtime'
 import { createHarnessRouter, createMockHarness, OrchestratorService, type MockTurnStep } from '@qm/orchestrator'
 import { createMemoryRunStore, createMemorySessionStore } from '@qm/store'
 import type { IdentityService, ResolutionService } from '@qm/types'
-import { APPROVAL_VALUE_KIND, approvalRequestCard, createImTurnBridge, parseApprovalValue, type ApprovalActionValue, type ImTurnBridge } from '../src/index.ts'
+import { APPROVAL_VALUE_KIND, approvalRequestCard, createImTurnBridge, parseApprovalValue, type ApprovalActionValue, type ImTurnBridge, type ImTurnBridgeAmbient } from '../src/index.ts'
 
 function devResolution(): ResolutionService {
   return {
@@ -121,7 +121,14 @@ interface Harness {
   dispose(): Promise<void>
 }
 
-async function setup(opts: { script?: MockTurnStep[]; actorType?: 'internal' | 'guest' } = {}): Promise<Harness> {
+async function setup(
+  opts: {
+    script?: MockTurnStep[]
+    actorType?: 'internal' | 'guest'
+    /** Ambient ingredients: containers preloaded into a memory policy. */
+    ambient?: { containers: string[]; judge: AmbientJudge }
+  } = {},
+): Promise<Harness> {
   const sessions = createMemorySessionStore()
   const runs = createMemoryRunStore()
   const harnessRouter = createHarnessRouter({ defaultId: 'mock' })
@@ -141,11 +148,18 @@ async function setup(opts: { script?: MockTurnStep[]; actorType?: 'internal' | '
   let bridge: ImTurnBridge | undefined
   const registry = createImRegistry({ onEvent: (events) => (bridge ? bridge.sink(events) : Promise.resolve()) })
   const approvalStore = createMemoryApprovalStore()
+  let ambient: ImTurnBridgeAmbient | undefined
+  if (opts.ambient) {
+    const policy = createMemoryChannelPolicyStore()
+    for (const container of opts.ambient.containers) await policy.setAmbient(container, true)
+    ambient = { policy, judge: opts.ambient.judge }
+  }
   bridge = createImTurnBridge(
     { runs, sessions, resolution: devResolution(), im: registry },
     {
       ...(opts.actorType ? { actorType: opts.actorType } : {}),
       approvalStore,
+      ...(ambient ? { ambient } : {}),
     },
   )
   await bridge.start()
@@ -181,6 +195,69 @@ test('inbound message submits a run and the terminal reply is delivered in-threa
     assert.equal(run.request.surface, 'feishu')
     assert.equal(run.request.actor.id, 'feishu:u1')
     assert.equal(run.request.conversation.threadRef, 'feishu:oc_chat1:om_thread1')
+  } finally {
+    await t.dispose()
+  }
+})
+
+test('ambient: unaddressed channel chatter in an enabled container goes to the judge, not a human turn', async () => {
+  const judged: string[] = []
+  const judge: AmbientJudge = {
+    consider: async (candidate) => {
+      judged.push(candidate.text)
+      return { engage: true }
+    },
+  }
+  const t = await setup({ ambient: { containers: ['feishu:oc_chat1'], judge } })
+  try {
+    await t.cells.ctx!.emit(messageEvent({ eventId: 'amb-1', mentionedBot: false, containerKind: 'channel' }))
+    assert.ok(await waitFor(() => t.sent.length === 1), 'expected the ambient reply delivery')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.deepEqual(judged, ['hello bot'], 'the judge saw exactly the overheard text')
+    const all = await t.runs.list()
+    assert.equal(all.length, 1, 'no human turn — the only run is the ambient turn')
+    const run = all[0]
+    assert.ok(run)
+    assert.deepEqual(run.request.origin, { kind: 'ambient' })
+    assert.equal(run.request.conversation.threadRef, 'feishu:oc_chat1:om_thread1')
+    const op = t.sent[0] as SendOperation
+    assert.deepEqual(op.body, { markdown: 'echo: hello bot' }, 'the ambient reply delivers like any reply')
+    assert.equal(op.threadId, 'om_thread1', 'ambient replies stay in the overheard thread')
+  } finally {
+    await t.dispose()
+  }
+})
+
+test('ambient: mentioned and dm messages keep the human path even in an enabled container', async () => {
+  const judge: AmbientJudge = {
+    consider: async () => {
+      throw new Error('judge must not be consulted for addressed messages')
+    },
+  }
+  const t = await setup({ ambient: { containers: ['feishu:oc_chat1'], judge } })
+  try {
+    await t.cells.ctx!.emit(messageEvent({ eventId: 'm-1', mentionedBot: true, containerKind: 'channel' }))
+    assert.ok(await waitFor(() => t.sent.length === 1), 'expected the mention echo')
+    await t.cells.ctx!.emit(messageEvent({ eventId: 'm-2', mentionedBot: false, containerKind: 'dm' }))
+    assert.ok(await waitFor(() => t.sent.length === 2), 'expected the dm echo')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.equal((await t.runs.list()).length, 2, 'two human turns, zero ambient turns')
+  } finally {
+    await t.dispose()
+  }
+})
+
+test('ambient: chatter outside enabled containers keeps the human path', async () => {
+  const judge: AmbientJudge = {
+    consider: async () => {
+      throw new Error('judge must not be consulted outside enabled containers')
+    },
+  }
+  const t = await setup({ ambient: { containers: ['feishu:oc_other'], judge } })
+  try {
+    await t.cells.ctx!.emit(messageEvent({ eventId: 'm-3', mentionedBot: false, containerKind: 'channel' }))
+    assert.ok(await waitFor(() => t.sent.length === 1), 'expected the plain echo')
+    assert.equal((await t.runs.list()).length, 1)
   } finally {
     await t.dispose()
   }

@@ -6,6 +6,7 @@
 import type { InboundMessageEvent, ImLogger } from '@qm/im-core'
 import type { Conversation, Principal, TurnInput } from '@qm/types'
 import type {
+  AmbientJudge,
   AmbientRoute,
   AmbientService,
   AmbientServiceOptions,
@@ -80,5 +81,24 @@ export function createMemoryChannelPolicyStore(): ChannelPolicyStore {
       return policy
     },
     async close() {},
+  }
+}
+
+/**
+ * Deterministic stub judge for smokes and the real-device e2e: engages
+ * when the overheard text contains `keyword` (case-insensitive); the
+ * literal `*` engages everything. The verdict text is the observed
+ * message verbatim — the turn pipeline answers overheard chatter with
+ * whatever the harness/model makes of the original text. qm's model
+ * judge replaces this stub when it lands.
+ */
+export function createKeywordAmbientJudge(keyword: string): AmbientJudge {
+  const needle = keyword.trim().toLowerCase()
+  return {
+    async consider(candidate) {
+      if (!needle) return { engage: false }
+      if (needle !== '*' && !candidate.text.toLowerCase().includes(needle)) return { engage: false }
+      return { engage: true }
+    },
   }
 }

@@ -1,0 +1,35 @@
+# qm-next 17.1 real-machine e2e profile: the full M3 stack over one
+# Feishu connection — HTTP API + bridge (ambient wiring) + cron/triggers
+# runtime + Feishu WS provider. Credentials and e2e targets come from the
+# environment (boot via `aidevops secret run` so FEISHU_* ride along):
+#
+#   FEISHU_APP_ID / FEISHU_APP_SECRET   required (open-platform app, long connection)
+#   FEISHU_VERIFICATION_TOKEN / FEISHU_ENCRYPT_KEY  optional (card callbacks)
+#   E2E_AMBIENT_CONTAINER   comma-separated containers (provider:chatId) with ambient on
+#   E2E_AMBIENT_KEYWORD     stub judge keyword; '*' engages all unaddressed chatter
+#   E2E_CRON_CHAT           chat id the e2e cron delivers to (set by the boot script)
+#
+# The Feishu app must receive card callbacks over the long connection
+# (open-platform console) for the approval-card leg.
+- id: api
+  name: '@qm/api'
+  config:
+    port: 0
+    secrets: ['dev-m3-e2e-secret']
+- id: im-bridge
+  name: '@qm/im-bridge'
+  config:
+    ambientContainers: !!js "process.env.E2E_AMBIENT_CONTAINER ? process.env.E2E_AMBIENT_CONTAINER.split(',').map((s) => s.trim()).filter(Boolean) : []"
+    ambientKeyword: !!js "process.env.E2E_AMBIENT_KEYWORD || '*'"
+- id: triggers
+  name: '@qm/triggers'
+  config:
+    intervalMs: 1000
+- id: feishu
+  name: '@qm/im-feishu'
+  config:
+    appId: !!js "process.env.FEISHU_APP_ID"
+    appSecret: !!js "process.env.FEISHU_APP_SECRET"
+    instanceId: e2e
+    verificationToken: !!js "process.env.FEISHU_VERIFICATION_TOKEN"
+    encryptKey: !!js "process.env.FEISHU_ENCRYPT_KEY"
