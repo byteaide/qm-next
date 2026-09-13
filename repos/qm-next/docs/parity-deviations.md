@@ -276,3 +276,14 @@ Each entry names the qm source shape, the qm-next shape, and why.
     identity-gated 404 (identity service lands with the control plane), and
     audit events (`principal.*`, `skill_pack.*`…) defer to the 12.0 audit
     sinks.
+
+41. **Keychain routes ride the qm-next Keychain with lane-A gaps** — the 11
+    routes map 1:1 onto `createKeychain` (save/list/overview/delete, grant
+    create/use/revoke, ask create/list/decline, use script as text/plain,
+    `KeychainError` → `{error:"keychain"}` + own status). Deferred to later
+    lanes: overview `usage`/`scopeNames` are empty until the
+    credential-usage + scope-name sources land (12.0); the ask-owner notice
+    enqueue rides the im-bridge wiring (13.0); the own-use `liveActor` gate
+    and the triggered-turn 403 need real capability tokens (12.0/14.0).
+    `config.keychain` backs the routes with memory maps in lane A;
+    production swaps Postgres maps without touching the routes.

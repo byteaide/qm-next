@@ -83,7 +83,7 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
 ### P3 API 面与控制台（1 串行门 + 2 并行 + 汇合，~5d）
 
 - [x] 10.0 【串行门】API 契约冻结 ~1.5d（2026-09-14 实际 ~0.5d fresh-session 完成：`docs/parity-api-contract.md` 479 行，26 文件/27 路由组、~242 条全部登记——qm `src/api/routes/` 实测 surface 47+2match、admin 58、deployments 13+3、turns 12、keychain 11 等；每条 method/path/auth + 请求/响应形状 + 兼容级别，全部「兼容」（0 子集/0 重设计）；形状从 handler 提取、大文件定向读取；qm-next 已有等价实现的（runs signal、session-state SSE）已标注）
-- [ ] 11.0 【A】`packages/api` routes 落地 ~2d：admin/auth-broker/blobs/connectors/context(-policy)/credentials/crons/deployments/directory/egress-audit/environments/keychain/projects/reach/search/secret-drop/session-state/skill-packs/surface(-cache)/user-model-auth/webhooks/emoji（进行中 2026-09-14：路由框架 RouteAuth→signed bearer + directory 5 条 + reach 1 条 + crons 8 条（M3 store 范围，capability-only 字段 400+偏差记录）已落地，66 测试全绿；next: keychain → surface conversations/sessions → 其余模块）
+- [ ] 11.0 【A】`packages/api` routes 落地 ~2d：admin/auth-broker/blobs/connectors/context(-policy)/credentials/crons/deployments/directory/egress-audit/environments/keychain/projects/reach/search/secret-drop/session-state/skill-packs/surface(-cache)/user-model-auth/webhooks/emoji（进行中 2026-09-14：框架 + directory 5 + reach 1 + crons 8 + keychain 11 已落地（tranche 1/2，偏差 #37-41），89 测试全绿；next: surface conversations/sessions → search/context/surface-cache → 其余模块）
 - [ ] 12.0 【B】admin + auth + portal ~2d：admin 服务 + PG sinks（metrics/error-log/audit-log/credential-usage/egress-audit/invite-email）+ plugins/admin UI 平移；capability-token/aws-role-broker/replay-dedupe；plugins/portal SSO
 - [ ] 13.0 【汇合】web-ui stub 后端化 ~1d：files/webhooks/connectors/keychain/search/memory/user-model-auth/deploy 视图接真 store；playground 启用；绑定/鉴权硬化；admin UI 冒烟；打 tag `p3`
 

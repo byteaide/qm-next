@@ -7,6 +7,7 @@
  */
 import { Context, Service } from '@qm/cordis'
 import { createMemoryDirectoryStore } from '@qm/directory'
+import { createKeychain, deriveConnectorKey } from '@qm/credentials'
 import { createClaudeHarness } from '@qm/harness-claude'
 import { createCodexHarness } from '@qm/harness-codex'
 import { createOpenCodeHarness } from '@qm/harness-opencode'
@@ -17,6 +18,7 @@ import { createHarnessRouter, createMockHarness, createSandboxToolContext, Orche
 import Schema from '@qm/schemastery'
 import { createLocalSandbox } from '@qm/sandbox'
 import { createMemoryRunEventBus, createMemoryRunStore, createMemorySessionStore } from '@qm/store'
+import { createMemoryMap } from '@qm/store'
 import { reachDirectory } from '@qm/reach'
 import type { CronScheduler, CronStore } from '@qm/triggers'
 import type {
@@ -77,6 +79,11 @@ export interface ApiConfig {
   scopeId?: ScopeId
   /** Directory sync surface (11.0): in-memory store behind the directory + reach routes. */
   directory?: boolean
+  /**
+   * Keychain surface (11.0): agent keychain behind the /v1/keychain routes.
+   * Lane A backs it with memory maps; production swaps Postgres maps in.
+   */
+  keychain?: boolean
 }
 
 export const Config = Schema.object({
@@ -110,6 +117,7 @@ export const Config = Schema.object({
   systemPrompt: Schema.string().default('You are qm-next.').description('Dev default system prompt'),
   scopeId: Schema.string().default('org:default').description('Dev default scope for API turns'),
   directory: Schema.boolean().description('Directory sync surface (11.0): in-memory store behind the directory + reach routes'),
+  keychain: Schema.boolean().description('Keychain surface (11.0): agent keychain behind the /v1/keychain routes'),
 })
 
 function devIdentity(): IdentityService {
@@ -291,6 +299,15 @@ export class ApiService extends Service<ApiConfig> {
     // routes always register and 404 per request until the triggers plugin
     // injects its runtime into `cronsRuntime`.
     const directoryStore = this.config.directory ? createMemoryDirectoryStore() : undefined
+    const keychain = this.config.keychain
+      ? createKeychain({
+          creds: createMemoryMap(),
+          grants: createMemoryMap(),
+          asks: createMemoryMap(),
+          key: deriveConnectorKey(this.config.secrets[0]!),
+          orgId: () => (this.config.scopeId ?? 'org:default').replace(/^org:/, ''),
+        })
+      : undefined
     const app = createApiServer(
       {
         orchestrator,
@@ -298,6 +315,7 @@ export class ApiService extends Service<ApiConfig> {
         runs,
         resolution,
         ...(directoryStore ? { directory: { directory: directoryStore }, reach: { directory: directoryStore } } : {}),
+        ...(keychain ? { keychain: { keychain: () => keychain, scopeFor: (actorId) => `personal:${actorId}` } } : {}),
         crons: {
           crons: () => this.cronsRuntime?.crons,
           scheduler: () => this.cronsRuntime?.scheduler,

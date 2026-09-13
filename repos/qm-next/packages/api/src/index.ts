@@ -8,3 +8,4 @@ export { registerRouteTable, sendJson, type ApiRouteContext, type Route, type Ro
 export { directoryRoutes, type DirectoryRoutesDeps, type DirectoryMeta } from './routes/directory-routes.ts'
 export { cronRoutes, type CronRoutesDeps } from './routes/cron-routes.ts'
 export { reachRoutes, type ReachRoutesDeps } from './routes/reach-routes.ts'
+export { keychainRoutes, type KeychainRoutesDeps } from './routes/keychain-routes.ts'
