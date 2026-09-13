@@ -247,7 +247,7 @@ test('ambient: mentioned and dm messages keep the human path even in an enabled 
   }
 })
 
-test('ambient: chatter outside enabled containers keeps the human path', async () => {
+test('ambient: unaddressed chatter outside enabled containers is dropped, not echoed', async () => {
   const judge: AmbientJudge = {
     consider: async () => {
       throw new Error('judge must not be consulted outside enabled containers')
@@ -256,8 +256,24 @@ test('ambient: chatter outside enabled containers keeps the human path', async (
   const t = await setup({ ambient: { containers: ['feishu:oc_other'], judge } })
   try {
     await t.cells.ctx!.emit(messageEvent({ eventId: 'm-3', mentionedBot: false, containerKind: 'channel' }))
-    assert.ok(await waitFor(() => t.sent.length === 1), 'expected the plain echo')
-    assert.equal((await t.runs.list()).length, 1)
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    assert.equal(t.sent.length, 0, 'no delivery — unaddressed chatter without policy is dropped')
+    assert.equal((await t.runs.list()).length, 0, 'no run — unaddressed chatter without policy is dropped')
+  } finally {
+    await t.dispose()
+  }
+})
+
+test('mentions and DMs submit human turns even without ambient ingredients', async () => {
+  const t = await setup()
+  try {
+    await t.cells.ctx!.emit(messageEvent({ eventId: 'm-4', mentionedBot: true, containerKind: 'channel' }))
+    assert.ok(await waitFor(() => t.sent.length === 1), 'mention echo delivered')
+    await t.cells.ctx!.emit(messageEvent({ eventId: 'm-5', mentionedBot: false, containerKind: 'dm' }))
+    assert.ok(await waitFor(() => t.sent.length === 2), 'dm echo delivered')
+    await t.cells.ctx!.emit(messageEvent({ eventId: 'm-6', mentionedBot: false, containerKind: 'channel' }))
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    assert.equal((await t.runs.list()).length, 2, 'unaddressed group chatter submits nothing without ambient')
   } finally {
     await t.dispose()
   }

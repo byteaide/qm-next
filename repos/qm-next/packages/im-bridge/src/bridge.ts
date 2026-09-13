@@ -16,10 +16,12 @@
  *   `approvalCards` swaps the built-in default renderer.
  * - Ambient: when ambient ingredients are provided, unaddressed group
  *   chatter (no mention, known `channel` container kind) in a
- *   policy-enabled container is offered to the judge instead of submitting
- *   a human turn; an engaging verdict replies over the same delivery
- *   path. Mentions and DMs always submit human turns. Without the
- *   ingredients every message submits a human turn (M2 behavior).
+ *   policy-enabled container is offered to the judge instead of
+ *   submitting a human turn; an engaging verdict replies over the same
+ *   delivery path. Mentions and DMs always submit human turns.
+ *   Unaddressed chatter without a covering ambient policy is dropped —
+ *   providers that filter it SDK-side keep identical behavior, and
+ *   providers that deliver everything no longer echo every group message.
  * - Refused turns deliver a short notice; qm's run-result delivery drops
  *   refusals. On a chat surface silence reads as breakage, so the bridge
  *   answers.
@@ -236,20 +238,19 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
     : undefined
 
   /**
-   * True when this message is unaddressed group chatter covered by an
-   * enabled ambient policy: no mention, known `channel` container kind,
-   * and the container policy on. Those messages go to the judge instead
-   * of submitting a human turn; mentions, DMs and legacy events without
-   * a container kind always take the human path. Callers pass an ambient
-   * service in — false without one.
+   * Addressing policy for one message: mentions and DMs (plus legacy
+   * events without a container kind) are human turns; unaddressed group
+   * chatter goes to the judge when an ambient policy covers the
+   * container and is dropped otherwise — matching the pre-ambient
+   * behavior where the provider never delivered such chatter at all.
    */
-  async function isAmbientOnly(event: InboundMessageEvent): Promise<boolean> {
-    if (!options.ambient) return false
-    if (event.mentionedBot) return false
-    if (event.containerKind !== 'channel') return false
+  async function classifyMessage(event: InboundMessageEvent): Promise<'human' | 'ambient' | 'ignore'> {
+    if (event.mentionedBot) return 'human'
+    if (event.containerKind !== 'channel') return 'human'
+    if (!options.ambient) return 'ignore'
     const container = `${event.provider}:${event.destination.target}`
     const policy = await options.ambient.policy.get(container)
-    return policy?.ambientEnabled === true
+    return policy?.ambientEnabled === true ? 'ambient' : 'ignore'
   }
 
   async function submitInteraction(event: InboundInteractionEvent): Promise<void> {
@@ -299,11 +300,14 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
   const sink: ImInboundSink = async (events) => {
     for (const event of events) {
       if (event.kind === 'message') {
-        if (ambient && (await isAmbientOnly(event))) {
+        const route = await classifyMessage(event)
+        if (route === 'ambient' && ambient) {
           void ambient.observe(event)
-          continue
+        } else if (route === 'ignore') {
+          logger.debug(`im-bridge: unaddressed chatter ${event.eventId} in ${event.provider}:${event.destination.target}; no ambient policy — dropped`)
+        } else {
+          await submitMessage(event)
         }
-        await submitMessage(event)
       } else if (event.kind === 'interaction') await submitInteraction(event)
       else logger.debug(`im-bridge: ${event.kind} event ${event.eventId} observed; no bridge action`)
     }

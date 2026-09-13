@@ -45,6 +45,11 @@ function defaultChannelFactory(config: FeishuProviderConfig): FeishuChannelLike 
     appSecret: config.appSecret,
     domain: LARK_BASE_URLS[config.domain ?? 'feishu'],
     transport: 'websocket',
+    // SDK-level group admission defaults to requireMention:true, which
+    // drops un-@mentioned chatter before it reaches the core — ambient
+    // needs those events. Core owns addressing: the bridge routes
+    // mentions/DMs to human turns and ambient candidates to the judge.
+    policy: { requireMention: false },
     ...(config.verificationToken || config.encryptKey
       ? { webhook: { ...(config.verificationToken ? { verificationToken: config.verificationToken } : {}), ...(config.encryptKey ? { encryptKey: config.encryptKey } : {}) } }
       : {}),
