@@ -6,7 +6,7 @@ import type {
   SandboxHandle,
 } from '@qm/types'
 import { swallowAs } from './util.ts'
-import { makeTar, parseTar } from './tar.ts'
+import { makeTar, parseTar } from '@qm/credentials'
 
 export function posixJoin(base: string, rel: string): string {
   const clean = rel.replace(/^\/+/, '')

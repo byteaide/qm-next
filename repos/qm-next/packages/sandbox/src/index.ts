@@ -1,4 +1,4 @@
-export * from './tar.ts'
+export { makeTar, parseTar } from '@qm/credentials'
 export * from './docker-exec.ts'
 export * from './exec-kill.ts'
 export * from './sandbox-env.ts'

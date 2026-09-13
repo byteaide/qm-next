@@ -116,3 +116,18 @@ Each entry names the qm source shape, the qm-next shape, and why.
     the harness package is a later lane, so the model package carries a local
     copy with identical semantics (base64url payload, `chatgpt_account_id`
     under the `https://api.openai.com/auth` claim).
+
+## Lane A4 (2026-09-13, local implementation)
+
+21. **tar codec homed in `@qm/credentials`** — device-flow credential
+    capture parses the sandbox tar inside the credentials package; moving
+    the codec down from `@qm/sandbox` keeps the dependency direction
+    (sandbox → credentials) acyclic. `@qm/sandbox` re-exports
+    `makeTar`/`parseTar` so its public shape is unchanged.
+
+22. **secret-drop and codex-device-login deferred with their consumers** —
+    qm's `secret-drop.ts` (and its test) is unreadable under the local
+    source-access guard, and its only consumers are P3 control-plane routes
+    (api, wiring, capability tokens); `codex-device-login.ts` drives the
+    Codex app-server, which lands with the harness lane (3.2). Both port
+    together with those consumers.

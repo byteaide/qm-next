@@ -56,7 +56,7 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
   - [x] 1.2 `pnpm install` 开并行 ~0.5h（worktree + canonical 均可装；lockfile 未动）
 - [ ] 2.0 【A】credentials + model ~1.5d（2026-09-13 主会话本地执行：子代理配额耗尽）
   - [x] 2.1 `packages/credentials`：keychain/secret-source/harness-auth-env/connector-token（memory+PG 双实现，PG 强制生产） ~4h（keychain 全量 + DurableMap 落 @qm/store；12 测试过）
-  - [ ] 2.2 secret-drop/device-flow/resident-auth 按引用跟进 ~3h（resident-paths/renderUseScript 已随 2.1 落地；resident-auth/device-flow/secret-drop 待跟进）
+  - [x] 2.2 secret-drop/device-flow/resident-auth 按引用跟进 ~3h（resident-auth/device-flow-persist/device-flow-cutover 落地 6 测试过；tar 编解码下移 @qm/credentials——deviations #21-22；secret-drop 随 P3 控制面、codex-device-login 随 3.2 harness 落地）
   - [x] 2.3 `packages/model` 核心：pi-models/catalog-gateway/provider-endpoints/custom-providers ~4h（11 测试过）
   - [x] 2.5 【A 余量】model-catalog + custom-provider-store + model-credential-store + user-model-credential-store + subscription-oauth ~4h（7 测试过；claude token 端点参数注入——deviations #19-20）
   - [ ] 2.4 parity 对拍测试（对照 qm `test/postgres-*` 相关用例形状） ~2h（契约测试已写；PG 对拍待容器轮次）

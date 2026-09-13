@@ -13,7 +13,7 @@ import {
   redactCommand,
   type DockerExec,
 } from '../src/index.ts'
-import { parseTar } from '../src/tar.ts'
+import { parseTar } from '../src/index.ts'
 
 const LIST_ID = 'a1b2c3d4-e5f6-7890-abcd-ef0123456789'
 

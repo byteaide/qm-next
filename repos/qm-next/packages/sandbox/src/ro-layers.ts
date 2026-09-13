@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import type { SandboxHandle, WorkspaceLayer } from '@qm/types'
 import { shq } from '@qm/credentials'
 import { swallow } from './util.ts'
-import { makeTar } from './tar.ts'
+import { makeTar } from '@qm/credentials'
 
 export interface RoLayerNames {
   manifest: string

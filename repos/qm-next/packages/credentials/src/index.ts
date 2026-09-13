@@ -16,3 +16,7 @@ export {
   renderUseScript,
 } from './keychain.ts'
 export { createCredentialResolver } from './resolver.ts'
+export { makeTar, parseTar } from './tar.ts'
+export * from './resident-auth.ts'
+export * from './device-flow-persist.ts'
+export * from './device-flow-cutover.ts'
