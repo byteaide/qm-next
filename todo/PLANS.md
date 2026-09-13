@@ -109,6 +109,7 @@ v0.1.0 只覆盖 qm 最核心的 ~11%（15k/133k 行 TS）。本计划把 qm-nex
 - 2026-09-13 P1 契约冻结落地：`@qm/types` 增 model/credentials/sandbox/tools 四文件；session-store 增 tape+LLM 记录组（memory+PG 同步实现）；`check:im` 逼出 surface-search/webhook-scheme 平台中性化；偏差全部记 `repos/qm-next/docs/parity-deviations.md`（10 条）
 - 2026-09-13 ToolContext 定为类型级全量冻结、运行时分阶段：P1 只实现 sandbox 支撑的 execute/read/write/computer，P4 域成员随子系统激活；`ToolContextDeps` 留待 4.1 profile 组装契约
 - 2026-09-13 P2 汇合：harness-router 配置化忠实移植 qm 阶梯（approved 缺省只认 fallback；requested 越权抛 NonRetryableTurnError）；run-signal 契约上移 `@qm/types`，startSignalPoll 移 `@qm/runs`，harness-pi 兼容 re-export；NonRetryableTurnError 上移 `@qm/types` 保 instanceof 单一身份（偏差 #29-36）
+- 2026-09-14 P3 开工前实测：qm routes 27 模块/~242 条路由（surface 43+、admin 58 为大头），API 车道估时上调（10.0 契约冻结 0.5d→1.5d，11.0 相应加压）；canonical main 同步确认为用户侧 `git merge --ff-only` 协议（reflog 全程 tiger.w Fast-forward 记录）
 
 #### Surprises & Discoveries
 
