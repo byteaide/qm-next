@@ -4,7 +4,7 @@ Based on [ai-dev-tasks](https://github.com/snarktank/ai-dev-tasks) task format, 
 
 **PRD:** [prd-qm-parity.md](prd-qm-parity.md)
 **Created:** 2026-09-13
-**Status:** In Progress（P1 串行门已过：契约冻结完成，车道 A/B 可开）
+**Status:** In Progress（P1、P2 已过串行门：tag `p1`/`p2`；P3 API 面未开）
 **Estimate:** ~23d ai 总工作量；双车道并行墙钟 ~3-4 周 (ai:~20d test:~3d)
 
 <!--TOON:tasks_meta{id,feature,prd,status,est,est_ai,est_test,est_read,logged,started,completed}:
@@ -46,6 +46,7 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
 - v0.1.0 tasks 12-16 的 OUT 项清单是 P4 回填 checklist 的直接来源（见 `tasks-qm-next.md`）。
 - 1.1 冻结记录：新增 `@qm/types` 的 model/credentials/sandbox/tools 四个契约文件；harness 增 tools/tape/goal/compaction/每轮 auth 挂钩；session-store 增 tape + LLM request 记录组（memory+PG 双实现同步落地）；偏差 10 条记 `repos/qm-next/docs/parity-deviations.md`（含 check:im 逼出的 surface-search/webhook-scheme 平台中性化）。门禁：typecheck/test/test:pg(容器)/check:im/rescope-check 全绿。
 - 车道 A1/A2（2026-09-13，worktree `aa-feature-auto-20260913-155602`）：子代理派发因 token plan 配额耗尽失败，转主会话本地实现。A1 credentials 核心提交 `18abcc6`（keychain 全量 + secret-cipher + DurableMap→@qm/store + resolver）；A2 model 核心随后（pi-models/provider-endpoints/custom-providers/gateway）。pi-coding-agent tgz 因 github.com 不可达暂缓（3.2 的前置）。deviations 增：orgId 注入、secret-source 从用面重建（原文件被 source-access guard 拦截）、manifest 渲染件随 P4 延后。
+- P2 车道 A/B/C/A2（2026-09-13，同 worktree，主会话本地串行执行）：三引擎 + runs 四个 commit（`9f22a03`/`0935d9d`/`a2e9d4f`/`924f2ca`）+ 汇合 commit。引擎大文件采用"复制 + 导入面改造 + prettier 风格归一"保字节保真；exactOptionalPropertyTypes 逼出条件展开/常量提升等风格适配。汇合的路由阶梯完整保留 qm 语义（approved 缺省只认 fallback、requested 越权即 NonRetryable）。冒烟凭据缺口见 deviations #36。
 
 ## Tasks
 
@@ -73,11 +74,11 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
 
 ### P2 多引擎 + runs 深化（3 并行 + 汇合，~4d）
 
-- [ ] 5.0 【A】claude-harness ~1d（967L；依赖 `@anthropic-ai/claude-agent-sdk` 0.3.211）
-- [ ] 6.0 【B】codex-harness ~1.5d（1415L + app-server 325L + auth 3 件；依赖 `@openai/codex` 0.144.5）
-- [ ] 7.0 【C】opencode-harness ~1.5d（1188L + plugin；依赖 `opencode-ai` 1.17.18）
-- [ ] 8.0 【A2】runs 深化 ~1.5d（与 5.0 同车道错峰）：worker/reaper/drain/task-protection/session-state-bus/run-activity-store/run-signal-store/instance-registry/turn-stream（memory+PG 双实现）
-- [ ] 9.0 【汇合】harness-router 配置化（per-surface/per-model）+ 四引擎真任务冒烟 + `test:pg` 全绿；打 tag `p2` ~1d
+- [x] 5.0 【A】claude-harness ~1d（967L；依赖 `@anthropic-ai/claude-agent-sdk` 0.3.211）（2026-09-13 完成，worktree `aa-feature-auto-20260913-155602`，commit `9f22a03`：claude-harness 967L 忠实平移入 `packages/harness-claude`，共享件全部走 `@qm/harness-pi`；mock 对拍 9 测试过；偏差 #29-31）
+- [x] 6.0 【B】codex-harness ~1.5d（1415L + app-server 325L + auth 3 件；依赖 `@openai/codex` 0.144.5）（2026-09-13 完成，commit `0935d9d`：harness + app-server + auth 三件整族平移入 `packages/harness-codex`，OAuth 集中刷新/子进程派生 auth/红字脱敏语义保持；mock 对拍 18 测试过；偏差 #32）
+- [x] 7.0 【C】opencode-harness ~1.5d（1188L + plugin；依赖 `opencode-ai` 1.17.18）（2026-09-13 完成，commit `a2e9d4f`：sidecar harness + HTTP 工具桥 + plugin 平移入 `packages/harness-opencode`，bridge secret/代理头/自定义 provider 注入保持；对拍 5 测试过）
+- [x] 8.0 【A2】runs 深化 ~1.5d（与 5.0 同车道错峰）：worker/reaper/drain/task-protection/session-state-bus/run-activity-store/run-signal-store/instance-registry/turn-stream（memory+PG 双实现）（2026-09-13 完成，commit `924f2ca`：新包 `packages/runs`；run-signal 契约上移 `@qm/types`、startSignalPoll 移入 runs、harness-pi 兼容 re-export（偏差 #33-35）；内存 14 测试 + PG16 跳过式 4 用例）
+- [x] 9.0 【汇合】harness-router 配置化（per-surface/per-model）+ 四引擎真任务冒烟 + `test:pg` 全绿；打 tag `p2` ~1d（2026-09-13：`RuntimeRouteConfig`（approved/default/per-scope）+ 注册表级 `resolveChoice`（qm 阶梯忠实移植 + 切换重置记账），orchestrator 消费、api 组合根 `engines`/`harnessRoutes` 配置并注册四引擎；路由 3 测试 + api 多引擎 11 测试过；typecheck/test/check:im/rescope-check/test:pg（PG16 容器 104✔/0✖）全绿；四引擎真任务冒烟：pi 已于 P1 4.2 实证，claude/codex/opencode 本会话无 provider 凭据，按 #36 跳过式待 key；tag `p2`）
 
 ### P3 API 面与控制台（1 串行门 + 2 并行 + 汇合，~5d）
 

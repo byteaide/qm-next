@@ -53,7 +53,7 @@ AI search:
 
 ### p002: qm-parity — qm-next 全功能对齐（qm 全功能替身）
 
-**Status:** In Progress (Phase P1/5)；Open Questions 5 项均不阻塞 P1（引擎优先级/长尾确认/迁移目标库/多渠道/退役时间表分别在 P2/P4/P5 拍板）
+**Status:** In Progress (Phase P2/5)；Open Questions 5 项均不阻塞 P1/P2（引擎优先级已按 P2 全量注册落地/长尾确认/迁移目标库/多渠道/退役时间表分别在 P4/P5 拍板）
 **Owner:** @wxd
 **Tags:** #qm-parity #qm-next #parity
 **Estimate:** ~23d (ai:20d test:3d read:2h)；双车道并行墙钟 ~3-4 周
@@ -94,8 +94,8 @@ v0.1.0 只覆盖 qm 最核心的 ~11%（15k/133k 行 TS）。本计划把 qm-nex
 
 #### Progress
 
-- [ ] (2026-09-13) Phase P1 真引擎回路：契约冻结 →【A credentials+model ‖ B pi-harness+sandbox】→ 汇合真任务对拍 ~5d（1.0 串行门已过：`@qm/types` 四契约 + tape/LLM 记录组 + OrchestratorDeps.modelGateway，全门禁绿）
-- [ ] Phase P2 多引擎 + runs：claude ‖ codex ‖ opencode ‖ runs 深化 → router 配置化 ~4d
+- [ ] (2026-09-13) Phase P1 真引擎回路：契约冻结 →【A credentials+model ‖ B pi-harness+sandbox】→ 汇合真任务对拍 ~5d（1.0 串行门已过：`@qm/types` 四契约 + tape/LLM 记录组 + OrchestratorDeps.modelGateway，全门禁绿）（2026-09-13 完成：tag `p1`）
+- [x] Phase P2 多引擎 + runs：claude ‖ codex ‖ opencode ‖ runs 深化 → router 配置化 ~4d（2026-09-13 单日完成：commits `9f22a03`/`0935d9d`/`a2e9d4f`/`924f2ca` + 汇合；四引擎注册可切换、runs memory+PG；test:pg 104✔/0✖；tag `p2`；claude/codex/opencode 真任务冒烟凭据待补——deviations #36）
 - [ ] Phase P3 API 面与控制台：routes 契约 →【A api ‖ B admin/auth/portal】→ web-ui 后端化 ~5d
 - [ ] Phase P4 长尾 + 回填：IM 域 ‖ memory/skills/reach 完整化 ‖ 长尾子系统 → OUT 项对账 ~5d
 - [ ] Phase P5 多渠道 + 迁移 + 切换：slack 复活 ‖ dingtalk/wecom → 迁移器 → 双跑演练 + tag v1.0.0 ~4d
@@ -108,6 +108,7 @@ v0.1.0 只覆盖 qm 最核心的 ~11%（15k/133k 行 TS）。本计划把 qm-nex
 - 2026-09-13 durable-by-default 沿 qm 铁律：生产路径 PG 强制，内存实现仅测试
 - 2026-09-13 P1 契约冻结落地：`@qm/types` 增 model/credentials/sandbox/tools 四文件；session-store 增 tape+LLM 记录组（memory+PG 同步实现）；`check:im` 逼出 surface-search/webhook-scheme 平台中性化；偏差全部记 `repos/qm-next/docs/parity-deviations.md`（10 条）
 - 2026-09-13 ToolContext 定为类型级全量冻结、运行时分阶段：P1 只实现 sandbox 支撑的 execute/read/write/computer，P4 域成员随子系统激活；`ToolContextDeps` 留待 4.1 profile 组装契约
+- 2026-09-13 P2 汇合：harness-router 配置化忠实移植 qm 阶梯（approved 缺省只认 fallback；requested 越权抛 NonRetryableTurnError）；run-signal 契约上移 `@qm/types`，startSignalPoll 移 `@qm/runs`，harness-pi 兼容 re-export；NonRetryableTurnError 上移 `@qm/types` 保 instanceof 单一身份（偏差 #29-36）
 
 #### Surprises & Discoveries
 
