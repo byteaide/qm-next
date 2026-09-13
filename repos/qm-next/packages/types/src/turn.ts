@@ -65,3 +65,10 @@ export interface TurnResult {
   sourceUserSeq?: number
   sourceAssistantEntrySeq?: number
 }
+
+export class NonRetryableTurnError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'NonRetryableTurnError'
+  }
+}

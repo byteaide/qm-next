@@ -14,6 +14,7 @@
     "@earendil-works/pi-ai": "0.82.0",
     "@qm/model": "workspace:^",
     "@qm/pi-coding-agent": "workspace:^",
+    "@qm/runs": "workspace:^",
     "@qm/types": "workspace:^",
     "typebox": "1.1.38"
   }

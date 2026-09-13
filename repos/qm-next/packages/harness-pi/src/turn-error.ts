@@ -1,6 +1,1 @@
-export class NonRetryableTurnError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'NonRetryableTurnError'
-  }
-}
+export { NonRetryableTurnError } from '@qm/types'

@@ -1,0 +1,20 @@
+{
+  "name": "@qm/runs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "run execution depth: worker pool, reaper, drain/task-protection, session-state bus, run activity, run signals, instance registry, turn stream",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@qm/store": "workspace:^",
+    "@qm/types": "workspace:^",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0"
+  }
+}
