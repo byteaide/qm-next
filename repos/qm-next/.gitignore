@@ -6,3 +6,4 @@ dist-web/
 .env
 .tmp/
 .im-e2e.log
+.sandbox-build/

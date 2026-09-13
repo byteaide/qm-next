@@ -405,3 +405,37 @@ test('run events: deltas, progress and terminal status publish for runId turns o
   await orch.handleTurn(turnInput())
   assert.equal(bus.replay('run-1').length, 4)
 })
+
+test('tool context: the factory result rides the harness turn; null opts out', async () => {
+  const seen: Array<unknown> = []
+  const captureHarness = {
+    profile: { id: 'capture', label: 'capture', capabilities: {} },
+    turns: {
+      runTurn: async (input: { tools?: unknown }) => {
+        seen.push(input.tools)
+        return { reply: 'captured' }
+      },
+    },
+  } as unknown as Harness
+  const registry = createHarnessRouter({ defaultId: 'capture' })
+  registry.register(captureHarness)
+  const ctx = { execute: async () => ({ code: 0, stdout: '', stderr: '', timedOut: false }) }
+  const scopedTool: OrchestratorDeps['tools'] = ({ sessionId }) => (sessionId === 'sess-1' ? (ctx as never) : null)
+  const orch = boot(buildDeps({ harness: registry, tools: scopedTool }))
+  const result = await orch.handleTurn(turnInput())
+  assert.equal(result.status, 'ok')
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0], ctx)
+
+  const otherScope = await orch.handleTurn(
+    turnInput({ conversation: { kind: 'dm', threadRef: 'thread:2', audience: [{ id: 'user-1', type: 'internal' }] } }),
+  )
+  assert.equal(otherScope.status, 'ok')
+  assert.equal(seen.length, 2)
+  assert.equal(seen[1], undefined)
+
+  const bare = boot(buildDeps({ harness: registry }))
+  await bare.handleTurn(turnInput())
+  assert.equal(seen.length, 3)
+  assert.equal(seen[2], undefined)
+})

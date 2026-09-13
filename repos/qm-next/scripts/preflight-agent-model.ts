@@ -47,6 +47,10 @@ const fiber = await ctx.plugin(ApiService, {
     },
   ],
   customProviderKeys: { [PROVIDER_ID]: apiKey },
+  sandbox: {
+    defaultTimeoutSec: 120,
+    defaultTimeoutCeilingSec: 600,
+  },
 })
 
 try {

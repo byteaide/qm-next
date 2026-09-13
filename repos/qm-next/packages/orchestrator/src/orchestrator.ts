@@ -92,6 +92,7 @@ export class OrchestratorService extends Service implements Orchestrator {
         scopeLabel: scopeId,
       })
       const emitted: SessionEntry[] = []
+      const tools = deps.tools ? await deps.tools({ scopeId, sessionId: session.id }) : undefined
       const result = await harness.turns.runTurn({
         session,
         ...(input.runId ? { runId: input.runId } : {}),
@@ -103,6 +104,7 @@ export class OrchestratorService extends Service implements Orchestrator {
         ...(input.harness ? { harness: input.harness } : {}),
         ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
         ...(input.readOnly ? { readOnly: true } : {}),
+        ...(tools ? { tools } : {}),
         systemPrompt: resolution.systemPrompt,
         history,
         emit: async (entry) => {

@@ -67,8 +67,8 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
   - [ ] 3.4 真模型单测（跳过式：有 key 才跑）+ mock 对拍 ~3h（mock 对拍 21 测试过：output-guard/detect/title/tape/replay/goal/pi-tools 只读与审批流；真模型跳过式待 key）
 - [ ] 4.0 【汇合】真任务验收 ~1d
   - [x] 4.1 profile 组装：im-feishu → orchestrator → pi-harness → model → credentials 全链 ~2h（api 组合根 `defaultHarness: 'pi'` 注册真引擎并接 modelGateway；profiles/im-agent.yml + scripts/boot-im-agent.ts；boot 测试覆盖 agent stanza 环境插值 boot）
-  - [ ] 4.2 飞书 @机器人真实编码任务 vs qm 同任务对拍（结果/耗时/流式） ~2h（模型侧就绪：SenseNova OpenAI 兼容 provider 已配置并真模型验证 glm-5.2 PONG 1.1s；前置缺口见 4.2a）
-  - [ ] 4.2a 【汇合暴露】per-turn ToolContext 装配：orchestrator 不构造 turn.tools（pi-harness ref.current=null → 全部工具报 no active tool context；文本回路不受影响）。对齐 qm core/orchestrator.ts:1836 createToolContext——P1 最小面 = sandbox 装配进 api 组合根 + execute/computerStatus/restartComputer（harness-pi 测试已证明该最小面可用），memory/publish/mcp 置空 ~4h
+  - [ ] 4.2 飞书 @机器人真实编码任务 vs qm 同任务对拍（结果/耗时/流式） ~2h（模型侧就绪：SenseNova OpenAI 兼容 provider 已配置并真模型验证 glm-5.2 PONG 1.1s；工具侧就绪：4.2a 完成，沙箱真机验证 execute/echo 与 write+execute 编码任务 fib(10)=55）
+  - [x] 4.2a 【汇合暴露】per-turn ToolContext 装配（2026-09-13 完成）：orchestrator deps.tools 工厂 → runTurn({tools})；createSandboxToolContext（orchestrator 包）实现 execute/read/write/computerStatus/restartComputer/background*（process sessions），memory/publish/mcp/cron/webhook/soul 按契约优雅不可用；api 组合根 sandbox 配置 → LocalSandbox + per-scope handle 缓存 + dispose teardown(destroy)；镜像链 fly/Dockerfile（轻量子集：node24+git/gh/aws/venv）+ local/Dockerfile + agent.mjs（91 行 daemon）+ pnpm sandbox:local:build（宿主侧下载注入，容器网络不通 github）；真机验证 glm-5.2 execute echo 3.4s / fib(10)=55 10.5s；坑：schemastery 嵌套 object 未传归一化 {}（truthy）→ 须运行时守卫 Object.keys().length；偏差 #26-28 已记档 ~4h 实际
   - [ ] 4.3 `test:pg` 基线扩充 + 全绿；【串行门验收】打 tag `p1` ~2h（PG16 全套 exit 0 实证：stores/keychain 等 7 包 PG 门用例实跑；tag 待 4.2 通过）
 
 ### P2 多引擎 + runs 深化（3 并行 + 汇合，~4d）

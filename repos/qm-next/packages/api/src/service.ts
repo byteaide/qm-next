@@ -8,16 +8,20 @@
 import { Context, Service } from '@qm/cordis'
 import { createPiHarness } from '@qm/harness-pi'
 import { createModelGateway, setCustomProviders, validateCustomProviderSpec, type CustomProviderSpec } from '@qm/model'
-import { createHarnessRouter, createMockHarness, OrchestratorService } from '@qm/orchestrator'
+import { createHarnessRouter, createMockHarness, createSandboxToolContext, OrchestratorService } from '@qm/orchestrator'
 import Schema from '@qm/schemastery'
+import { createLocalSandbox } from '@qm/sandbox'
 import { createMemoryRunEventBus, createMemoryRunStore, createMemorySessionStore } from '@qm/store'
 import type {
   Harness,
   IdentityService,
+  OrchestratorDeps,
   RateLimiter,
   ResolutionService,
   RunEventBus,
   RunStore,
+  Sandbox,
+  SandboxHandle,
   ScopeId,
   SessionStore,
 } from '@qm/types'
@@ -45,6 +49,17 @@ export interface ApiConfig {
   customProviders?: CustomProviderSpec[]
   /** Keys for custom providers, by provider id. */
   customProviderKeys?: Record<string, string>
+  /** Sandbox-backed tool execution; presence gives every turn a ToolContext (docker local backend). */
+  sandbox?: {
+    image?: string
+    dockerBin?: string
+    cpus?: number
+    memoryMb?: number
+    /** Per-command exec timeout in seconds (ceiling-capped). */
+    defaultTimeoutSec?: number
+    /** Hard ceiling for per-command exec timeouts in seconds. */
+    defaultTimeoutCeilingSec?: number
+  }
   /** Dev default system prompt. */
   systemPrompt?: string
   /** Dev default scope for API turns. */
@@ -60,6 +75,14 @@ export const Config = Schema.object({
   modelId: Schema.string().description('pi base model id (a model registry entry)'),
   customProviders: Schema.array(Schema.any()).description('Custom model providers (OpenAI/Anthropic-compatible); specs validated at boot'),
   customProviderKeys: Schema.dict(Schema.string()).description('Keys for custom providers, by provider id'),
+  sandbox: Schema.object({
+    image: Schema.string().description('Docker image for the local sandbox (default qm-sandbox-local:latest)'),
+    dockerBin: Schema.string().description('Docker binary path override'),
+    cpus: Schema.number().description('CPU cores per sandbox container'),
+    memoryMb: Schema.number().description('Memory cap (MB) per sandbox container'),
+    defaultTimeoutSec: Schema.number().description('Per-command exec timeout in seconds'),
+    defaultTimeoutCeilingSec: Schema.number().description('Hard ceiling for per-command exec timeouts in seconds'),
+  }).description('Sandbox-backed tool execution; set any field (e.g. defaultTimeoutSec) to give every turn a ToolContext'),
   anthropicApiKey: Schema.string().description('Anthropic key for the pi harness'),
   openaiApiKey: Schema.string().description('OpenAI key for the pi harness'),
   openrouterApiKey: Schema.string().description('OpenRouter key for the pi harness'),
@@ -105,6 +128,9 @@ export class ApiService extends Service<ApiConfig> {
   /** The orchestrator driving every turn. */
   orchestrator!: OrchestratorService
 
+  /** Sandbox backend when tool execution is configured; torn down on dispose. */
+  sandbox?: Sandbox
+
   /** Run event stream (deltas/progress/status); the SSE surface reads this. */
   runEvents!: RunEventBus
 
@@ -145,6 +171,36 @@ export class ApiService extends Service<ApiConfig> {
       registry.register(engine)
     }
     const resolution = devResolution(this.config)
+    let toolFactory: OrchestratorDeps['tools'] | undefined
+    const sandboxHandles = new Map<ScopeId, SandboxHandle>()
+    const sandboxConfig = this.config.sandbox
+    if (sandboxConfig && Object.keys(sandboxConfig).length > 0) {
+      const sc = sandboxConfig
+      const sandbox = createLocalSandbox({
+        ...(sc.image ? { image: sc.image } : {}),
+        ...(sc.dockerBin ? { dockerBin: sc.dockerBin } : {}),
+        ...(sc.cpus !== undefined ? { cpus: sc.cpus } : {}),
+        ...(sc.memoryMb !== undefined ? { memoryMb: sc.memoryMb } : {}),
+        ...(sc.defaultTimeoutSec !== undefined ? { defaultTimeoutSec: sc.defaultTimeoutSec } : {}),
+      })
+      this.sandbox = sandbox
+      toolFactory = async ({ scopeId }) => {
+        let handle = sandboxHandles.get(scopeId)
+        if (!handle) {
+          handle = await sandbox.provision([{ scopeId, mountPath: 'global', mode: 'rw' }])
+          sandboxHandles.set(scopeId, handle)
+        }
+        return createSandboxToolContext({
+          sandbox,
+          handle,
+          scopeId,
+          ...(sc.defaultTimeoutSec !== undefined ? { execTimeoutMs: sc.defaultTimeoutSec * 1000 } : {}),
+          ...(sc.defaultTimeoutCeilingSec !== undefined
+            ? { execTimeoutCeilingMs: sc.defaultTimeoutCeilingSec * 1000 }
+            : {}),
+        })
+      }
+    }
     const orchestrator = new OrchestratorService(this.ctx, {
       sessions,
       runs,
@@ -154,6 +210,7 @@ export class ApiService extends Service<ApiConfig> {
       rateLimiter: allowLimiter(),
       runEvents,
       modelGateway,
+      ...(toolFactory ? { tools: toolFactory } : {}),
     })
     this.runs = runs
     this.sessions = sessions
@@ -176,6 +233,16 @@ export class ApiService extends Service<ApiConfig> {
         await engine?.turns.close?.()
       } catch {
         void 0
+      }
+      if (this.sandbox) {
+        for (const handle of sandboxHandles.values()) {
+          try {
+            await this.sandbox.teardown(handle, { destroy: true })
+          } catch (err) {
+            void err
+          }
+        }
+        sandboxHandles.clear()
       }
     }
   }

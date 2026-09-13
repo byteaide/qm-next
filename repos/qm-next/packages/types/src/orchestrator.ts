@@ -14,6 +14,7 @@ import type { BudgetTracker, RateLimiter } from './ratelimit.ts'
 import type { RunEventBus } from './run-events.ts'
 import type { RunStore } from './run.ts'
 import type { SessionStore } from './session-store.ts'
+import type { ToolContext } from './tools.ts'
 import type { TurnInput, TurnResult } from './turn.ts'
 
 export interface IdentityService {
@@ -43,6 +44,12 @@ export interface OrchestratorDeps {
   runEvents?: RunEventBus
   /** Optional model usage recorder (P1): powers recordModelCall and admin sinks. */
   modelGateway?: ModelGateway
+  /**
+   * Optional per-turn tool context factory (P1 4.2a): when present, the
+   * returned ToolContext rides the harness turn so tools execute; when it
+   * returns null (or the factory is absent) the turn runs without tools.
+   */
+  tools?: (input: { scopeId: ScopeId; sessionId: string }) => ToolContext | null | Promise<ToolContext | null>
 }
 
 export interface Orchestrator {

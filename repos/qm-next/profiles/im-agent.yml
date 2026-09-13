@@ -40,6 +40,9 @@
             name: SenseNova 6.8 Flash Lite
     customProviderKeys:
       sensenova: !!js "process.env.SENSENOVA_API_KEY"
+    sandbox:
+      defaultTimeoutSec: 120
+      defaultTimeoutCeilingSec: 600
     anthropicApiKey: !!js "process.env.ANTHROPIC_API_KEY"
     openaiApiKey: !!js "process.env.OPENAI_API_KEY"
     openrouterApiKey: !!js "process.env.OPENROUTER_API_KEY"

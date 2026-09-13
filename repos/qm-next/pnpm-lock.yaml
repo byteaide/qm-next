@@ -65,6 +65,9 @@ importers:
       '@qm/orchestrator':
         specifier: workspace:^
         version: link:../orchestrator
+      '@qm/sandbox':
+        specifier: workspace:^
+        version: link:../sandbox
       '@qm/schemastery':
         specifier: workspace:^
         version: link:../../vendor/schemastery

@@ -13,6 +13,7 @@
     "test:pg": "bash scripts/run-pg.sh",
     "check:im": "bash scripts/check-im-isolation.sh",
     "rescope-check": "bash scripts/rescope-check.sh",
+    "sandbox:local:build": "bash scripts/local-sandbox-build.sh",
     "typecheck": "tsc -b vendor/cosmokit vendor/schemastery vendor/cordis vendor/loader vendor/include vendor/timer && tsc -b tsconfig.json"
   },
   "devDependencies": {

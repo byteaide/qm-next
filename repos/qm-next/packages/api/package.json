@@ -14,6 +14,7 @@
     "@qm/harness-pi": "workspace:^",
     "@qm/model": "workspace:^",
     "@qm/orchestrator": "workspace:^",
+    "@qm/sandbox": "workspace:^",
     "@qm/schemastery": "workspace:^",
     "@qm/store": "workspace:^",
     "@qm/types": "workspace:^",

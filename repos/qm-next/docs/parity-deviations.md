@@ -158,3 +158,33 @@ Each entry names the qm source shape, the qm-next shape, and why.
     orchestrator's audience plumbing, so `tape-fold` ports the fold/lint/heal
     core only; `RunSignal` drops the `request` field until the runs lane
     (P2 8.0) ports `TurnRequest` consumers. Both land with their consumers.
+
+## Tool context assembly / 4.2a (2026-09-13)
+
+26. **P1 ToolContext is sandbox-core only; M3 surfaces answer their
+    graceful-unavailable values** — qm's `createToolContext`
+    (src/tools/primitives.ts, 1,233 lines) wires ledger caching, command
+    policy/approvals, control plane, reach, skills, memory, publishing and
+    surface delivery. The P1 port (`packages/orchestrator/src/tool-context.ts`)
+    implements execute/read/write/computer status and background process
+    sessions over the Sandbox port; memory returns null, history empty,
+    crons/webhooks/soul `control_unavailable`, publish/playground/MCP/sharing
+    throw honest errors, surface delivery refuses. No command policy yet:
+    execute runs everything the internal actor asks (the admission gate is
+    internal-only identity); the approval pipe exists (harness) but nothing
+    throws NeedsApproval until the policy lane.
+
+27. **Local sandbox image is a P1 subset, unpinned** — qm builds
+    `qm-sandbox-local` from `fly/Dockerfile` (claude-code, codex, gh, aws CLI,
+    browser engine, digest-pinned bases) plus `local/Dockerfile`
+    (microvm-agent). qm-next ports the same two-stage shape and the identical
+    91-line agent daemon, but the base image drops claude/codex/browser,
+    keeps gh + aws CLI + python venv to match the advertised profile spec,
+    uses unpinned base tags (digest pins return with the image-supply lane),
+    and defaults `LOCAL_SANDBOX_PLATFORM` to the host arch (qm pins
+    linux/amd64 for Fly). `scripts/local-sandbox-build.sh` keeps the
+    fingerprint label so staleness warnings work.
+
+28. **No per-turn tool ledger** — qm caches tool results per (run, attempt,
+    call index) through a ledger store; P1 executes every call live (no
+    replay dedupe). The `once()` seam lands with the runs/replay lane.
