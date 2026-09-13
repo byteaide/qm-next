@@ -204,3 +204,46 @@ test('ApiService: defaultHarness pi registers the real engine beside mock; expli
   assert.equal(((await res.json()) as TurnResult).reply, 'echo: hi mock')
   await fiber.dispose()
 })
+
+test('ApiService: custom providers register into the model registry before the pi harness boots', async () => {
+  const ctx = new Context()
+  const fiber = await ctx.plugin(ApiService, {
+    secrets: [SECRET],
+    port: 0,
+    defaultHarness: 'pi',
+    customProviders: [
+      {
+        id: 'acme',
+        name: 'Acme AI',
+        protocol: 'openai',
+        baseUrl: 'https://api.acme.dev/v1',
+        models: [{ id: 'acme-large', name: 'Acme Large', contextWindow: 200_000 }],
+      },
+    ],
+    customProviderKeys: { acme: 'k-acme' },
+  })
+  try {
+    const { resolveModel, isCustomModelId } = await import('@qm/model')
+    assert.equal(isCustomModelId('acme-large'), true)
+    assert.equal(resolveModel('acme-large')?.provider, 'acme')
+    assert.ok(ctx.api.orchestrator.deps.harness.get('pi'))
+  } finally {
+    await fiber.dispose()
+  }
+})
+
+test('ApiService: an invalid custom provider spec rejects boot', async () => {
+  const ctx = new Context()
+  await assert.rejects(
+    async () => {
+      await ctx.plugin(ApiService, {
+        secrets: [SECRET],
+        port: 0,
+        customProviders: [
+          { id: 'Bad_Slug', name: 'x', protocol: 'openai', baseUrl: 'https://api.x.dev/v1', models: [{ id: 'm' }] },
+        ],
+      })
+    },
+    /lowercase slug/,
+  )
+})

@@ -7,7 +7,7 @@
  */
 import { Context, Service } from '@qm/cordis'
 import { createPiHarness } from '@qm/harness-pi'
-import { createModelGateway } from '@qm/model'
+import { createModelGateway, setCustomProviders, validateCustomProviderSpec, type CustomProviderSpec } from '@qm/model'
 import { createHarnessRouter, createMockHarness, OrchestratorService } from '@qm/orchestrator'
 import Schema from '@qm/schemastery'
 import { createMemoryRunEventBus, createMemoryRunStore, createMemorySessionStore } from '@qm/store'
@@ -41,6 +41,10 @@ export interface ApiConfig {
   anthropicApiKey?: string
   openaiApiKey?: string
   openrouterApiKey?: string
+  /** Custom model providers (OpenAI-/Anthropic-compatible) registered before the pi harness boots; specs validated at boot. */
+  customProviders?: CustomProviderSpec[]
+  /** Keys for custom providers, by provider id. */
+  customProviderKeys?: Record<string, string>
   /** Dev default system prompt. */
   systemPrompt?: string
   /** Dev default scope for API turns. */
@@ -54,6 +58,8 @@ export const Config = Schema.object({
   tickMs: Schema.number().default(25).description('Async run-queue poll interval in ms'),
   defaultHarness: Schema.union(['mock', 'pi']).default('mock').description("Harness id used when a turn does not name one; 'pi' boots the real engine"),
   modelId: Schema.string().description('pi base model id (a model registry entry)'),
+  customProviders: Schema.array(Schema.any()).description('Custom model providers (OpenAI/Anthropic-compatible); specs validated at boot'),
+  customProviderKeys: Schema.dict(Schema.string()).description('Keys for custom providers, by provider id'),
   anthropicApiKey: Schema.string().description('Anthropic key for the pi harness'),
   openaiApiKey: Schema.string().description('OpenAI key for the pi harness'),
   openrouterApiKey: Schema.string().description('OpenRouter key for the pi harness'),
@@ -112,6 +118,9 @@ export class ApiService extends Service<ApiConfig> {
     const runs = createMemoryRunStore()
     const runEvents = createMemoryRunEventBus()
     const modelGateway = createModelGateway()
+    const customProviders = this.config.customProviders ?? []
+    for (const spec of customProviders) validateCustomProviderSpec(spec)
+    if (customProviders.length) setCustomProviders(customProviders)
     const harnessId = this.config.defaultHarness ?? 'mock'
     const registry = createHarnessRouter({ defaultId: harnessId })
     registry.register(createMockHarness())
@@ -119,6 +128,16 @@ export class ApiService extends Service<ApiConfig> {
     if (harnessId === 'pi') {
       engine = createPiHarness({
         ...(this.config.modelId ? { modelId: this.config.modelId } : {}),
+        ...(Object.keys(this.config.customProviderKeys ?? {}).length
+          ? {
+              resolveProviderKeys: async () => ({
+                ...(this.config.anthropicApiKey ? { anthropic: this.config.anthropicApiKey } : {}),
+                ...(this.config.openaiApiKey ? { openai: this.config.openaiApiKey } : {}),
+                ...(this.config.openrouterApiKey ? { openrouter: this.config.openrouterApiKey } : {}),
+                ...this.config.customProviderKeys,
+              }),
+            }
+          : {}),
         ...(this.config.anthropicApiKey ? { apiKey: this.config.anthropicApiKey } : {}),
         ...(this.config.openaiApiKey ? { openaiApiKey: this.config.openaiApiKey } : {}),
         ...(this.config.openrouterApiKey ? { openrouterApiKey: this.config.openrouterApiKey } : {}),

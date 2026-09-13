@@ -4,8 +4,11 @@
 #
 #   FEISHU_APP_ID / FEISHU_APP_SECRET   required (open-platform app, long connection)
 #   FEISHU_VERIFICATION_TOKEN / FEISHU_ENCRYPT_KEY  optional (card callbacks)
-#   ANTHROPIC_API_KEY (or OPENAI_API_KEY / OPENROUTER_API_KEY)  provider key for the pi engine
-#   QM_MODEL_ID   optional base model override (defaults to the registry default)
+#   SENSENOVA_API_KEY   key for the sensenova custom provider (default brain)
+#   ANTHROPIC_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY  optional built-in provider keys
+#   QM_MODEL_ID   optional base model override (default glm-5.2 via sensenova;
+#                 also registered: deepseek-v4-pro, deepseek-v4-flash, kimi-k3,
+#                 sensenova-6.8-flash-lite)
 #
 # The Feishu app must receive card callbacks over the long connection
 # (open-platform console) for the approval-card leg.
@@ -15,7 +18,28 @@
     port: 0
     secrets: ['dev-p1-agent-secret']
     defaultHarness: pi
-    modelId: !!js "process.env.QM_MODEL_ID"
+    modelId: !!js "process.env.QM_MODEL_ID || 'glm-5.2'"
+    customProviders:
+      - id: sensenova
+        name: SenseNova (OpenAI-compatible)
+        protocol: openai
+        baseUrl: https://token.sensenova.cn/v1
+        models:
+          - id: glm-5.2
+            name: GLM-5.2
+            contextWindow: 1000000
+          - id: deepseek-v4-pro
+            name: DeepSeek V4 Pro
+            contextWindow: 1000000
+          - id: deepseek-v4-flash
+            name: DeepSeek V4 Flash
+          - id: kimi-k3
+            name: Kimi K3
+            contextWindow: 1000000
+          - id: sensenova-6.8-flash-lite
+            name: SenseNova 6.8 Flash Lite
+    customProviderKeys:
+      sensenova: !!js "process.env.SENSENOVA_API_KEY"
     anthropicApiKey: !!js "process.env.ANTHROPIC_API_KEY"
     openaiApiKey: !!js "process.env.OPENAI_API_KEY"
     openrouterApiKey: !!js "process.env.OPENROUTER_API_KEY"
