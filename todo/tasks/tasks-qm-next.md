@@ -152,9 +152,9 @@ tasks-qm-next,qm-next（Cordis 重写 + 飞书 IM）,prd-qm-next,in_progress,~11
 - [ ] 17.0 【汇合】M3 回归验收 ~1d (ai:0.3d test:0.7d)
   - [x] 固化 `test:pg` 命令（12.0 遗留）~0.5h
     - 落地：`scripts/run-pg.sh` 一次性 `postgres:16-alpine` 容器（动态端口 + `pg_isready` 就绪等待 + EXIT/INT/TERM trap 强制清理，`KEEP=1` 可留容器调试）+ 根 `pnpm test:pg`；自动补装 workspace 依赖与 vendor 构建（fresh worktree 可直接跑）；`--test-concurrency=1` 串行化测试文件，避免各包 reset 共享 schema 竞态。验证：无 PG 基线 185/175/10 skip 与 lane 记录一致；`test:pg` 239/239 全过 0 skip（含 pg claimSlot 并发串行化、跨包 schema 自举）；容器退出后无残留；typecheck 绿 + rescope-check OK
-  - [ ] 17.1 对照功能清单逐项回归 ~4h
+  - [x] 17.1 对照功能清单逐项回归 ~4h
     - 自动化切片已过（2026-09-13）：`pnpm test:pg` 239/239 全过 0 skip——覆盖 12.0 验收（approve 恢复/reject 终止/双击去重/pg 重启恢复）、13.0（claimSlot 并发串行化、fire log 跨重启、directory 投递可见性门）、14.0（memory/skills pg parity 跨实现收敛）、15.0（roster 跨重启）、16.0（server 半 auth/turn→SSE/live 视图/stubs）；无 PG 基线 185/175/10 与各 lane 记录一致；typecheck 绿 + rescope-check OK；web-ui loopback 冒烟复现 16.0 全链路（boot→静态 index+深链回退→signin/me→turn→done echo→SSE done 帧+心跳→sessions/skills/crons/contexts 真数据→会话转录→SIGTERM 优雅卸载）
-    - 剩余人工项：真机飞书 e2e（真实卡片点击/ambient 真频道/cron fire→真实 IM 投递）——需真机环境后跑，全过即可进 17.2 打 tag `m3`
+    - 真机飞书 e2e 通过（2026-09-13，用户客户端实测 + `.im-e2e.log` 终态文件日志）：①卡片点击——真实卡片送达，Approve→`echo: Approve: e2e-approval`、Reject→`echo: Reject: e2e-approval-1` 回复达线程，重复决定静默去重（途中修复：审批命令按轮次唯一化，requestId=`sessionId:command` 否则同会话第二张卡变僵尸卡；另需控制台开启卡片回调长连接）；②ambient 真频道——未@群聊消息经 judge→ambient turn→回复送达（`origin=ambient reply="echo: 测试 ambient"`；途中修复：飞书 SDK 默认 `requireMention:true` 在 SDK 层丢弃未@消息，channel factory 关闭之，bridge 收归寻址分诊：@/私信→人转、未@有 ambient 策略→judge、无策略→丢弃=旧行为）；③cron fire→真实 IM 投递——auto-arm（首条入站消息的 threadRef 自动发现 chat id，im-bridge 暴露 ambientPolicy 供 boot 后开容器）→一次性 cron fire→`echo: !run e2e cron fire` 送达真实群。新引导：`profiles/im-e2e.yml` + `scripts/boot-im-e2e.ts`（唯一审批命令 + auto-arm + 终态文件日志，10.x 遗留的 pnpm 管道缓冲丢日志已解），runbook `docs/e2e-feishu.md`；接线新增 approvals 关键词 stub judge、im-core containerKind、im-bridge ambient 配置+queue 暴露、TriggersService 调度器挂载（cordis.yml）；最终无 PG 192/182/10 skip 0 fail
   - [ ] 17.2 【串行门验收】打 tag `m3` ~0.5h
 
 ### M4 多平台 + 收尾（3 适配器并行，~1d/墙钟 ~1d）

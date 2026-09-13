@@ -16,7 +16,9 @@ back, deliveries landing in a real chat.
 
 - Feishu open-platform app with **long connection** events enabled
   (websocket transport, no public webhook needed) and **card callbacks
-  over the long connection** (console setting — required for leg 1).
+  over the long connection** (console setting — required for leg 1;
+  without it clicks pop "该应用未配置卡片回调" — use the popup's
+  one-click config or 开发配置 → 事件与回调 → 卡片回调 → 长连接).
 - The bot is a member of a test group chat (the e2e channel).
 - aidevops secrets `FEISHU_APP_ID` / `FEISHU_APP_SECRET` present
   (`aidevops secret list`). `FEISHU_VERIFICATION_TOKEN` /
@@ -26,25 +28,29 @@ back, deliveries landing in a real chat.
 
 ```bash
 cd repos/qm-next
-
-# leg 3 only: pick the cron destination chat first (see chat listing below)
-E2E_CRON_CHAT=oc_xxx aidevops secret run pnpm exec tsx scripts/boot-im-e2e.ts
+aidevops secret run pnpm exec tsx scripts/boot-im-e2e.ts
 ```
 
-The boot prints the API health, ambient state, the bot's group chats
-(useful when you don't know the `oc_…` id — re-run with it), the cron
-schedule, and one runbook line per leg.
+**Auto-arm (default)**: send any @bot message once booted — the boot
+extracts the real chat id from the inbound threadRef, enables ambient
+for that chat, and schedules a one-shot cron (~20s) into it. No chat id
+or console setup needed. Boot lines append to `.im-e2e.log` (repo root;
+gitignored) — pnpm pipes buffer stdout, so the file is the evidence
+trail.
+
+Explicit env always wins over auto-arm (`E2E_AUTO_ARM=0` disables it):
 
 Environment knobs:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `E2E_AMBIENT_CONTAINER` | *(unset — ambient off)* | Comma-separated containers (`feishu:oc_…`) with ambient enabled |
+| `E2E_AMBIENT_CONTAINER` | *(auto-arm)* | Comma-separated containers (`feishu:oc_…`) with ambient enabled at boot |
 | `E2E_AMBIENT_KEYWORD` | `*` | Stub judge keyword (`*` = engage every unaddressed message) |
-| `E2E_CRON_CHAT` | *(unset — cron off)* | Destination chat for the e2e cron |
-| `E2E_CRON_DELAY_MS` | `15000` | One-shot fire delay from boot |
+| `E2E_CRON_CHAT` | *(auto-arm)* | Destination chat for the e2e cron |
+| `E2E_CRON_DELAY_MS` | `15000` | One-shot fire delay from boot (env-pinned cron only) |
 | `E2E_CRON_EVERY_MS` | *(unset — one-shot)* | Set (≥60000) for a repeating cron instead |
 | `E2E_CRON_ACTION` | `!run e2e cron fire` | Stored task every fire submits (`!run` skips the cron preamble) |
+| `E2E_AUTO_ARM` | `1` | `0` disables chat discovery + auto-arm |
 
 Stop with Ctrl-C; SIGTERM unmounts the whole profile tree.
 
