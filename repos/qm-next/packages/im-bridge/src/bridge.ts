@@ -12,8 +12,10 @@
  *   first decision submits the approval-carrying follow-up turn. Without an
  *   injected store the bridge uses an in-memory one, so restart-safe
  *   recovery means configuring the Postgres store.
- * - Card rendering stays provider-side (`OutboundBody.card` is opaque);
- *   `approvalCards` swaps the built-in default renderer.
+ * - Card rendering stays provider-side (`OutboundBody.card` is opaque):
+ *   each provider exposes its own `approvalCardRenderer`; `approvalCards`
+ *   is a global override; providers without a renderer get a neutral text
+ *   notice.
  * - Ambient: when ambient ingredients are provided, unaddressed group
  *   chatter (no mention, known `channel` container kind) in a
  *   policy-enabled container is offered to the judge instead of
@@ -101,7 +103,11 @@ export interface ImTurnBridgeOptions {
   maxRoutes?: number
   /** Durable approval registry; defaults to an in-memory store. */
   approvalStore?: ApprovalStore
-  /** Approval card renderer; defaults to the built-in Feishu-shaped card. */
+  /**
+   * Approval card renderer override applied to every provider. Unset, the
+   * bridge resolves each provider's own `approvalCardRenderer` and falls
+   * back to a neutral text notice.
+   */
   approvalCards?: ApprovalCardRenderer
   /** Ambient ingredients; absent means ambient is fully inert. */
   ambient?: ImTurnBridgeAmbient
@@ -318,7 +324,8 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
       const route = routes.get(run.id)
       if (!route) return
       if (isPendingApprovalResult(run)) await rememberPendingApprovals(run, route)
-      const delivery = imRunResultDelivery(run, route, options.replyAs ?? 'markdown', options.approvalCards)
+      const cards = options.approvalCards ?? deps.im.get(route.destination.type)?.approvalCardRenderer
+      const delivery = imRunResultDelivery(run, route, options.replyAs ?? 'markdown', cards)
       if (!delivery) return
       await queue.enqueue(delivery)
     })().catch((err) => {
@@ -343,6 +350,11 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
  * Map a terminal run to its outbound delivery, mirroring qm's
  * `runResultDelivery` over the im-core operation shape. Returns null when
  * nothing should be sent (non-IM run, silent, or ok-without-reply).
+ *
+ * Approval cards resolve provider-side: the injected `approvalCards`
+ * override wins, then the provider's own `approvalCardRenderer`, then a
+ * neutral text notice (no buttons — decisions stay possible via the
+ * requesting surface, and both shipping providers carry renderers).
  */
 export function imRunResultDelivery(
   run: Run,
@@ -355,11 +367,9 @@ export function imRunResultDelivery(
   if (run.status === 'failed' || result?.status === 'failed') {
     body = { text: `⚠️ I couldn't finish that turn: ${result?.reason ?? 'unknown error'}` }
   } else if (result?.status === 'pending_approval' || (result?.status === 'ok' && result.pendingApprovals?.length)) {
-    body = {
-      card: cards
-        ? cards.render({ runId: run.id, sessionId: result.sessionId ?? '', approvals: result.pendingApprovals ?? [] })
-        : approvalRequestCard(run.id, result.sessionId ?? '', result.pendingApprovals ?? []),
-    }
+    body = cards
+      ? { card: cards.render({ runId: run.id, sessionId: result.sessionId ?? '', approvals: result.pendingApprovals ?? [] }) }
+      : { text: approvalRequestNotice(result.pendingApprovals ?? []) }
   } else if (result?.status === 'ok' && result.reply !== undefined) {
     body = replyAs === 'text' ? { text: result.reply } : { markdown: result.reply }
   } else if (result?.status === 'refused') {
@@ -383,44 +393,14 @@ export function isPendingApprovalResult(run: Run): boolean {
 }
 
 /**
- * Built-in interactive approval card. Provider-native payloads are opaque
- * by contract; this Feishu-shaped default covers the M2/M3 smoke path and
- * is swapped per provider via the `ApprovalCardRenderer` port.
+ * Built-in neutral fallback for providers without a card renderer: an
+ * actionable-text notice carrying the request context (no buttons, no
+ * platform-native markup — the bridge stays provider-neutral by contract).
  */
-export function approvalRequestCard(
-  runId: string,
-  sessionId: string,
-  approvals: readonly PendingApproval[],
-): Record<string, unknown> {
+export function approvalRequestNotice(approvals: readonly PendingApproval[]): string {
   const primary = approvals[0]
   const command = primary?.command ?? 'turn'
-  const reason = primary?.reason ?? ''
+  const reason = primary?.reason ?? 'requires approval'
   const detail = approvals.length > 1 ? ` (+${approvals.length - 1} more)` : ''
-  const value = (decision: ApprovalActionValue['decision']): ApprovalActionValue => ({
-    kind: APPROVAL_VALUE_KIND,
-    runId,
-    sessionId,
-    ...(primary ? { requestId: primary.requestId } : { requestId: '' }),
-    command,
-    decision,
-  })
-  return {
-    config: { update_multi: true },
-    header: { title: { tag: 'plain_text', content: 'Approval needed' }, template: 'orange' },
-    elements: [
-      { tag: 'div', text: { tag: 'lark_md', content: `**${command}** — ${reason}${detail}` } },
-      {
-        tag: 'action',
-        actions: [
-          { tag: 'button', text: { tag: 'plain_text', content: 'Approve' }, type: 'primary', value: value('approve') },
-          { tag: 'button', text: { tag: 'plain_text', content: 'Reject' }, type: 'danger', value: value('reject') },
-        ],
-      },
-    ],
-  }
-}
-
-/** `ApprovalCardRenderer` adapter over the built-in card. */
-export const defaultApprovalCardRenderer: ApprovalCardRenderer = {
-  render: ({ runId, sessionId, approvals }) => approvalRequestCard(runId, sessionId, approvals),
+  return `Approval needed before I can run \`${command}\` — ${reason}${detail}`
 }

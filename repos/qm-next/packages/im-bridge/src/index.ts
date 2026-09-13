@@ -6,11 +6,10 @@
  * state machine.
  */
 export { APPROVAL_VALUE_KIND, parseApprovalValue } from '@qm/approvals'
-export type { ApprovalActionValue } from '@qm/approvals'
+export type { ApprovalActionValue, ApprovalCardRenderer } from '@qm/approvals'
 export {
-  approvalRequestCard,
+  approvalRequestNotice,
   createImTurnBridge,
-  defaultApprovalCardRenderer,
   imRunResultDelivery,
   isPendingApprovalResult,
 } from './bridge.ts'

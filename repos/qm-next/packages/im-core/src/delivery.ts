@@ -103,6 +103,8 @@ export interface ImRegistryLike {
 export interface ImProviderLike {
   provider: string
   outbound(ops: readonly OutboundOperation[]): Promise<import('./types.ts').OutboundReceipt[]>
+  /** Optional provider-native approval card renderer (bridge consults it). */
+  approvalCardRenderer?: import('./provider.ts').ImApprovalCardRenderer
 }
 
 export type { OutgoingAttachment, Destination }

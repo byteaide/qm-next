@@ -8,6 +8,7 @@ import { createLarkChannel } from '@larksuiteoapi/node-sdk'
 import type { NormalizedMessage } from '@larksuiteoapi/node-sdk'
 import { IM_UNSUPPORTED_OP, type ImCapabilities, type ImProvider, type ImProviderStartContext, type OutboundOperation, type OutboundReceipt } from '@qm/im-core'
 import type { Destination, OutgoingAttachment } from '@qm/types'
+import { createLarkApprovalCardRenderer } from './card-renderer.ts'
 import { createInboundMapper, type InboundMapperDeps } from './map-inbound.ts'
 import type { FeishuChannelLike, FeishuProviderConfig, FeishuProviderDeps } from './types.ts'
 
@@ -168,6 +169,7 @@ export function createFeishuProvider(config: FeishuProviderConfig, deps: FeishuP
     provider: PROVIDER,
     instanceId: config.instanceId,
     capabilities,
+    approvalCardRenderer: createLarkApprovalCardRenderer(),
     async start(ctx: ImProviderStartContext): Promise<void> {
       startCtx = ctx
       channel = factory(config)

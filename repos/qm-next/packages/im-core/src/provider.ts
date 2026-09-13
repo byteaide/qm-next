@@ -3,11 +3,29 @@
  * Inbound flows provider → core via the start context's `emit`; outbound
  * flows core → provider via `outbound` and `format`.
  */
-import type { Destination } from '@qm/types'
+import type { Destination, PendingApproval } from '@qm/types'
 import type { InboundEvent } from './inbound.ts'
 import type { DirectorySyncPush } from './directory.ts'
 import type { OutboundOperation } from './outbound.ts'
 import type { ImBlobs, ImCapabilities, OutboundBody, OutboundReceipt } from './types.ts'
+
+/** Semantic input for provider-native approval card rendering. */
+export interface ImApprovalCardSpec {
+  runId: string
+  sessionId: string
+  approvals: readonly PendingApproval[]
+}
+
+/**
+ * Provider-side approval card renderer. Payloads stay opaque
+ * (`OutboundBody.card`); button values must embed the approval action
+ * value so decisions round-trip back through `parseApprovalValue`
+ * (`@qm/approvals` codec — objects for platforms that carry structured
+ * values, JSON strings for platforms that stringify).
+ */
+export interface ImApprovalCardRenderer {
+  render(spec: ImApprovalCardSpec): Record<string, unknown>
+}
 
 /** Minimal logger port; satisfied by any cordis logger. */
 export interface ImLogger {
@@ -50,6 +68,12 @@ export interface ImProvider {
   format(markdown: string): OutboundBody
   /** Pull a directory snapshot from the platform (capabilities.directorySync). */
   collectDirectory?(): Promise<DirectorySyncPush>
+  /**
+   * Provider-native approval card renderer. The bridge consults it for
+   * this provider's pending-approval deliveries before any injected
+   * override and before the neutral-text fallback.
+   */
+  approvalCardRenderer?: ImApprovalCardRenderer
   /** Provider-native destination for a chat id (mainly tests and tooling). */
   destination(chatId: string, threadId?: string): Destination
 }

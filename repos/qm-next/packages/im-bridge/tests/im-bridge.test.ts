@@ -13,7 +13,7 @@ import { createImRegistry } from '@qm/im-core/runtime'
 import { createHarnessRouter, createMockHarness, OrchestratorService, type MockTurnStep } from '@qm/orchestrator'
 import { createMemoryRunStore, createMemorySessionStore } from '@qm/store'
 import type { IdentityService, ResolutionService } from '@qm/types'
-import { APPROVAL_VALUE_KIND, approvalRequestCard, createImTurnBridge, parseApprovalValue, type ApprovalActionValue, type ImTurnBridge, type ImTurnBridgeAmbient } from '../src/index.ts'
+import { APPROVAL_VALUE_KIND, approvalRequestNotice, createImTurnBridge, parseApprovalValue, type ApprovalActionValue, type ApprovalCardRenderer, type ImTurnBridge, type ImTurnBridgeAmbient } from '../src/index.ts'
 
 function devResolution(): ResolutionService {
   return {
@@ -47,11 +47,50 @@ interface RecorderCells {
   ctx?: ImProviderStartContext
 }
 
-function recorderProvider(sent: OutboundOperation[], cells: RecorderCells): ImProvider {
+/**
+ * Provider-owned card rendering, test double: same structured button
+ * values the real feishu/slack renderers produce.
+ */
+const testCardRenderer: ApprovalCardRenderer = {
+  render: ({ runId, sessionId, approvals }) => ({
+    elements: [
+      {
+        tag: 'action',
+        actions: [
+          {
+            tag: 'button',
+            value: {
+              kind: APPROVAL_VALUE_KIND,
+              runId,
+              sessionId,
+              requestId: approvals[0]?.requestId ?? '',
+              command: approvals[0]?.command ?? '',
+              decision: 'approve',
+            },
+          },
+          {
+            tag: 'button',
+            value: {
+              kind: APPROVAL_VALUE_KIND,
+              runId,
+              sessionId,
+              requestId: approvals[0]?.requestId ?? '',
+              command: approvals[0]?.command ?? '',
+              decision: 'reject',
+            },
+          },
+        ],
+      },
+    ],
+  }),
+}
+
+function recorderProvider(sent: OutboundOperation[], cells: RecorderCells, withCardRenderer = true): ImProvider {
   return {
     provider: 'feishu',
     instanceId: 'test',
     capabilities,
+    ...(withCardRenderer ? { approvalCardRenderer: testCardRenderer } : {}),
     start: async (ctx) => {
       cells.ctx = ctx
     },
@@ -127,6 +166,8 @@ async function setup(
     actorType?: 'internal' | 'guest'
     /** Ambient ingredients: containers preloaded into a memory policy. */
     ambient?: { containers: string[]; judge: AmbientJudge }
+    /** When false the provider ships no card renderer (fallback-path tests). */
+    providerCardRenderer?: boolean
   } = {},
 ): Promise<Harness> {
   const sessions = createMemorySessionStore()
@@ -163,7 +204,7 @@ async function setup(
     },
   )
   await bridge.start()
-  const disposer = await registry.register(recorderProvider(sent, cells))
+  const disposer = await registry.register(recorderProvider(sent, cells, opts.providerCardRenderer !== false))
   return {
     runs,
     bridge,
@@ -469,20 +510,29 @@ test('approval value parsing accepts only well-formed qm approval values', () =>
   assert.deepEqual(parseApprovalValue(value), value)
 })
 
-test('approvalRequestCard keeps request context and both decisions on the buttons', () => {
-  const card = approvalRequestCard('run-1', 'session-1', [
-    { requestId: 'session-1:deploy', command: 'deploy', reason: 'needs sign-off' },
+test('approvalRequestNotice keeps the request context in plain neutral text', () => {
+  const notice = approvalRequestNotice([{ requestId: 'session-1:deploy', command: 'deploy', reason: 'needs sign-off' }])
+  assert.match(notice, /`deploy`/)
+  assert.match(notice, /needs sign-off/)
+  const multi = approvalRequestNotice([
+    { requestId: 'a', command: 'deploy', reason: 'needs sign-off' },
+    { requestId: 'b', command: 'migrate', reason: 'needs sign-off' },
   ])
-  const elements = card['elements'] as Array<{ tag: string; actions?: Array<{ value: ApprovalActionValue }> }>
-  const actions = elements.find((element) => element.tag === 'action')?.actions
-  assert.equal(actions?.length, 2)
-  assert.deepEqual(actions?.[0]?.value, {
-    kind: APPROVAL_VALUE_KIND,
-    runId: 'run-1',
-    sessionId: 'session-1',
-    requestId: 'session-1:deploy',
-    command: 'deploy',
-    decision: 'approve',
+  assert.match(multi, /\+1 more/)
+})
+
+test('pending approval without any card renderer delivers the neutral text notice', async () => {
+  const t = await setup({
+    providerCardRenderer: false,
+    script: [{ reply: '', pausedOnApproval: true, pendingApprovals: [{ command: 'deploy', reason: 'needs sign-off' }] }],
   })
-  assert.equal(actions?.[1]?.value.decision, 'reject')
+  try {
+    await t.cells.ctx!.emit(messageEvent())
+    assert.ok(await waitFor(() => t.sent.length === 1), 'expected fallback notice delivery')
+    const op = t.sent[0] as SendOperation
+    assert.equal(op.body.card, undefined, 'no provider-native card without a renderer')
+    assert.match(op.body.text ?? '', /Approval needed before I can run `deploy`/)
+  } finally {
+    await t.dispose()
+  }
 })
