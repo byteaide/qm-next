@@ -99,3 +99,20 @@ Each entry names the qm source shape, the qm-next shape, and why.
 18. **Blob staging deferred to the control-plane phase** —
     `createExecBlobStaging` needs the `/v1/blobs` API and capability-token
     minting (P3 routes); P1 ships exec file ops and backup only.
+
+## Lane A3 (2026-09-13, local implementation)
+
+19. **Claude OAuth token endpoint injected, not hardcoded** — qm
+    hardcodes the Claude token URL in `subscription-oauth.ts`; the value is
+    pattern-redacted by the local source-access guard on every read path, so
+    the port takes `claudeTokenUrl` as a required `createSubscriptionOAuth`
+    option with no default. Call sites must supply the public endpoint (or
+    verify the known public value) before subscription logins go live. The
+    ChatGPT issuer (`https://auth.openai.com`) was readable in qm and ships
+    as a constant.
+
+20. **codex JWT claim helper lives in the model package** — qm's
+    `codexOAuthJwtAccountIdFromToken` sits in `harness/codex-auth-file.ts`;
+    the harness package is a later lane, so the model package carries a local
+    copy with identical semantics (base64url payload, `chatgpt_account_id`
+    under the `https://api.openai.com/auth` claim).

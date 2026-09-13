@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.82.0",
+    "@qm/credentials": "workspace:^",
+    "@qm/store": "workspace:^",
     "@qm/types": "workspace:^"
   }
 }

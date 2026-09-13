@@ -57,7 +57,8 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
 - [ ] 2.0 【A】credentials + model ~1.5d（2026-09-13 主会话本地执行：子代理配额耗尽）
   - [x] 2.1 `packages/credentials`：keychain/secret-source/harness-auth-env/connector-token（memory+PG 双实现，PG 强制生产） ~4h（keychain 全量 + DurableMap 落 @qm/store；12 测试过）
   - [ ] 2.2 secret-drop/device-flow/resident-auth 按引用跟进 ~3h（resident-paths/renderUseScript 已随 2.1 落地；resident-auth/device-flow/secret-drop 待跟进）
-  - [x] 2.3 `packages/model` 核心：pi-models/catalog-gateway/provider-endpoints/custom-providers ~4h（11 测试过；custom-provider-store/model-credential-store/subscription-oauth 待跟进）
+  - [x] 2.3 `packages/model` 核心：pi-models/catalog-gateway/provider-endpoints/custom-providers ~4h（11 测试过）
+  - [x] 2.5 【A 余量】model-catalog + custom-provider-store + model-credential-store + user-model-credential-store + subscription-oauth ~4h（7 测试过；claude token 端点参数注入——deviations #19-20）
   - [ ] 2.4 parity 对拍测试（对照 qm `test/postgres-*` 相关用例形状） ~2h（契约测试已写；PG 对拍待容器轮次）
 - [ ] 3.0 【B】pi-harness 平移 ~2.5d（2026-09-13 主会话本地执行）
   - [x] 3.1 `packages/sandbox`：local-sandbox 全量（docker-exec/exec-process-session/ro-layers/exec-file-ops/exec-kill/sandbox-env/process-poll/await-exit；mock dockerExec+daemon 11 测试过） ~5h（blob staging 延后 P3、layerData seam、secret-masking 重建——deviations #16-18）
