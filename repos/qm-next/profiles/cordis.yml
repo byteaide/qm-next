@@ -14,3 +14,7 @@
     secrets: ['dev-m1-secret']
 - id: im-bridge
   name: '@qm/im-bridge'
+- id: web-ui
+  name: '@qm/web-ui'
+  config:
+    port: 0
