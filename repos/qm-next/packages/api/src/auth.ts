@@ -22,6 +22,21 @@ function isClaims(value: unknown): value is TurnTokenClaims {
 }
 
 export async function authenticateBearer(header: string | undefined, secrets: string[]): Promise<Principal | null> {
+  const auth = await authenticateBearerWithClaims(header, secrets)
+  return auth?.principal ?? null
+}
+
+export interface AuthenticatedRequest {
+  principal: Principal
+  /** Raw verified claims (aud, exp, …) for audience-scoped routes. */
+  claims: Record<string, unknown>
+}
+
+/** Bearer authentication that also exposes the raw claims (route framework). */
+export async function authenticateBearerWithClaims(
+  header: string | undefined,
+  secrets: string[],
+): Promise<AuthenticatedRequest | null> {
   if (!header?.startsWith('Bearer ')) return null
   const token = header.slice('Bearer '.length).trim()
   if (!token) return null
@@ -30,5 +45,5 @@ export async function authenticateBearer(header: string | undefined, secrets: st
   if (claims.exp !== undefined && (!Number.isFinite(claims.exp) || claims.exp <= Date.now())) return null
   const principal: Principal = { id: claims.p, type: claims.typ ?? 'internal' }
   if (claims.name !== undefined) principal.displayName = claims.name
-  return principal
+  return { principal, claims: claims as unknown as Record<string, unknown> }
 }

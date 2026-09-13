@@ -6,6 +6,7 @@
  * deployments swap each piece without touching the others.
  */
 import { Context, Service } from '@qm/cordis'
+import { createMemoryDirectoryStore } from '@qm/directory'
 import { createClaudeHarness } from '@qm/harness-claude'
 import { createCodexHarness } from '@qm/harness-codex'
 import { createOpenCodeHarness } from '@qm/harness-opencode'
@@ -16,6 +17,8 @@ import { createHarnessRouter, createMockHarness, createSandboxToolContext, Orche
 import Schema from '@qm/schemastery'
 import { createLocalSandbox } from '@qm/sandbox'
 import { createMemoryRunEventBus, createMemoryRunStore, createMemorySessionStore } from '@qm/store'
+import { reachDirectory } from '@qm/reach'
+import type { CronScheduler, CronStore } from '@qm/triggers'
 import type {
   Harness,
   IdentityService,
@@ -72,6 +75,8 @@ export interface ApiConfig {
   systemPrompt?: string
   /** Dev default scope for API turns. */
   scopeId?: ScopeId
+  /** Directory sync surface (11.0): in-memory store behind the directory + reach routes. */
+  directory?: boolean
 }
 
 export const Config = Schema.object({
@@ -104,6 +109,7 @@ export const Config = Schema.object({
   openrouterApiKey: Schema.string().description('OpenRouter key for the pi harness'),
   systemPrompt: Schema.string().default('You are qm-next.').description('Dev default system prompt'),
   scopeId: Schema.string().default('org:default').description('Dev default scope for API turns'),
+  directory: Schema.boolean().description('Directory sync surface (11.0): in-memory store behind the directory + reach routes'),
 })
 
 function devIdentity(): IdentityService {
@@ -149,6 +155,13 @@ export class ApiService extends Service<ApiConfig> {
 
   /** Run event stream (deltas/progress/status); the SSE surface reads this. */
   runEvents!: RunEventBus
+
+  /**
+   * Cron runtime (store + scheduler) injected by the triggers plugin after
+   * it boots; the parity cron routes read it lazily per request, so late
+   * injection is fine. Routes 404 while absent.
+   */
+  cronsRuntime?: { crons: CronStore; scheduler?: CronScheduler } | undefined
 
   constructor(ctx: Context, public config: ApiConfig) {
     super(ctx, 'api')
@@ -274,7 +287,30 @@ export class ApiService extends Service<ApiConfig> {
       this.config.tickMs !== undefined ? { tickMs: this.config.tickMs } : {},
     )
     runner.start()
-    const app = createApiServer({ orchestrator, sessions, runs, resolution }, { secrets: this.config.secrets })
+    // Parity surface (11.0): directory + reach behind an opt-in store; cron
+    // routes always register and 404 per request until the triggers plugin
+    // injects its runtime into `cronsRuntime`.
+    const directoryStore = this.config.directory ? createMemoryDirectoryStore() : undefined
+    const app = createApiServer(
+      {
+        orchestrator,
+        sessions,
+        runs,
+        resolution,
+        ...(directoryStore ? { directory: { directory: directoryStore }, reach: { directory: directoryStore } } : {}),
+        crons: {
+          crons: () => this.cronsRuntime?.crons,
+          scheduler: () => this.cronsRuntime?.scheduler,
+          ...(directoryStore
+            ? {
+                reach: reachDirectory(directoryStore),
+                scopeFor: () => this.config.scopeId ?? 'org:default',
+              }
+            : {}),
+        },
+      },
+      { secrets: this.config.secrets },
+    )
     await app.listen({ port: this.config.port ?? 0, host: this.config.host ?? '127.0.0.1' })
     const addr = app.server.address()
     if (typeof addr === 'object' && addr !== null) this.address = { port: addr.port, host: addr.address }

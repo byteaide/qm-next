@@ -4,3 +4,7 @@ export { createApiServer, type ApiDeps, type ApiServerOptions } from './server.t
 export { createTurnRunner, type TurnRunner, type TurnRunnerOptions } from './runner.ts'
 export { authenticateBearer, type TurnTokenClaims } from './auth.ts'
 export { mintSignedPayload, signingKeyId, verifySignedPayload } from './signed-token.ts'
+export { registerRouteTable, sendJson, type ApiRouteContext, type Route, type RouteAuth } from './routes/framework.ts'
+export { directoryRoutes, type DirectoryRoutesDeps, type DirectoryMeta } from './routes/directory-routes.ts'
+export { cronRoutes, type CronRoutesDeps } from './routes/cron-routes.ts'
+export { reachRoutes, type ReachRoutesDeps } from './routes/reach-routes.ts'

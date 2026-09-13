@@ -8,12 +8,22 @@
 import type { Conversation, Destination, Orchestrator, ResolutionService, RunStore, SessionStore, TurnInput, TurnOrigin, TurnResult } from '@qm/types'
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify'
 import { authenticateBearer } from './auth.ts'
+import { registerRouteTable } from './routes/framework.ts'
+import { directoryRoutes, type DirectoryRoutesDeps } from './routes/directory-routes.ts'
+import { cronRoutes, type CronRoutesDeps } from './routes/cron-routes.ts'
+import { reachRoutes, type ReachRoutesDeps } from './routes/reach-routes.ts'
 
 export interface ApiDeps {
   orchestrator: Orchestrator
   sessions: SessionStore
   runs: RunStore
   resolution: ResolutionService
+  /** Parity surface (11.0): directory sync/resolve routes when a store is wired. */
+  directory?: DirectoryRoutesDeps
+  /** Parity surface (11.0): cron routes when the triggers runtime is loaded. */
+  crons?: CronRoutesDeps
+  /** Parity surface (11.0): the reach route when a directory is wired. */
+  reach?: ReachRoutesDeps
 }
 
 export interface ApiServerOptions {
@@ -78,6 +88,16 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
   const app = Fastify({ logger: false })
 
   app.get('/healthz', async () => ({ ok: true }))
+
+  if (deps.directory) {
+    registerRouteTable(app, opts, directoryRoutes(deps.directory))
+  }
+  if (deps.crons) {
+    registerRouteTable(app, opts, cronRoutes(deps.crons))
+  }
+  if (deps.reach) {
+    registerRouteTable(app, opts, reachRoutes(deps.reach))
+  }
 
   app.get('/v1/runs/:id', async (request, reply) => {
     const actor = await authenticateBearer(request.headers.authorization, opts.secrets)

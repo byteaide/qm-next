@@ -66,8 +66,12 @@ export class TriggersService extends Service<TriggersConfig> {
     }
     this.scheduler = createCronScheduler({ ...deps, crons: this.crons })
     this.triggers = createTriggerSink(deps)
+    // Parity surface (11.0): expose the registry + scheduler to the API's
+    // cron routes; cleared on dispose so late requests 404 cleanly.
+    api.cronsRuntime = { crons: this.crons, scheduler: this.scheduler }
     this.scheduler.start(this.config.intervalMs)
     return async () => {
+      api.cronsRuntime = undefined
       this.scheduler.stop()
     }
   }
