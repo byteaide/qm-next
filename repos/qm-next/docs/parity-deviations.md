@@ -81,3 +81,21 @@ Each entry names the qm source shape, the qm-next shape, and why.
     `subscription-oauth` follow with their P3 routes; the P1 core ships the
     resolution layer (pi-models, provider-endpoints, custom-providers
     runtime registry, gateway) that harnesses consume.
+
+## Lane B (2026-09-13, local implementation)
+
+16. **secret-masking rebuilt from usage** — qm's `security/secret-masking.ts`
+    is unreadable under the source-access guard (secret-bearing basename).
+    The port keeps `redactCommand`'s readable flag/echo/export patterns
+    verbatim and rebuilds the env-value masker beneath it: secret-looking
+    env names (>=8-char values) mask to `[redacted]`. Exact qm marker text
+    is unverified.
+
+17. **WorkspaceStore seam narrowed to layer data** — qm's ro-layers and
+    local-sandbox read the workspace store directly; the qm-next sandbox
+    consumes pre-resolved `RoLayerData` through `opts.layerData` until the
+    workspace package lands.
+
+18. **Blob staging deferred to the control-plane phase** —
+    `createExecBlobStaging` needs the `/v1/blobs` API and capability-token
+    minting (P3 routes); P1 ships exec file ops and backup only.

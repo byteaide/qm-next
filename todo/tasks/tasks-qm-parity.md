@@ -59,9 +59,9 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
   - [ ] 2.2 secret-drop/device-flow/resident-auth 按引用跟进 ~3h（resident-paths/renderUseScript 已随 2.1 落地；resident-auth/device-flow/secret-drop 待跟进）
   - [x] 2.3 `packages/model` 核心：pi-models/catalog-gateway/provider-endpoints/custom-providers ~4h（11 测试过；custom-provider-store/model-credential-store/subscription-oauth 待跟进）
   - [ ] 2.4 parity 对拍测试（对照 qm `test/postgres-*` 相关用例形状） ~2h（契约测试已写；PG 对拍待容器轮次）
-- [ ] 3.0 【B】pi-harness 平移 ~2.5d
-  - [ ] 3.1 `packages/sandbox`：接口 + local-sandbox（qm `src/sandbox/local-sandbox.ts`）+ process-poll/liveness ~4h
-  - [ ] 3.2 `packages/harness-pi`：pi-harness 主体（2190L）+ pi-tools（3097L） ~8h
+- [ ] 3.0 【B】pi-harness 平移 ~2.5d（2026-09-13 主会话本地执行）
+  - [x] 3.1 `packages/sandbox`：local-sandbox 全量（docker-exec/exec-process-session/ro-layers/exec-file-ops/exec-kill/sandbox-env/process-poll/await-exit；mock dockerExec+daemon 11 测试过） ~5h（blob staging 延后 P3、layerData seam、secret-masking 重建——deviations #16-18）
+  - [ ] 3.2 `packages/harness-pi`：pi-harness 主体（2190L）+ pi-tools（3097L） ~8h（阻塞：pi-coding-agent tgz 下载）
   - [ ] 3.3 共享件：tape-fold/replay/context-compaction/goal/grind（入 `packages/harness-pi` 或独立 `packages/harness-common`，1.1 定） ~4h
   - [ ] 3.4 真模型单测（跳过式：有 key 才跑）+ mock 对拍 ~3h
 - [ ] 4.0 【汇合】真任务验收 ~1d
