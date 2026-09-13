@@ -43,8 +43,8 @@ qm-next/
 │   ├── api/                     # @qm/api          Fastify + /v1/turns + 鉴权  [M1·汇合]
 │   ├── im-core/                 # @qm/im-core      IM 契约 + 注册表 + 投递循环  [M2·A]
 │   ├── im-feishu/               # @qm/im-feishu    飞书 Provider               [M2·B]
-│   ├── im-slack/                #                                      [M4]
-│   ├── im-dingtalk/  im-wecom/  #                                      [M4 可选]
+│   ├── im-slack/                # @qm/im-slack     Slack Provider (socket-mode) [M4·A]
+│   ├── im-dingtalk/  im-wecom/  #                                      [M4 可选，未启动]
 │   ├── approvals/  triggers/  reach/  directory/                #      [M3]
 │   ├── memory/  skills/                                          #      [M3]
 │   ├── web-ui/  admin/                                           #      [M3]
@@ -73,48 +73,47 @@ qm-next/
 
 依赖方向：`im/api/triggers → orchestrator → { sessions, runs, harnesses }`；`harnesses → credentials`；**core 不依赖任何 im 包**（grep 门禁：core 无 `slack|feishu|lark|wecom|dingtalk` 符号）。
 
-## 5. IM 契约（@qm/im-core，M2 串行门冻结）
+## 5. IM 契约（@qm/im-core，M2 串行门冻结；M4 增补渲染端口）
+
+M2 冻结后的实际形状（速写，完整定义见 `packages/im-core/src`）：
 
 ```ts
-// 渠道实例：配置声明，surface id 之源
-interface ChannelInstance {
-  readonly id: string        // "feishu:prod" —— orchestrator input.surface 的值
-  readonly provider: string  // "feishu" | "slack" | "wecom" | "dingtalk"
+// 目的地：surface 显式，无默认渠道（type = provider key）
+interface Destination { type: string; target: string; threadId?: string }
+
+// 入站事件（判别联合）：message / interaction / reaction / lifecycle
+// 事件信封含 provider、instanceId、eventId（core 据此去重）、occurredAt
+interface InboundMessageEvent extends InboundEnvelope {
+  kind: 'message'
+  destination: Destination
+  actor: InboundActor
+  text: string
+  mentionedBot?: boolean          // 寻址分诊由 core（bridge）拥有
+  containerKind?: 'dm' | 'channel'
 }
 
-// 目的地：泛化 threadTs 语义
-interface Destination {
-  channelId: string          // ChannelInstance.id
-  chatId: string             // 平台会话 id（飞书 chat_id / Slack channel）
-  threadId?: string          // 平台线程 id（飞书 root_id / Slack thread_ts）
+// 出站操作（队列存储单元）：send / edit / delete / uploadFile / react
+// react、uploadFile 为 v1 保留位，adapter 报 IM_UNSUPPORTED_OP
+interface SendOperation { op: 'send'; destination: Destination; body: OutboundBody; threadId?; replyToMessageId? }
+
+// Provider 端口：每个 im-* 包实现一份
+interface ImProvider {
+  provider: string; instanceId: string
+  capabilities(): ImCapabilities
+  start(ctx: ImProviderStartContext): Promise<void>   // 接入即 intake live
+  stop(): Promise<void>
+  outbound(ops: readonly OutboundOperation[]): Promise<OutboundReceipt[]>
+  format(markdown: string): OutboundBody               // 规范 md → 平台 body
+  collectDirectory?(): Promise<DirectorySyncPush>      // 人/群目录拉取
+  approvalCardRenderer?: ImApprovalCardRenderer        // M4 增补：审批卡归 provider
 }
-
-// 入站事件（判别联合，closed union + assertNever）
-type InboundEvent =
-  | { kind: 'message';  channel: string; from: Principal; chat: ChatRef; text: string; files?: InFile[] }
-  | { kind: 'mention';  channel: string; from: Principal; chat: ChatRef; text: string }
-  | { kind: 'join';     channel: string; members: Principal[] }
-  | { kind: 'leave';    channel: string; members: Principal[] }
-  | { kind: 'reaction'; channel: string; target: MsgRef; emoji: string; from: Principal }
-  | { kind: 'interaction'; channel: string; action: string; value: unknown; from: Principal }
-
-// Provider 适配器（每个 im-* 包注册一份）
-interface ImAdapter {
-  send(dest: Destination, msg: OutMessage): Promise<MsgRef>
-  edit(dest: Destination, ref: MsgRef, msg: OutMessage): Promise<void>
-  delete(dest: Destination, ref: MsgRef): Promise<void>
-  uploadFile(dest: Destination, file: FilePayload): Promise<MsgRef>
-  // v1 保留位，不实现：react?(dest, ref, emoji)
-}
-
-// 格式管道：Markdown → 平台方言
-type Formatter = (md: string) => PlatformDoc
 ```
 
-- 注册：`ctx.im.registerChannel(instance, adapter)`，返回 disposer（effect 语义）。
-- 入站：适配器 normalize 平台事件 → `ctx.im.dispatchInbound(event)`（parallel 事件 `im/inbound`）→ orchestrator 桥接创建 turn（`surface = channel.id`）。
-- 出站投递：turn 终态 → `ctx.runs.onTerminal` → delivery 入队（按 channelId）→ im-core 认领循环（claim/ack/重试，平移 qm DeliveryStore 语义）→ `adapter.send`。
-- 交互（审批）：`interaction` 事件走 `im/interaction`（**bail** 派发）：approvals 插件认领决策，未认领则默认拒绝。
+- 注册：`ctx.im.register(provider)`（校验 → start → intake live），返回幂等 disposer（停止 + 排空 in-flight）；registry 按 `eventId` 去重入站。
+- 入站：adapter emit → `ImInboundSink` → `im-bridge` 分诊（@提及/私信 → 人转 turn；未寻址群聊 → 有 ambient 策略走 judge，否则丢弃）。
+- 出站投递：turn 终态 → bridge → delivery 队列入队（幂等键 + TTL lease）→ 认领循环（退避重试、maxAttempts 停机、stop 排空）→ `provider.outbound(ops)`。
+- 交互（审批）：`interaction` 事件的 `action.value` 经 `@qm/approvals` codec 往返（对象或 JSON 串）；决策状态机 pending→approved/rejected 单次迁移、仅请求者可决、双击去重。
+- 审批卡（M4）：渲染归 provider 自带（`approvalCardRenderer`），bridge 解析顺序为注入覆盖 → provider 自带 → 中性文本兜底；core 侧零平台符号（`pnpm check:im` 门禁）。
 
 ## 6. 核心类型（@qm/types，M1 串行门冻结）
 
@@ -143,39 +142,51 @@ interface RunStore {
 ## 7. Turn 生命线（端到端时序）
 
 ```
-飞书 WS 事件 → im-feishu(normalize) → ctx.im.dispatchInbound
-  → orchestrator.handleTurn({surface:'feishu:prod', …})
-      → 限流/预算/身份 → sessions 解析 → runs.enqueue
-      → worker claim → heartbeat → harnesses.route() → provider.runTurn
-  → runs.complete → delivery 入队(channelId)
-  → im-core 认领循环 → adapter.send(dest, msg) → 飞书 API（线程内回复）
+飞书 WS 事件 → im-feishu(normalize) → registry(去重) → im-bridge
+  → runs.enqueue（surface='feishu'，threadRef 会话解析）
+      → TurnRunner claim → orchestrator.handleTurn（限流/预算/身份）
+      → harnesses.route() → provider.runTurn
+  → runs.onTerminal → bridge → delivery 入队（幂等键 run:<id>）
+  → 认领循环 → im-feishu.outbound(send) → 飞书 API（线程内回复）
 ```
+
+Slack 同构（Socket Mode 入站、`@slack/web-api` 出站、Block Kit 审批卡、mrkdwn 格式管道）；一个 registry 同时挂多 provider，投递按 `Destination.type` 认领到对应 adapter——双渠道并存见 `profiles/multi-im.yml` 与 `packages/im-bridge/tests/dual-channel.test.ts`。
 
 HTTP 入口同构：`POST /v1/turns`（`@qm/api`）→ 同一 `runs.enqueue`，回复经 API/SSE 取回。
 
 ## 8. 配置与组装
 
 ```yaml
-# profiles/default.yml（示意）
-plugins:
-  - '@qm/boot'
-  - name: '@qm/stores-pg'
-    config: { databaseUrl: !!js "process.env.DATABASE_URL" }
-  - '@qm/sessions'
-  - '@qm/runs'
-  - '@qm/harness'
-  - '@qm/orchestrator'
-  - '@qm/credentials'
-  - '@qm/im-core'
-  - name: '@qm/im-feishu'
-    config:
-      channelId: 'feishu:prod'
-      appId: !!js "process.env.FEISHU_APP_ID"
-      appSecret: !!js "process.env.FEISHU_APP_SECRET"
-  - '@qm/api'
+# profiles/cordis.yml（仓库默认组装：M0 冒烟 + M1 全链 + 桥 + 调度 + web-ui）
+- id: demo
+  name: '@qm/demo'
+  config: { greeting: !!js "'hello-' + (1 + 1)", times: 3 }
+- id: api
+  name: '@qm/api'
+  config: { port: 0, secrets: ['dev-m1-secret'] }
+- id: im-bridge
+  name: '@qm/im-bridge'
+- id: triggers
+  name: '@qm/triggers'
+- id: web-ui
+  name: '@qm/web-ui'
+  config: { port: 0 }
+
+# IM provider 按 profile 挂载（真机档见 profiles/im-smoke.yml / im-e2e.yml /
+# multi-im.yml 双渠道档；凭据一律 !!js 读 env，不写字面量）
+- id: feishu
+  name: '@qm/im-feishu'
+  config:
+    appId: !!js "process.env.FEISHU_APP_ID"
+    appSecret: !!js "process.env.FEISHU_APP_SECRET"
+- id: slack
+  name: '@qm/im-slack'
+  config:
+    appToken: !!js "process.env.SLACK_APP_TOKEN"
+    botToken: !!js "process.env.SLACK_BOT_TOKEN"
 ```
 
-环境差异用 include patch overlay（`profiles/dev.yml` 换内存 store、关飞书）。
+环境差异用 profile 变体表达（内存 store/无 IM 的 cordis.yml 为默认；im-smoke/im-e2e/multi-im 挂真渠道）。
 
 ## 9. 事件契约（声明合并，@mode 标注）
 
@@ -200,6 +211,7 @@ M0-M2 单进程（in-process 插件，一 profile 一进程）。M3 视资源隔
 
 | 门禁 | 内容 |
 |------|------|
-| `verify:im-isolation` | grep core 包（types/stores/orchestrator/harness/credentials）无 IM 平台符号 |
-| `verify:explicit-surface` | 禁止 `surface` 默认值模式（`?? "…"`, `|| "…"`） |
-| test | 各包单测 + M1 e2e（HTTP→mock harness）+ M2 真机清单 |
+| `pnpm check:im` | grep core 服务 src/（api/approvals/boot/directory/im-bridge/im-core/memory/orchestrator/reach/skills/store/triggers/types/web-ui）无 `slack\|feishu\|lark\|wecom\|dingtalk` 符号（M4 21.1） |
+| `pnpm rescope-check` | vendor 无 `@deepseek-ai` 残留 |
+| `pnpm typecheck` | strict TS 全仓 |
+| `pnpm test` / `pnpm test:pg` | 单测 + e2e（无 PG / 一次性 PG 容器全量对拍） |
