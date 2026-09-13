@@ -55,18 +55,6 @@ base.turns.runTurn = async (input) => {
 }
 api.orchestrator.deps.harness.register(base)
 
-// Terminal-run evidence into the file log: shows which path each turn
-// took (echo vs pending_approval card vs approval follow-up).
-api.runs.onTerminal((run) => {
-  const result = run.result
-  const approvals = result?.pendingApprovals?.length ?? 0
-  log(
-    `im-e2e: run ${run.id} terminal surface=${run.request?.surface} origin=${String(run.request?.origin?.kind)} status=${run.status} result=${result?.status ?? 'n/a'}` +
-      (typeof result?.reply === 'string' ? ` reply=${JSON.stringify(result.reply.slice(0, 120))}` : '') +
-      (approvals > 0 ? ` pendingApprovals=${approvals}` : ''),
-  )
-})
-
 const { port } = api.address
 log(`im-e2e: booted, api 127.0.0.1:${port}, healthz ${(await fetch(`http://127.0.0.1:${port}/healthz`)).status}`)
 
@@ -78,7 +66,7 @@ if (ambientContainers.length > 0) {
   log(`im-e2e: ambient ON for ${ambientContainers.join(', ')} (keyword '${process.env.E2E_AMBIENT_KEYWORD ?? '*'}')`)
   log('im-e2e: leg 2 — send a NON-mention message in that chat; expect the bot to reply')
 } else {
-  log('im-e2e: ambient OFF (set E2E_AMBIENT_CONTAINER to enable leg 2)')
+  log('im-e2e: ambient OFF for now (set E2E_AMBIENT_CONTAINER to pin it; auto-arm enables it for the first observed chat)')
 }
 
 const feishu = ctx.im.get('feishu')
@@ -111,10 +99,62 @@ if (cronChat) {
       : `im-e2e: leg 3 — cron ${cron.id} fires once ~${Math.round(delayMs / 1000)}s from now into ${cronChat}; expect the echo reply there`,
   )
 } else {
-  log('im-e2e: cron OFF (set E2E_CRON_CHAT to a chat id above to enable leg 3)')
+  log('im-e2e: cron OFF for now (set E2E_CRON_CHAT to pin it; auto-arm schedules it for the first observed chat)')
 }
 
 log('im-e2e: leg 1 — @机器人 with !approval; expect the card, then click Approve/Reject and watch the follow-up echo')
+
+// Auto-arm legs 2+3 for the first observed real chat: the chat id rides
+// inbound runs (threadRef `provider:target[:thread]`), so any @bot
+// message discovers it — no console or env setup needed. Explicit env
+// always wins; E2E_AUTO_ARM=0 disables.
+const armedChats = new Set<string>()
+const autoArm = process.env.E2E_AUTO_ARM !== '0'
+if (autoArm) {
+  log('im-e2e: auto-arm on — send ANY @bot message and legs 2+3 arm for that chat')
+}
+
+async function armLegs(chatId: string): Promise<void> {
+  if (armedChats.has(chatId) || !autoArm) return
+  armedChats.add(chatId)
+  const ambientBridge = ctx['im-bridge']
+  if (!ambientContainers.includes(`feishu:${chatId}`) && ambientBridge.ambientPolicy) {
+    await ambientBridge.ambientPolicy.setAmbient(`feishu:${chatId}`, true)
+    log(`im-e2e: leg 2 ARMED — ambient on for feishu:${chatId} (keyword '${process.env.E2E_AMBIENT_KEYWORD ?? '*'}'); send a NON-mention message and the bot replies`)
+  }
+  if (!cronChat && ctx.triggers?.crons) {
+    const delayMs = 20_000
+    const cron = await ctx.triggers.crons.create({
+      scopeId: 'org:default',
+      ownerId: 'e2e:owner',
+      createdBy: 'boot-im-e2e',
+      schedule: { firstFireAt: Date.now() + delayMs },
+      action: '!run e2e cron fire',
+      destination: { type: 'feishu', target: chatId },
+      title: 'e2e one-shot fire (auto-armed)',
+    })
+    log(`im-e2e: leg 3 ARMED — cron ${cron.id} fires once ~${delayMs / 1000}s from now into ${chatId}; expect 'e2e echo: !run e2e cron fire' there`)
+  }
+}
+
+// Terminal-run evidence into the file log: shows which path each turn
+// took (echo vs pending_approval card vs approval follow-up), and arms
+// the legs once real chat traffic reveals the chat id.
+api.runs.onTerminal((run) => {
+  const result = run.result
+  const approvals = result?.pendingApprovals?.length ?? 0
+  const threadRef = run.request?.conversation?.threadRef
+  log(
+    `im-e2e: run ${run.id} terminal surface=${run.request?.surface} origin=${String(run.request?.origin?.kind)} status=${run.status} result=${result?.status ?? 'n/a'}` +
+      (typeof result?.reply === 'string' ? ` reply=${JSON.stringify(result.reply.slice(0, 120))}` : '') +
+      (approvals > 0 ? ` pendingApprovals=${approvals}` : '') +
+      (threadRef ? ` threadRef=${threadRef}` : ''),
+  )
+  const segments = threadRef?.split(':') ?? []
+  if (run.request?.surface === 'feishu' && segments[0] === 'feishu' && segments[1]) {
+    void armLegs(segments[1]).catch((err) => log(`im-e2e: auto-arm failed: ${err instanceof Error ? err.message : String(err)}`))
+  }
+})
 
 let stopping = false
 async function shutdown(signal: string): Promise<void> {

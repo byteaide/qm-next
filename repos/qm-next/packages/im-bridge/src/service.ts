@@ -13,6 +13,7 @@ import { Service, type Context } from '@qm/cordis'
 import {
   createKeywordAmbientJudge,
   createMemoryChannelPolicyStore,
+  type ChannelPolicyStore,
 } from '@qm/approvals'
 import type { ImDeliveryQueue } from '@qm/im-core'
 import { ImRegistryService } from '@qm/im-core/runtime'
@@ -62,6 +63,13 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
   /** The delivery queue the bridge drains; cron/trigger deliveries share it. */
   queue!: ImDeliveryQueue
 
+  /**
+   * The ambient container policy this service built, when ambient is
+   * active. Exposed so tooling can enable containers after boot (the e2e
+   * boot arms ambient from the first observed chat).
+   */
+  ambientPolicy?: ChannelPolicyStore
+
   constructor(ctx: Context, public config: ImBridgeConfig) {
     super(ctx, 'im-bridge')
   }
@@ -76,14 +84,16 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
     }
     const containers = this.config.ambientContainers ?? []
     let ambient: ImTurnBridgeOptions['ambient'] | undefined
-    if (containers.length > 0 && this.config.ambientKeyword) {
+    if (this.config.ambientKeyword) {
+      // With a judge keyword the policy store exists even with no
+      // containers preloaded: absent entries stay inert, and tooling can
+      // enable containers after boot via `ambientPolicy`.
       const policy = createMemoryChannelPolicyStore()
       for (const container of containers) await policy.setAmbient(container, true)
       ambient = { policy, judge: createKeywordAmbientJudge(this.config.ambientKeyword) }
+      this.ambientPolicy = policy
     } else if (containers.length > 0) {
       this.ctx.logger.warn('im-bridge: ambientContainers set without ambientKeyword — ambient stays inert')
-    } else if (this.config.ambientKeyword) {
-      this.ctx.logger.warn('im-bridge: ambientKeyword set without ambientContainers — ambient stays inert')
     }
     const registry = new ImRegistryService(this.ctx, {
       onEvent: (events) => (this.bridge ? this.bridge.sink(events) : Promise.resolve()),
