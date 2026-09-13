@@ -1,0 +1,19 @@
+{
+  "name": "@qm/harness-claude",
+  "version": "0.1.0",
+  "private": true,
+  "description": "claude engine harness: the claude-agent-sdk adapter bridging the shared pi tools over an in-process MCP server",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.211",
+    "@qm/harness-pi": "workspace:^",
+    "@qm/model": "workspace:^",
+    "@qm/types": "workspace:^",
+    "zod": "4.4.3"
+  }
+}
