@@ -1,0 +1,33 @@
+# qm-next P1 real-engine profile: Feishu IM → delivery queue → orchestrator →
+# pi-harness → model registry, with provider keys injected from the
+# environment (boot via `aidevops secret run` so keys ride along):
+#
+#   FEISHU_APP_ID / FEISHU_APP_SECRET   required (open-platform app, long connection)
+#   FEISHU_VERIFICATION_TOKEN / FEISHU_ENCRYPT_KEY  optional (card callbacks)
+#   ANTHROPIC_API_KEY (or OPENAI_API_KEY / OPENROUTER_API_KEY)  provider key for the pi engine
+#   QM_MODEL_ID   optional base model override (defaults to the registry default)
+#
+# The Feishu app must receive card callbacks over the long connection
+# (open-platform console) for the approval-card leg.
+- id: api
+  name: '@qm/api'
+  config:
+    port: 0
+    secrets: ['dev-p1-agent-secret']
+    defaultHarness: pi
+    modelId: !!js "process.env.QM_MODEL_ID"
+    anthropicApiKey: !!js "process.env.ANTHROPIC_API_KEY"
+    openaiApiKey: !!js "process.env.OPENAI_API_KEY"
+    openrouterApiKey: !!js "process.env.OPENROUTER_API_KEY"
+- id: im-bridge
+  name: '@qm/im-bridge'
+- id: triggers
+  name: '@qm/triggers'
+- id: feishu
+  name: '@qm/im-feishu'
+  config:
+    appId: !!js "process.env.FEISHU_APP_ID"
+    appSecret: !!js "process.env.FEISHU_APP_SECRET"
+    instanceId: p1
+    verificationToken: !!js "process.env.FEISHU_VERIFICATION_TOKEN"
+    encryptKey: !!js "process.env.FEISHU_ENCRYPT_KEY"

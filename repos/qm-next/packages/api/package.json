@@ -2,7 +2,7 @@
   "name": "@qm/api",
   "version": "0.1.0",
   "private": true,
-  "description": "HTTP surface: signed-token auth, POST /v1/turns (sync and async queue) and the M1 composition root wiring stores, mock harness and the orchestrator",
+  "description": "HTTP surface: signed-token auth, POST /v1/turns (sync and async queue) and the composition root wiring stores, harness registry (mock or real pi engine) and the orchestrator",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@qm/cordis": "workspace:^",
+    "@qm/harness-pi": "workspace:^",
+    "@qm/model": "workspace:^",
     "@qm/orchestrator": "workspace:^",
     "@qm/schemastery": "workspace:^",
     "@qm/store": "workspace:^",

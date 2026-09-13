@@ -66,7 +66,7 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
   - [x] 3.3 共享件：tape-fold/replay/context-compaction/goal/grind（入 `packages/harness-pi`，1.1 定） ~4h（另含 run-signal-store/tokens/message-tag/define-harness/security-posture 纯函数；tape audience 过滤随 P4——#25）
   - [ ] 3.4 真模型单测（跳过式：有 key 才跑）+ mock 对拍 ~3h（mock 对拍 21 测试过：output-guard/detect/title/tape/replay/goal/pi-tools 只读与审批流；真模型跳过式待 key）
 - [ ] 4.0 【汇合】真任务验收 ~1d
-  - [ ] 4.1 profile 组装：im-feishu → orchestrator → pi-harness → model → credentials 全链 ~2h
+  - [x] 4.1 profile 组装：im-feishu → orchestrator → pi-harness → model → credentials 全链 ~2h（api 组合根 `defaultHarness: 'pi'` 注册真引擎并接 modelGateway；profiles/im-agent.yml + scripts/boot-im-agent.ts；boot 测试覆盖 agent stanza 环境插值 boot）
   - [ ] 4.2 飞书 @机器人真实编码任务 vs qm 同任务对拍（结果/耗时/流式） ~2h
   - [ ] 4.3 `test:pg` 基线扩充 + 全绿；【串行门验收】打 tag `p1` ~2h
 

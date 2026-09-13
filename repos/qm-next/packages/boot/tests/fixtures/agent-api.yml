@@ -1,0 +1,10 @@
+# api stanza of the P1 agent profile (profiles/im-agent.yml): the real pi
+# engine registered beside mock, provider keys interpolated from the env.
+- id: api
+  name: '@qm/api'
+  config:
+    port: 0
+    secrets: ['dev-p1-agent-secret']
+    defaultHarness: pi
+    modelId: !!js "process.env.QM_MODEL_ID"
+    anthropicApiKey: !!js "process.env.ANTHROPIC_API_KEY"

@@ -88,3 +88,27 @@ test('the repository profile boots end to end', async () => {
   assert.equal(ctx.reflect.get('api'), undefined)
   await assert.rejects(() => fetch(`http://127.0.0.1:${port}/healthz`))
 })
+
+test('the agent profile stanza boots the pi engine from env interpolation', async () => {
+  const profile = await stageFixture('agent-api')
+  const ctx = await bootProfile(profile)
+  const deps = ctx.api.orchestrator.deps
+  assert.deepEqual(deps.harness.ids().sort(), ['mock', 'pi'])
+  const { port } = ctx.api.address
+  const token = await mintSignedPayload({ p: 'user-1' }, 'dev-p1-agent-secret')
+  const res = await fetch(`http://127.0.0.1:${port}/v1/turns`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      text: 'hi pi boot',
+      surface: 'api',
+      harness: 'mock',
+      conversation: { kind: 'dm', threadRef: 'thread:agent-api' },
+    }),
+  })
+  assert.equal(res.status, 200)
+  assert.equal(((await res.json()) as { reply?: string }).reply, 'echo: hi pi boot')
+
+  await ctx.loader.remove('include')
+  assert.equal(ctx.reflect.get('api'), undefined)
+})

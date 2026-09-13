@@ -180,3 +180,27 @@ test('ApiService: real listen, healthz and sync turn over HTTP, clean dispose', 
   await fiber.dispose()
   await assert.rejects(() => fetch(`${base}/healthz`))
 })
+
+test('ApiService: defaultHarness pi registers the real engine beside mock; explicit mock turns still work', async () => {
+  const ctx = new Context()
+  const fiber = await ctx.plugin(ApiService, { secrets: [SECRET], port: 0, defaultHarness: 'pi' })
+  const deps = ctx.api.orchestrator.deps
+  assert.deepEqual(deps.harness.ids().sort(), ['mock', 'pi'])
+  assert.ok(deps.harness.get('pi'))
+  assert.ok(deps.modelGateway)
+  const { port } = ctx.api.address
+  const base = `http://127.0.0.1:${port}`
+  const res = await fetch(`${base}/v1/turns`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${await mint({ p: 'user-1' })}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      text: 'hi mock',
+      surface: 'api',
+      harness: 'mock',
+      conversation: { kind: 'dm', threadRef: 'thread:pi-registered' },
+    }),
+  })
+  assert.equal(res.status, 200)
+  assert.equal(((await res.json()) as TurnResult).reply, 'echo: hi mock')
+  await fiber.dispose()
+})

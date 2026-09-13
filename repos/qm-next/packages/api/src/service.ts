@@ -1,14 +1,18 @@
 /**
- * The M1 composition root: memory stores, mock harness, dev admission
+ * The composition root: memory stores, harness registry (mock echo and, when
+ * configured, the real pi engine over the model registry), dev admission
  * defaults, the orchestrator, the async run loop and the HTTP server wired
  * into one cordis service. This is assembly, not policy — production
  * deployments swap each piece without touching the others.
  */
 import { Context, Service } from '@qm/cordis'
+import { createPiHarness } from '@qm/harness-pi'
+import { createModelGateway } from '@qm/model'
 import { createHarnessRouter, createMockHarness, OrchestratorService } from '@qm/orchestrator'
 import Schema from '@qm/schemastery'
 import { createMemoryRunEventBus, createMemoryRunStore, createMemorySessionStore } from '@qm/store'
 import type {
+  Harness,
   IdentityService,
   RateLimiter,
   ResolutionService,
@@ -29,8 +33,14 @@ export interface ApiConfig {
   secrets: string[]
   /** Async run-queue poll interval in ms. */
   tickMs?: number
-  /** Harness id used when a turn does not name one. */
-  defaultHarness?: string
+  /** Harness id used when a turn does not name one; 'pi' boots the real engine. */
+  defaultHarness?: 'mock' | 'pi'
+  /** Base model id for the pi harness (a model registry entry). */
+  modelId?: string
+  /** Provider keys handed to the pi harness (env/config injection; keychain-backed resolution arrives with the control plane). */
+  anthropicApiKey?: string
+  openaiApiKey?: string
+  openrouterApiKey?: string
   /** Dev default system prompt. */
   systemPrompt?: string
   /** Dev default scope for API turns. */
@@ -42,7 +52,11 @@ export const Config = Schema.object({
   host: Schema.string().default('127.0.0.1').description('Listen host'),
   secrets: Schema.array(Schema.string()).required().description('Signing secrets; the first mints, every entry verifies'),
   tickMs: Schema.number().default(25).description('Async run-queue poll interval in ms'),
-  defaultHarness: Schema.string().default('mock').description('Harness id used when a turn does not name one'),
+  defaultHarness: Schema.union(['mock', 'pi']).default('mock').description("Harness id used when a turn does not name one; 'pi' boots the real engine"),
+  modelId: Schema.string().description('pi base model id (a model registry entry)'),
+  anthropicApiKey: Schema.string().description('Anthropic key for the pi harness'),
+  openaiApiKey: Schema.string().description('OpenAI key for the pi harness'),
+  openrouterApiKey: Schema.string().description('OpenRouter key for the pi harness'),
   systemPrompt: Schema.string().default('You are qm-next.').description('Dev default system prompt'),
   scopeId: Schema.string().default('org:default').description('Dev default scope for API turns'),
 })
@@ -97,8 +111,20 @@ export class ApiService extends Service<ApiConfig> {
     const sessions = createMemorySessionStore()
     const runs = createMemoryRunStore()
     const runEvents = createMemoryRunEventBus()
-    const registry = createHarnessRouter({ defaultId: this.config.defaultHarness ?? 'mock' })
+    const modelGateway = createModelGateway()
+    const harnessId = this.config.defaultHarness ?? 'mock'
+    const registry = createHarnessRouter({ defaultId: harnessId })
     registry.register(createMockHarness())
+    let engine: Harness | undefined
+    if (harnessId === 'pi') {
+      engine = createPiHarness({
+        ...(this.config.modelId ? { modelId: this.config.modelId } : {}),
+        ...(this.config.anthropicApiKey ? { apiKey: this.config.anthropicApiKey } : {}),
+        ...(this.config.openaiApiKey ? { openaiApiKey: this.config.openaiApiKey } : {}),
+        ...(this.config.openrouterApiKey ? { openrouterApiKey: this.config.openrouterApiKey } : {}),
+      })
+      registry.register(engine)
+    }
     const resolution = devResolution(this.config)
     const orchestrator = new OrchestratorService(this.ctx, {
       sessions,
@@ -108,6 +134,7 @@ export class ApiService extends Service<ApiConfig> {
       resolution,
       rateLimiter: allowLimiter(),
       runEvents,
+      modelGateway,
     })
     this.runs = runs
     this.sessions = sessions
@@ -126,6 +153,11 @@ export class ApiService extends Service<ApiConfig> {
     return async () => {
       await runner.stop()
       await app.close()
+      try {
+        await engine?.turns.close?.()
+      } catch {
+        void 0
+      }
     }
   }
 }
