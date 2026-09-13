@@ -1,6 +1,7 @@
 /**
- * Schema DDL for the M1 store surface: runs queue and session/entry/lease
- * tables. Fresh-install statements only — qm's legacy migrations stay behind.
+ * Schema DDL for the M1 store surface: runs queue and
+ * session/entry/lease/tape/LLM-request tables. Fresh-install statements
+ * only — qm's legacy migrations stay behind.
  */
 export const RUN_SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS runs(
@@ -39,4 +40,19 @@ export const SESSION_SCHEMA_STATEMENTS = [
       session_id TEXT PRIMARY KEY, token TEXT NOT NULL, expires_at BIGINT NOT NULL,
       holder TEXT, acquired_at BIGINT
     )`,
+  `CREATE TABLE IF NOT EXISTS session_tape(
+      session_id TEXT NOT NULL, seq INT NOT NULL,
+      kind TEXT NOT NULL, payload TEXT, scope_label TEXT NOT NULL, harness TEXT,
+      meta TEXT, entry_seq INT, covers_entry_seq INT, created_at BIGINT NOT NULL,
+      PRIMARY KEY(session_id, seq)
+    )`,
+  `CREATE INDEX IF NOT EXISTS session_tape_session_seq ON session_tape(session_id, seq)`,
+  `CREATE TABLE IF NOT EXISTS llm_requests(
+      id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_seq INT, step INT NOT NULL,
+      model TEXT NOT NULL, scope_label TEXT NOT NULL, created_at BIGINT NOT NULL,
+      request TEXT, prompt_hash TEXT, prompt_envelope TEXT, truncated BOOLEAN NOT NULL DEFAULT FALSE,
+      ttft_ms BIGINT, duration_ms BIGINT, step_gap_ms BIGINT, tool_wall_ms TEXT,
+      gap_phases TEXT, usage TEXT, transport TEXT
+    )`,
+  `CREATE INDEX IF NOT EXISTS llm_requests_session_created ON llm_requests(session_id, created_at)`,
 ]

@@ -53,7 +53,7 @@ AI search:
 
 ### p002: qm-parity — qm-next 全功能对齐（qm 全功能替身）
 
-**Status:** Planning（待用户拍板 Open Questions 后开道）
+**Status:** In Progress (Phase P1/5)；Open Questions 5 项均不阻塞 P1（引擎优先级/长尾确认/迁移目标库/多渠道/退役时间表分别在 P2/P4/P5 拍板）
 **Owner:** @wxd
 **Tags:** #qm-parity #qm-next #parity
 **Estimate:** ~23d (ai:20d test:3d read:2h)；双车道并行墙钟 ~3-4 周
@@ -94,7 +94,7 @@ v0.1.0 只覆盖 qm 最核心的 ~11%（15k/133k 行 TS）。本计划把 qm-nex
 
 #### Progress
 
-- [ ] (2026-09-13) Phase P1 真引擎回路：契约冻结 →【A credentials+model ‖ B pi-harness+sandbox】→ 汇合真任务对拍 ~5d
+- [ ] (2026-09-13) Phase P1 真引擎回路：契约冻结 →【A credentials+model ‖ B pi-harness+sandbox】→ 汇合真任务对拍 ~5d（1.0 串行门已过：`@qm/types` 四契约 + tape/LLM 记录组 + OrchestratorDeps.modelGateway，全门禁绿）
 - [ ] Phase P2 多引擎 + runs：claude ‖ codex ‖ opencode ‖ runs 深化 → router 配置化 ~4d
 - [ ] Phase P3 API 面与控制台：routes 契约 →【A api ‖ B admin/auth/portal】→ web-ui 后端化 ~5d
 - [ ] Phase P4 长尾 + 回填：IM 域 ‖ memory/skills/reach 完整化 ‖ 长尾子系统 → OUT 项对账 ~5d
@@ -106,6 +106,8 @@ v0.1.0 只覆盖 qm 最核心的 ~11%（15k/133k 行 TS）。本计划把 qm-nex
 - 2026-09-13 引擎依赖 pin qm 同版本（pi security fork、claude-agent-sdk 0.3.211、codex 0.144.5、opencode 1.17.18、pg-boss 12.x），回避引擎行为漂移
 - 2026-09-13 API 对齐标准为"路由形状兼容"（迁移期 qm CLI/自动化不破坏），非逐行照抄；偏差记录 `docs/parity-deviations.md`
 - 2026-09-13 durable-by-default 沿 qm 铁律：生产路径 PG 强制，内存实现仅测试
+- 2026-09-13 P1 契约冻结落地：`@qm/types` 增 model/credentials/sandbox/tools 四文件；session-store 增 tape+LLM 记录组（memory+PG 同步实现）；`check:im` 逼出 surface-search/webhook-scheme 平台中性化；偏差全部记 `repos/qm-next/docs/parity-deviations.md`（10 条）
+- 2026-09-13 ToolContext 定为类型级全量冻结、运行时分阶段：P1 只实现 sandbox 支撑的 execute/read/write/computer，P4 域成员随子系统激活；`ToolContextDeps` 留待 4.1 profile 组装契约
 
 #### Surprises & Discoveries
 
@@ -114,7 +116,7 @@ v0.1.0 只覆盖 qm 最核心的 ~11%（15k/133k 行 TS）。本计划把 qm-nex
 - qm-next orchestrator 已按 qm harness 接口形状编程（176 行骨架消费 `runTurn`），P1 契约冻结有现成基线
 
 <!--TOON:active_plans[1]{id,title,status,phase,total_phases,owner,tags,est,est_ai,est_test,est_read,logged,started}:
-p002,qm-parity — qm-next 全功能对齐（qm 全功能替身）,planning,0,5,wxd,#qm-parity #qm-next #parity,~23d,~20d,~3d,~2h,2026-09-13,
+p002,qm-parity — qm-next 全功能对齐（qm 全功能替身）,in_progress,1,5,wxd,#qm-parity #qm-next #parity,~23d,~20d,~3d,~2h,2026-09-13,2026-09-13
 -->
 
 ## Completed Plans

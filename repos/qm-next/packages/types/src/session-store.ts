@@ -2,9 +2,9 @@
  * Session persistence contract (M1 core subset of qm's SessionStore).
  *
  * Lease semantics: a turn acquires the session lease before appending, so
- * concurrent runs over one thread serialize. Extension method groups (tape,
- * LLM request records, participant views, search, admin listings) are
- * deliberately deferred; additions must be additive.
+ * concurrent runs over one thread serialize. P1 adds the tape and LLM
+ * request record groups the harness layer consumes; participant views,
+ * search, and admin listings remain deferred; additions must be additive.
  */
 import type { ScopeId } from './identity.ts'
 import type { GetEntriesOptions, NewEntry, Session, SessionEntry, SessionType } from './session.ts'
@@ -21,6 +21,132 @@ export interface LeaseAttempt {
   heldBy?: LeaseHolder
   heldSince?: number
   heldUntil?: number
+}
+
+export type TapeKind = 'message' | 'context_event' | 'annotation'
+
+export interface TapeMeta {
+  bareText?: string
+  ts?: string
+  changeTime?: string
+  hidden?: boolean
+  overheard?: boolean
+  author?: string
+}
+
+export interface NewTapeRecord {
+  kind: TapeKind
+  payload: unknown
+  scopeLabel: ScopeId
+  harness?: string
+  meta?: TapeMeta
+  entrySeq?: number
+  coversEntrySeq?: number
+}
+
+export interface TapeRecord extends NewTapeRecord {
+  sessionId: string
+  seq: number
+  createdAt: number
+}
+
+export interface GetTapeOptions {
+  sinceSeq?: number
+  limit?: number
+}
+
+export interface LlmCallUsage {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  totalTokens: number
+  costUsd: number
+}
+
+export interface LlmTransportMeta {
+  modelId?: string
+  headers?: Record<string, string>
+}
+
+export type GapPhase =
+  | 'provision'
+  | 'creds'
+  | 'dir_cleanup'
+  | 'proc_reconcile'
+  | 'auth_probe'
+  | 'skills_materialize'
+  | 'recall'
+  | 'memory_write'
+  | 'file_op'
+  | 'exec'
+  | 'model_dispatch'
+  | 'dispatch_glue'
+  | 'loop_reentry'
+  | 'context_assemble'
+  | 'glue_other'
+  | 'tool_body'
+  | 'pre_tool'
+  | 'in_tool_untagged'
+  | 'post_tool'
+  | 'tool_ledger'
+  | 'persist'
+  | 'stream_open'
+
+export interface GapWork {
+  phase: GapPhase
+  start: number
+  end: number
+  tool?: string
+}
+
+export type GapPhases = Partial<Record<GapPhase, number>> & {
+  residual?: number
+} & {
+  [key: `tool_body.${string}`]: number | undefined
+}
+
+export interface LlmRequestRecord {
+  id: string
+  sessionId: string
+  turnSeq: number | null
+  step: number
+  model: string
+  scopeLabel: ScopeId
+  createdAt: number
+  request: unknown
+  promptHash: string | null
+  promptEnvelope?: unknown
+  truncated: boolean
+  ttftMs: number | null
+  durationMs: number | null
+  stepGapMs: number | null
+  toolWallMs: number[] | null
+  gapPhases: GapPhases | null
+  usage: LlmCallUsage | null
+  transport: LlmTransportMeta | null
+}
+
+export interface NewLlmRequest {
+  turnSeq: number | null
+  step: number
+  model: string
+  scopeLabel: ScopeId
+  promptEnvelope?: unknown
+  truncated?: boolean
+  ttftMs?: number | null
+  durationMs?: number | null
+  stepGapMs?: number | null
+  toolWallMs?: number[] | null
+  gapPhases?: GapPhases | null
+  usage?: LlmCallUsage | null
+  transport?: LlmTransportMeta | null
+}
+
+export interface ListLlmRequestsOptions {
+  turnSeqs?: number[]
+  orphans?: boolean
+  omitRequest?: boolean
 }
 
 export interface SessionStore {
@@ -42,6 +168,12 @@ export interface SessionStore {
 
   append(lease: Lease, entry: NewEntry): Promise<SessionEntry>
   getEntries(sessionId: string, opts?: GetEntriesOptions): Promise<SessionEntry[]>
+
+  appendTape(lease: Lease, rec: NewTapeRecord): Promise<TapeRecord>
+  getTape(sessionId: string, opts?: GetTapeOptions): Promise<TapeRecord[]>
+
+  recordLlmRequest(sessionId: string, rec: NewLlmRequest, signal?: AbortSignal): Promise<LlmRequestRecord>
+  listLlmRequests(sessionId: string, opts?: ListLlmRequestsOptions): Promise<LlmRequestRecord[]>
 
   addParticipant(sessionId: string, principalId: string): Promise<void>
   removeParticipant(sessionId: string, principalId: string): Promise<void>

@@ -112,7 +112,15 @@ export class OrchestratorService extends Service implements Orchestrator {
         },
         scopeLabel: scopeId,
         orgScopeId: resolution.orgScopeId,
-        recordModelCall: () => undefined,
+        recordModelCall: (rec) => {
+          deps.modelGateway?.recordCall({
+            at: Date.now(),
+            scopeLabel: scopeId,
+            model: rec.model,
+            inputTokens: rec.inputTokens,
+            entryCount: rec.entryCount,
+          })
+        },
         ...(events
           ? {
               onDelta: (text: string) => publish({ kind: 'delta', text } satisfies Omit<RunDeltaEvent, 'runId' | 'sessionId' | 'seq'>),

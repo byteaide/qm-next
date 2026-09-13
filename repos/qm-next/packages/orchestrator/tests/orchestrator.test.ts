@@ -98,6 +98,33 @@ class FakeSessions implements SessionStore {
   async participantsOf(): Promise<string[]> {
     return []
   }
+
+  tapeRows = new Map<string, any[]>()
+  async appendTape(lease: { sessionId: string; token: string }, rec: any) {
+    if (this.leases.get(lease.sessionId) !== lease.token) throw new Error('appendTape without a valid session lease')
+    const rows = this.tapeRows.get(lease.sessionId) ?? []
+    this.tapeRows.set(lease.sessionId, rows)
+    const full = { sessionId: lease.sessionId, seq: rows.length, createdAt: 0, ...rec }
+    rows.push(full)
+    return full
+  }
+
+  async getTape(sessionId: string) {
+    return this.tapeRows.get(sessionId) ?? []
+  }
+
+  llmRequests = new Map<string, any[]>()
+  async recordLlmRequest(sessionId: string, rec: any) {
+    const rows = this.llmRequests.get(sessionId) ?? []
+    this.llmRequests.set(sessionId, rows)
+    const full = { id: `llm-${rows.length + 1}`, sessionId, createdAt: 0, ...rec }
+    rows.push(full)
+    return full
+  }
+
+  async listLlmRequests(sessionId: string) {
+    return this.llmRequests.get(sessionId) ?? []
+  }
 }
 
 class FakeRuns implements RunStore {

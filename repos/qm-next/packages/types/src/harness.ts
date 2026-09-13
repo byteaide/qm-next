@@ -1,12 +1,17 @@
 /**
  * Harness adapter contract: the seam between the orchestrator and a model
  * runtime (mock, in-process SDK, HTTP gateway, ...). Adapted from qm's
- * harness.ts with the security-screening, tape and image fields deferred.
+ * harness.ts with the security-screening callbacks still deferred; P1 adds
+ * the tools/tape/goal/compaction hooks and the per-turn auth vocabulary the
+ * four engine harnesses consume.
  */
 import type { ConversationTurn } from './conversation.ts'
 import type { ScopeId } from './identity.ts'
 import type { IncomingAttachment } from './destination.ts'
 import type { NewEntry, Session, SessionEntry } from './session.ts'
+import type { GapPhases, GapWork, LlmCallUsage, LlmTransportMeta, NewTapeRecord, TapeRecord } from './session-store.ts'
+import type { ProviderKeys } from './model.ts'
+import type { ToolContext } from './tools.ts'
 
 export type HarnessControlTransport = 'mock' | 'in-process' | 'sdk' | 'http' | 'json-rpc' | 'api'
 
@@ -28,8 +33,59 @@ export interface HarnessLlmRequestRecord {
   model: string
   promptEnvelope?: unknown
   truncated: boolean
+  transport?: LlmTransportMeta | null
   ttftMs?: number | null
   durationMs?: number | null
+  stepGapMs?: number | null
+  toolWallMs?: number[] | null
+  gapPhases?: GapPhases | null
+  usage?: LlmCallUsage | null
+}
+
+export interface HarnessImage {
+  mimeType: string
+  dataBase64: string
+  artifactId?: string
+}
+
+export interface OverheardEntryPayload {
+  overheard: true
+  ts: string
+  changeTime?: string
+  name?: string
+  text: string
+  files?: string[]
+  mentions?: Record<string, string>
+}
+
+export interface CodexTurnAuth {
+  accessToken: string
+  idToken: string
+  accountId?: string
+  expiresAt?: number
+}
+
+export type GoalStatus = 'active' | 'complete' | 'blocked'
+
+export interface GrindBudget {
+  minTurns?: number
+  minMs?: number
+  minTokens?: number
+  minUsd?: number
+}
+
+export interface GoalRecord {
+  objective: string
+  status: GoalStatus
+  floor?: GrindBudget
+  capTokens?: number
+  tokensUsed: number
+  createdAt: number
+  updatedAt: number
+  blockedStreak: number
+  blockedReason?: string
+  completionNote?: string
+  source: 'tool' | 'directive'
 }
 
 export interface HarnessTurnInput {
@@ -37,21 +93,44 @@ export interface HarnessTurnInput {
   runId?: string
   cancel?: AbortSignal
   input: string
+  triggerTs?: string
+  entryTs?: string
+  environment?: string
   priorTurns?: ConversationTurn[]
+  overheard?: OverheardEntryPayload[]
   attachments?: IncomingAttachment[]
+  images?: HarnessImage[]
   model?: string
   harness?: string
   thinkingLevel?: string
+  fastMode?: boolean
   readOnly?: boolean
+  surfaceTools?: boolean
+  surfaceName?: string
+  pollFire?: boolean
+  turnWallClockMs?: number
   systemPrompt: string
+  systemCacheBoundary?: number
   history: SessionEntry[]
+  tools?: ToolContext
   emit(entry: NewEntry): Promise<SessionEntry>
+  tape?(rec: NewTapeRecord): Promise<unknown>
+  tapeRows?: TapeRecord[]
+  tapeMode?: 'shadow' | 'serve'
+  tapeFold?: unknown[]
   scopeLabel: ScopeId
   orgScopeId: ScopeId
+  providerKeys?: ProviderKeys
+  runtimePinned?: boolean
+  claudeOauthToken?: string
+  codexAuth?: CodexTurnAuth
   recordModelCall(rec: { model: string; inputTokens: number; entryCount: number }): void
   recordLlmRequest?(rec: HarnessLlmRequestRecord): void | Promise<void>
-  onProgress?(p: { toolCalls: number }): void
+  onProgress?(p: { toolCalls: number; tokens?: number }): void
+  onGapWork?(sink: (work: GapWork) => void): void
   onDelta?(chunk: string): void
+  onTextBlockStart?(): void
+  toolApprovalGate?(tool: string): boolean
 }
 
 export interface HarnessPendingApproval {
@@ -71,6 +150,8 @@ export interface HarnessTurnResult {
   pausedOnApproval?: boolean
   modelCalls?: number
   cacheUsage?: { cacheRead: number; cacheWrite: number; uncachedInput: number }
+  compileMs?: number
+  tapeWriteFailed?: boolean
 }
 
 export interface HarnessDetectInput {
@@ -103,8 +184,9 @@ export interface HarnessTurnController {
 export interface HarnessModelUtilities {
   shouldRespond?(input: HarnessDetectInput): Promise<HarnessDetectResult>
   compactHistory?(input: HarnessCompactInput): Promise<string>
-  generateTitle?(transcript: string): Promise<string | undefined>
+  contextTokenBudget?(scopeLabel?: string, model?: string): number | undefined
   oneShot?(systemPrompt: string, prompt: string): Promise<string | undefined>
+  generateTitle?(transcript: string): Promise<string | undefined>
 }
 
 export interface HarnessToolPresentation {

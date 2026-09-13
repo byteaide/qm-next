@@ -1,21 +1,27 @@
 /**
  * Postgres SessionStore for the frozen M1 contract subset. Session mutation
  * serializes on a per-session advisory transaction lock; append requires a
- * live lease and extends it (qm semantics). Translated from qm's
- * postgres-session-store minus tape, LLM records, search and admin listings.
+ * live lease and extends it (qm semantics). P1 adds the tape and LLM
+ * request record groups; search and admin listings remain deferred.
  */
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type {
   GetEntriesOptions,
+  GetTapeOptions,
   Lease,
   LeaseAttempt,
   LeaseHolder,
+  LlmRequestRecord,
+  ListLlmRequestsOptions,
   NewEntry,
+  NewLlmRequest,
+  NewTapeRecord,
   ScopeId,
   Session,
   SessionEntry,
   SessionStore,
   SessionType,
+  TapeRecord,
 } from '@qm/types'
 import { createPgPool, withPgTransaction, type PgPool, type PoolClient } from './pg-pool.ts'
 import { SESSION_SCHEMA_STATEMENTS } from './schema.ts'
@@ -48,6 +54,48 @@ function rowToEntry(r: Record<string, unknown>): SessionEntry {
     payload: r.payload != null ? JSON.parse(r.payload as string) : null,
     scopeLabel: r.scope_label as ScopeId,
     createdAt: Number(r.created_at),
+  }
+}
+
+function rowToTape(r: Record<string, unknown>): TapeRecord {
+  return {
+    sessionId: r.session_id as string,
+    seq: Number(r.seq),
+    createdAt: Number(r.created_at),
+    kind: r.kind as TapeRecord['kind'],
+    payload: r.payload != null ? JSON.parse(r.payload as string) : null,
+    scopeLabel: r.scope_label as ScopeId,
+    ...(r.harness != null ? { harness: r.harness as string } : {}),
+    ...(r.meta != null ? { meta: JSON.parse(r.meta as string) } : {}),
+    ...(r.entry_seq != null ? { entrySeq: Number(r.entry_seq) } : {}),
+    ...(r.covers_entry_seq != null ? { coversEntrySeq: Number(r.covers_entry_seq) } : {}),
+  }
+}
+
+function jsonOrNull(v: unknown): string | null {
+  return v === undefined || v === null ? null : JSON.stringify(v)
+}
+
+function rowToLlmRequest(r: Record<string, unknown>): LlmRequestRecord {
+  return {
+    id: r.id as string,
+    sessionId: r.session_id as string,
+    turnSeq: r.turn_seq === null || r.turn_seq === undefined ? null : Number(r.turn_seq),
+    step: Number(r.step),
+    model: r.model as string,
+    scopeLabel: r.scope_label as ScopeId,
+    createdAt: Number(r.created_at),
+    request: r.request != null ? JSON.parse(r.request as string) : null,
+    promptHash: (r.prompt_hash as string | null) ?? null,
+    promptEnvelope: r.prompt_envelope != null ? JSON.parse(r.prompt_envelope as string) : null,
+    truncated: Boolean(r.truncated),
+    ttftMs: r.ttft_ms === null || r.ttft_ms === undefined ? null : Number(r.ttft_ms),
+    durationMs: r.duration_ms === null || r.duration_ms === undefined ? null : Number(r.duration_ms),
+    stepGapMs: r.step_gap_ms === null || r.step_gap_ms === undefined ? null : Number(r.step_gap_ms),
+    toolWallMs: r.tool_wall_ms != null ? JSON.parse(r.tool_wall_ms as string) : null,
+    gapPhases: r.gap_phases != null ? JSON.parse(r.gap_phases as string) : null,
+    usage: r.usage != null ? JSON.parse(r.usage as string) : null,
+    transport: r.transport != null ? JSON.parse(r.transport as string) : null,
   }
 }
 
@@ -200,6 +248,136 @@ export function createPostgresSessionStore(
         since,
       ])
       return rows.map(rowToEntry)
+    },
+
+    async appendTape(lease, rec: NewTapeRecord): Promise<TapeRecord> {
+      return withLease(lease, 'appendTape without a valid session lease', async (client) => {
+        const max = await client.query(
+          'SELECT COALESCE(MAX(seq), -1) + 1 AS n FROM session_tape WHERE session_id = $1',
+          [lease.sessionId],
+        )
+        const seq = Number(max.rows[0]!.n)
+        const createdAt = now()
+        const full: TapeRecord = {
+          sessionId: lease.sessionId,
+          seq,
+          createdAt,
+          kind: rec.kind,
+          payload: rec.payload,
+          scopeLabel: rec.scopeLabel as ScopeId,
+          ...(rec.harness ? { harness: rec.harness } : {}),
+          ...(rec.meta ? { meta: rec.meta } : {}),
+          ...(rec.entrySeq !== undefined ? { entrySeq: rec.entrySeq } : {}),
+          ...(rec.coversEntrySeq !== undefined ? { coversEntrySeq: rec.coversEntrySeq } : {}),
+        }
+        await client.query(
+          `INSERT INTO session_tape(session_id, seq, kind, payload, scope_label, harness, meta, entry_seq, covers_entry_seq, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [
+            full.sessionId,
+            full.seq,
+            full.kind,
+            jsonOrNull(full.payload),
+            full.scopeLabel,
+            full.harness ?? null,
+            jsonOrNull(full.meta),
+            full.entrySeq ?? null,
+            full.coversEntrySeq ?? null,
+            full.createdAt,
+          ],
+        )
+        return full
+      })
+    },
+
+    async getTape(sessionId, opts?: GetTapeOptions): Promise<TapeRecord[]> {
+      const since = opts?.sinceSeq ?? 0
+      if (opts?.limit !== undefined) {
+        const rows = await q(
+          'SELECT * FROM session_tape WHERE session_id = $1 AND seq >= $2 ORDER BY seq DESC LIMIT $3',
+          [sessionId, since, opts.limit],
+        )
+        return rows.map(rowToTape).reverse()
+      }
+      const rows = await q('SELECT * FROM session_tape WHERE session_id = $1 AND seq >= $2 ORDER BY seq ASC', [
+        sessionId,
+        since,
+      ])
+      return rows.map(rowToTape)
+    },
+
+    async recordLlmRequest(sessionId, rec: NewLlmRequest, _signal?: AbortSignal): Promise<LlmRequestRecord> {
+      const id = randomUUID()
+      const createdAt = now()
+      const request = jsonOrNull(rec.promptEnvelope)
+      const promptHash =
+        rec.promptEnvelope === undefined || rec.promptEnvelope === null
+          ? null
+          : createHash('sha256').update(JSON.stringify(rec.promptEnvelope)).digest('hex').slice(0, 16)
+      await q(
+        `INSERT INTO llm_requests(id, session_id, turn_seq, step, model, scope_label, created_at,
+             request, prompt_hash, prompt_envelope, truncated, ttft_ms, duration_ms, step_gap_ms,
+             tool_wall_ms, gap_phases, usage, transport)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+        [
+          id,
+          sessionId,
+          rec.turnSeq,
+          rec.step,
+          rec.model,
+          rec.scopeLabel,
+          createdAt,
+          request,
+          promptHash,
+          request,
+          rec.truncated ?? false,
+          rec.ttftMs ?? null,
+          rec.durationMs ?? null,
+          rec.stepGapMs ?? null,
+          jsonOrNull(rec.toolWallMs ?? null),
+          jsonOrNull(rec.gapPhases ?? null),
+          jsonOrNull(rec.usage ?? null),
+          jsonOrNull(rec.transport ?? null),
+        ],
+      )
+      return {
+        id,
+        sessionId,
+        turnSeq: rec.turnSeq,
+        step: rec.step,
+        model: rec.model,
+        scopeLabel: rec.scopeLabel as ScopeId,
+        createdAt,
+        request: rec.promptEnvelope ?? null,
+        promptHash,
+        promptEnvelope: rec.promptEnvelope,
+        truncated: rec.truncated ?? false,
+        ttftMs: rec.ttftMs ?? null,
+        durationMs: rec.durationMs ?? null,
+        stepGapMs: rec.stepGapMs ?? null,
+        toolWallMs: rec.toolWallMs ?? null,
+        gapPhases: rec.gapPhases ?? null,
+        usage: rec.usage ?? null,
+        transport: rec.transport ?? null,
+      }
+    },
+
+    async listLlmRequests(sessionId, opts?: ListLlmRequestsOptions): Promise<LlmRequestRecord[]> {
+      const clauses: string[] = ['session_id = $1']
+      const params: unknown[] = [sessionId]
+      if (opts?.turnSeqs !== undefined) {
+        params.push(opts.turnSeqs)
+        clauses.push(`turn_seq = ANY($${params.length}::int[])`)
+      }
+      if (opts?.orphans) clauses.push('turn_seq IS NULL')
+      const select = opts?.omitRequest
+        ? 'id, session_id, turn_seq, step, model, scope_label, created_at, NULL AS request, prompt_hash, prompt_envelope, truncated, ttft_ms, duration_ms, step_gap_ms, tool_wall_ms, gap_phases, usage, transport'
+        : '*'
+      const rows = await q(
+        `SELECT ${select} FROM llm_requests WHERE ${clauses.join(' AND ')} ORDER BY created_at ASC`,
+        params,
+      )
+      return rows.map(rowToLlmRequest)
     },
 
     async addParticipant(sessionId, principalId): Promise<void> {

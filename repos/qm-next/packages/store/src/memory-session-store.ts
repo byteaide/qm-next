@@ -1,20 +1,26 @@
 /**
  * In-memory SessionStore for the frozen M1 contract subset: thread-keyed
- * sessions, TTL leases, seq-monotonic entry log, participant windows.
- * Translated from qm's memory-session-store (tape, LLM records, search and
- * admin listings are M3 extensions, not part of the frozen surface).
+ * sessions, TTL leases, seq-monotonic entry log, participant windows, and
+ * the P1 tape / LLM request record groups. Translated from qm's
+ * memory-session-store (search and admin listings remain deferred).
  */
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type {
   GetEntriesOptions,
+  GetTapeOptions,
   Lease,
   LeaseAttempt,
   LeaseHolder,
+  LlmRequestRecord,
+  ListLlmRequestsOptions,
   NewEntry,
+  NewLlmRequest,
+  NewTapeRecord,
   ScopeId,
   Session,
   SessionEntry,
   SessionStore,
+  TapeRecord,
 } from '@qm/types'
 
 export interface MemoryStoreOptions {
@@ -41,9 +47,16 @@ export function createMemorySessionStore(opts: MemoryStoreOptions = {}): Session
   const leaseTtlMs = opts.leaseTtlMs ?? 5 * 60_000
   const sessions = new Map<string, Session>()
   const entries = new Map<string, SessionEntry[]>()
+  const tape = new Map<string, TapeRecord[]>()
+  const llmRequests = new Map<string, LlmRequestRecord[]>()
   const byThread = new Map<string, string>()
   const participants = new Map<string, Map<string, ParticipantWindow>>()
   const leases = new Map<string, HeldLease>()
+
+  const promptHashOf = (request: unknown): string | null =>
+    request === undefined || request === null
+      ? null
+      : createHash('sha256').update(JSON.stringify(request)).digest('hex').slice(0, 16)
 
   return {
     async getOrCreateByThread(threadRef, type, scopeId, surface, channelName) {
@@ -141,6 +154,73 @@ export function createMemorySessionStore(opts: MemoryStoreOptions = {}): Session
       const since = opts?.sinceSeq ?? 0
       const filtered = log.filter((e) => e.seq >= since)
       return opts?.limit !== undefined ? filtered.slice(-opts.limit) : filtered
+    },
+
+    async appendTape(lease, rec: NewTapeRecord): Promise<TapeRecord> {
+      const held = leases.get(lease.sessionId)
+      if (!held || held.token !== lease.token) {
+        throw new Error('appendTape without a valid session lease')
+      }
+      const rows = tape.get(lease.sessionId) ?? []
+      tape.set(lease.sessionId, rows)
+      const full: TapeRecord = {
+        sessionId: lease.sessionId,
+        seq: rows.length,
+        createdAt: now(),
+        kind: rec.kind,
+        payload: rec.payload,
+        scopeLabel: rec.scopeLabel as ScopeId,
+        ...(rec.harness ? { harness: rec.harness } : {}),
+        ...(rec.meta ? { meta: rec.meta } : {}),
+        ...(rec.entrySeq !== undefined ? { entrySeq: rec.entrySeq } : {}),
+        ...(rec.coversEntrySeq !== undefined ? { coversEntrySeq: rec.coversEntrySeq } : {}),
+      }
+      rows.push(full)
+      return full
+    },
+
+    async getTape(sessionId, opts?: GetTapeOptions) {
+      const rows = tape.get(sessionId) ?? []
+      const since = opts?.sinceSeq ?? 0
+      const filtered = rows.filter((r) => r.seq >= since)
+      return opts?.limit !== undefined ? filtered.slice(-opts.limit) : filtered
+    },
+
+    async recordLlmRequest(sessionId, rec: NewLlmRequest, _signal?: AbortSignal): Promise<LlmRequestRecord> {
+      const rows = llmRequests.get(sessionId) ?? []
+      llmRequests.set(sessionId, rows)
+      const full: LlmRequestRecord = {
+        id: randomUUID(),
+        sessionId,
+        turnSeq: rec.turnSeq,
+        step: rec.step,
+        model: rec.model,
+        scopeLabel: rec.scopeLabel as ScopeId,
+        createdAt: now(),
+        request: rec.promptEnvelope ?? null,
+        promptHash: promptHashOf(rec.promptEnvelope),
+        truncated: rec.truncated ?? false,
+        ttftMs: rec.ttftMs ?? null,
+        durationMs: rec.durationMs ?? null,
+        stepGapMs: rec.stepGapMs ?? null,
+        toolWallMs: rec.toolWallMs ?? null,
+        gapPhases: rec.gapPhases ?? null,
+        usage: rec.usage ?? null,
+        transport: rec.transport ?? null,
+      }
+      rows.push(full)
+      return full
+    },
+
+    async listLlmRequests(sessionId, opts?: ListLlmRequestsOptions) {
+      let rows = llmRequests.get(sessionId) ?? []
+      if (opts?.turnSeqs !== undefined) {
+        const wanted = new Set(opts.turnSeqs)
+        rows = rows.filter((r) => r.turnSeq !== null && wanted.has(r.turnSeq))
+      }
+      if (opts?.orphans) rows = rows.filter((r) => r.turnSeq === null)
+      if (opts?.omitRequest) rows = rows.map((r) => ({ ...r, request: null }))
+      return rows
     },
 
     async addParticipant(sessionId, principalId) {

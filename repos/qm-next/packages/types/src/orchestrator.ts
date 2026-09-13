@@ -9,6 +9,7 @@
 import type { Conversation } from './conversation.ts'
 import type { HarnessRegistry } from './harness.ts'
 import type { Principal, ScopeId } from './identity.ts'
+import type { ModelGateway } from './model.ts'
 import type { BudgetTracker, RateLimiter } from './ratelimit.ts'
 import type { RunEventBus } from './run-events.ts'
 import type { RunStore } from './run.ts'
@@ -40,6 +41,8 @@ export interface OrchestratorDeps {
   budget?: BudgetTracker
   /** Optional run event stream (M3): harness deltas/progress surface here. */
   runEvents?: RunEventBus
+  /** Optional model usage recorder (P1): powers recordModelCall and admin sinks. */
+  modelGateway?: ModelGateway
 }
 
 export interface Orchestrator {
