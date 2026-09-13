@@ -17,7 +17,7 @@ export interface Session {
   lastActivityAt?: number
 }
 
-export type EntryType = 'user' | 'assistant' | 'thinking' | 'text' | 'tool_call' | 'tool_result' | 'system'
+export type EntryType = 'user' | 'assistant' | 'thinking' | 'text' | 'tool_call' | 'tool_result' | 'system' | 'soul' | 'delivery'
 
 export interface SessionEntry {
   sessionId: string

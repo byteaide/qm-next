@@ -337,8 +337,15 @@ export type ShareArtifactResult =
       verb: 'share' | 'move' | 'promote'
       type: ArtifactType
       id: string
+      target: { scope: ScopeId; label: string }
+      permission: Permission
     }
-  | { ok: false; code: string; message: string }
+  | {
+      ok: false
+      code: 'bad_request' | 'not_found' | 'forbidden' | 'recipient_not_found' | 'ambiguous_recipient' | 'share_failed'
+      message: string
+      candidates?: Array<{ id: string; label: string }>
+    }
 
 export interface RecipientConsent {
   recipientId: string

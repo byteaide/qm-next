@@ -131,3 +131,30 @@ Each entry names the qm source shape, the qm-next shape, and why.
     (api, wiring, capability tokens); `codex-device-login.ts` drives the
     Codex app-server, which lands with the harness lane (3.2). Both port
     together with those consumers.
+
+## Lane B2 / harness-pi (2026-09-13, local implementation)
+
+23. **pi-coding-agent vendored from upstream 0.82.0, not the qm security
+    fork** — qm pins `0.82.0-qm-security.3`, a fork tarball published only on
+    GitHub (unreachable from this environment); the npm registry serves the
+    identical-base upstream `@earendil-works/pi-coding-agent@0.82.0`, which
+    is vendored as `@qm/pi-coding-agent`. Swap in the fork tarball (same
+    package shape) once GitHub is reachable; `pi-ai` needs no swap since qm
+    itself consumes upstream 0.82.0 from the registry.
+
+24. **config seam injected instead of qm's global config** — qm's
+    `piHarnessConfigOptions(config)` and `coreToolOptions(config: Config)`
+    read the 1,214-line global config; the harness takes the same fields as
+    explicit options (`PiHarnessOptions`, structural `HarnessToolConfigSeed`)
+    so the caller wires env/config values in. Related naming deltas: the
+    surface search source literal is `live` (qm: `slack`) per the frozen
+    platform-neutral contract, the default surface tool name is `surface`
+    (qm: `slack`), and the surface-tool description text is
+    platform-neutralized.
+
+25. **tape audience filtering and run-signal request payloads deferred** —
+    `filterTapeForAudience`/`tapeEventsEntitled` need qm's
+    `principalEntitledToScope` from the resolution stack (P4/M3) and the
+    orchestrator's audience plumbing, so `tape-fold` ports the fold/lint/heal
+    core only; `RunSignal` drops the `request` field until the runs lane
+    (P2 8.0) ports `TurnRequest` consumers. Both land with their consumers.

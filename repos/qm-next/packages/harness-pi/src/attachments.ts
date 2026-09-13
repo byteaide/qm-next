@@ -1,0 +1,1 @@
+export const MAX_LLM_REQUEST_BYTES = 18_000_000

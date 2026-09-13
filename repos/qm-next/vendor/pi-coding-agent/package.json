@@ -1,0 +1,53 @@
+{
+  "name": "@qm/pi-coding-agent",
+  "version": "0.82.0",
+  "description": "Vendored @earendil-works/pi-coding-agent 0.82.0 upstream base (qm security fork swap pending, deviation #23)",
+  "license": "MIT",
+  "type": "module",
+  "piConfig": {
+    "configDir": ".pi"
+  },
+  "bin": {
+    "pi": "dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./rpc-entry": {
+      "import": "./dist/rpc-entry.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.82.0",
+    "@earendil-works/pi-ai": "0.82.0",
+    "@earendil-works/pi-tui": "0.82.0",
+    "@silvia-odwyer/photon-node": "0.3.4",
+    "chalk": "5.6.2",
+    "cross-spawn": "7.0.6",
+    "diff": "8.0.4",
+    "glob": "13.0.6",
+    "highlight.js": "10.7.3",
+    "hosted-git-info": "9.0.3",
+    "ignore": "7.0.5",
+    "jiti": "2.7.0",
+    "minimatch": "10.2.5",
+    "proper-lockfile": "4.1.2",
+    "semver": "7.8.0",
+    "typebox": "1.1.38",
+    "undici": "8.5.0",
+    "yaml": "2.9.0"
+  },
+  "optionalDependencies": {
+    "@mariozechner/clipboard": "0.3.9"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

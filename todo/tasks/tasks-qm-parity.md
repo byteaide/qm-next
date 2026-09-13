@@ -62,9 +62,9 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
   - [ ] 2.4 parity 对拍测试（对照 qm `test/postgres-*` 相关用例形状） ~2h（契约测试已写；PG 对拍待容器轮次）
 - [ ] 3.0 【B】pi-harness 平移 ~2.5d（2026-09-13 主会话本地执行）
   - [x] 3.1 `packages/sandbox`：local-sandbox 全量（docker-exec/exec-process-session/ro-layers/exec-file-ops/exec-kill/sandbox-env/process-poll/await-exit；mock dockerExec+daemon 11 测试过） ~5h（blob staging 延后 P3、layerData seam、secret-masking 重建——deviations #16-18）
-  - [ ] 3.2 `packages/harness-pi`：pi-harness 主体（2190L）+ pi-tools（3097L） ~8h（阻塞：pi-coding-agent tgz 下载）
-  - [ ] 3.3 共享件：tape-fold/replay/context-compaction/goal/grind（入 `packages/harness-pi` 或独立 `packages/harness-common`，1.1 定） ~4h
-  - [ ] 3.4 真模型单测（跳过式：有 key 才跑）+ mock 对拍 ~3h
+  - [x] 3.2 `packages/harness-pi`：pi-harness 主体（2190L）+ pi-tools（3097L） ~8h（pi-coding-agent tgz 从 npm 镜像解决——上游 0.82.0 底座 vendor 为 @qm/pi-coding-agent（fork swap 待 github 可达，deviations #23-25）；@qm/types 增量扩展 harness 契约）
+  - [x] 3.3 共享件：tape-fold/replay/context-compaction/goal/grind（入 `packages/harness-pi`，1.1 定） ~4h（另含 run-signal-store/tokens/message-tag/define-harness/security-posture 纯函数；tape audience 过滤随 P4——#25）
+  - [ ] 3.4 真模型单测（跳过式：有 key 才跑）+ mock 对拍 ~3h（mock 对拍 21 测试过：output-guard/detect/title/tape/replay/goal/pi-tools 只读与审批流；真模型跳过式待 key）
 - [ ] 4.0 【汇合】真任务验收 ~1d
   - [ ] 4.1 profile 组装：im-feishu → orchestrator → pi-harness → model → credentials 全链 ~2h
   - [ ] 4.2 飞书 @机器人真实编码任务 vs qm 同任务对拍（结果/耗时/流式） ~2h

@@ -10,8 +10,11 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@anthropic-ai/tokenizer": "^0.0.4",
     "@earendil-works/pi-ai": "0.82.0",
+    "@qm/model": "workspace:^",
+    "@qm/pi-coding-agent": "workspace:^",
     "@qm/types": "workspace:^",
-    "typebox": "^1.1.38"
+    "typebox": "1.1.38"
   }
 }

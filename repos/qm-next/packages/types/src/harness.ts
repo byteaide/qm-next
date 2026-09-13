@@ -113,6 +113,7 @@ export interface HarnessTurnInput {
   systemCacheBoundary?: number
   history: SessionEntry[]
   tools?: ToolContext
+  credentialExecServices?: readonly { service: string; binary: string }[]
   emit(entry: NewEntry): Promise<SessionEntry>
   tape?(rec: NewTapeRecord): Promise<unknown>
   tapeRows?: TapeRecord[]
@@ -160,12 +161,14 @@ export interface HarnessDetectInput {
   recentContext: string
   threadOpener?: string
   systemPrompt: string
+  reactionGuidance?: string
   history: SessionEntry[]
   recordModelCall(rec: { model: string; inputTokens: number; entryCount: number }): void
 }
 
 export interface HarnessDetectResult {
   respond: boolean
+  reactions?: string[]
   reason?: string
 }
 
@@ -181,12 +184,32 @@ export interface HarnessTurnController {
   resetSession?(sessionId: string): Promise<void> | void
 }
 
+export interface HarnessSecurityScreenInput {
+  payload: string
+  harnessId?: string
+  modelId?: string
+  systemPrompt?: string
+  signal: AbortSignal
+  recordModelCall(rec: { model: string; inputTokens: number; entryCount: number }): void
+  recordLlmRequest?(rec: HarnessLlmRequestRecord, signal?: AbortSignal): void | Promise<void>
+}
+
+export interface SecurityScreenVerdict {
+  decision: 'auto' | 'strict'
+  reason?: string
+  unscreened?: boolean
+}
+
 export interface HarnessModelUtilities {
   shouldRespond?(input: HarnessDetectInput): Promise<HarnessDetectResult>
   compactHistory?(input: HarnessCompactInput): Promise<string>
   contextTokenBudget?(scopeLabel?: string, model?: string): number | undefined
   oneShot?(systemPrompt: string, prompt: string): Promise<string | undefined>
+  judge?(systemPrompt: string, prompt: string): Promise<string | undefined>
+  screenSecurity?(input: HarnessSecurityScreenInput): Promise<SecurityScreenVerdict | undefined>
+  pickAckEmoji?(text: string, candidates: readonly string[]): Promise<string | undefined>
   generateTitle?(transcript: string): Promise<string | undefined>
+  summarizeApproval?(command: string, reason: string, purpose?: string): Promise<string | undefined>
 }
 
 export interface HarnessToolPresentation {
