@@ -38,12 +38,17 @@ const ctx = await bootProfile(fileURLToPath(new URL('../profiles/im-e2e.yml', im
 const api = ctx.api
 const base = createMockHarness()
 const echoTurn = base.turns.runTurn
+// Unique command per card: requestId is `${sessionId}:${command}`, so a
+// per-turn command keeps every card independently decidable no matter
+// which session the marker message lands in.
+let approvalSeq = 0
 base.turns.runTurn = async (input) => {
   if (input.input.includes('!approval')) {
+    approvalSeq += 1
     return {
       reply: '',
       pausedOnApproval: true,
-      pendingApprovals: [{ command: 'e2e-approval', reason: '17.1 real-device card click' }],
+      pendingApprovals: [{ command: `e2e-approval-${approvalSeq}`, reason: '17.1 real-device card click' }],
     }
   }
   return echoTurn(input)
