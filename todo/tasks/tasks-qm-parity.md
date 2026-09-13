@@ -68,7 +68,7 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
 - [ ] 4.0 【汇合】真任务验收 ~1d
   - [x] 4.1 profile 组装：im-feishu → orchestrator → pi-harness → model → credentials 全链 ~2h（api 组合根 `defaultHarness: 'pi'` 注册真引擎并接 modelGateway；profiles/im-agent.yml + scripts/boot-im-agent.ts；boot 测试覆盖 agent stanza 环境插值 boot）
   - [ ] 4.2 飞书 @机器人真实编码任务 vs qm 同任务对拍（结果/耗时/流式） ~2h
-  - [ ] 4.3 `test:pg` 基线扩充 + 全绿；【串行门验收】打 tag `p1` ~2h
+  - [ ] 4.3 `test:pg` 基线扩充 + 全绿；【串行门验收】打 tag `p1` ~2h（PG16 全套 exit 0 实证：stores/keychain 等 7 包 PG 门用例实跑；tag 待 4.2 通过）
 
 ### P2 多引擎 + runs 深化（3 并行 + 汇合，~4d）
 
