@@ -241,3 +241,38 @@ Each entry names the qm source shape, the qm-next shape, and why.
     OPENAI_API_KEY, opencode provider keys) that this environment does not
     hold; the P1-established skip-until-key pattern applies. Registration,
     profile switching, and the contract gates are the interim evidence.
+
+## P3 lane A tranche 1 (2026-09-14, routes framework + directory/reach/crons)
+
+37. **`either` auth treats the signed bearer as the capability principal (lane
+    A)** — qm separates plugin-signer source auth from agent capability
+    tokens; qm-next has no capability tokens until the control plane (12.0).
+    The route framework authenticates `either` routes when a bearer is
+    present and leaves `ctx.capability` null; capability-required branches
+    (reach 403, keychain 401, consent 403) key off `ctx.actor`/`capability`
+    so the 12.0 guard split is a framework-local change. Deviation scope:
+    auth plumbing only — response shapes are unchanged.
+
+38. **Cron routes land at the M3 store scope** — qm's capability-mode fields
+    (`runAs`, `destinationKey`, `unattendedGrants`, personal `scope`) and the
+    consent store arrive with the IM-domain backfill (14.0); the routes
+    refuse those fields with qm's 400 error codes (message names the lane)
+    and consent always reports "no consent pending" (qm's common case).
+    Source-mode surface (create/list/get/patch/delete/disable/run/runs + fire
+    log) is complete over `@qm/triggers`.
+
+39. **Reach send gate is 501 until surface delivery is wired** — resolution,
+    validation, membership/visibility, files checks and rate limiting are
+    complete; the final send returns qm's `not_configured` 501 (files need
+    blob staging from the control plane, 12.0; text delivery lands with the
+    web-ui backend, 13.0). The 200 success path (`deliveryId`) is deferred,
+    not reshaped.
+
+40. **Directory routes translate the qm vocabulary onto the provider-neutral
+    store** — qm's members/channels/groups sync maps to DirectorySyncPush
+    (people/spaces/spaceMembers) with provider pinned to `slack` and
+    instance `default` until real provider adapters land; `slackId` backfill
+    keeps the qm resolve contract. `deactivate`/`reactivate` stay
+    identity-gated 404 (identity service lands with the control plane), and
+    audit events (`principal.*`, `skill_pack.*`…) defer to the 12.0 audit
+    sinks.
