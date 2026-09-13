@@ -43,8 +43,7 @@ qm-next/
 │   ├── api/                     # @qm/api          Fastify + /v1/turns + 鉴权  [M1·汇合]
 │   ├── im-core/                 # @qm/im-core      IM 契约 + 注册表 + 投递循环  [M2·A]
 │   ├── im-feishu/               # @qm/im-feishu    飞书 Provider               [M2·B]
-│   ├── im-slack/                # @qm/im-slack     Slack Provider (socket-mode) [M4·A]
-│   ├── im-dingtalk/  im-wecom/  #                                      [M4 可选，未启动]
+│   ├── im-dingtalk/  im-wecom/  #  （延期：v1 只做飞书；slack 同级延期，历史见 git）
 │   ├── approvals/  triggers/  reach/  directory/                #      [M3]
 │   ├── memory/  skills/                                          #      [M3]
 │   ├── web-ui/  admin/                                           #      [M3]
@@ -150,7 +149,7 @@ interface RunStore {
   → 认领循环 → im-feishu.outbound(send) → 飞书 API（线程内回复）
 ```
 
-Slack 同构（Socket Mode 入站、`@slack/web-api` 出站、Block Kit 审批卡、mrkdwn 格式管道）；一个 registry 同时挂多 provider，投递按 `Destination.type` 认领到对应 adapter——双渠道并存见 `profiles/multi-im.yml` 与 `packages/im-bridge/tests/dual-channel.test.ts`。
+新 provider 同构接入：实现 `ImProvider`（入站 mapper 诚实寻址 + 出站 + `format` + 目录拉取 + 自带审批卡渲染）注册进同一 registry 即可——投递按 `Destination.type` 认领到对应 adapter，core 零改动（`pnpm check:im` 门禁保证）。v1 只随包发布飞书；slack（历史实现见 git）/钉钉/企微延期。
 
 HTTP 入口同构：`POST /v1/turns`（`@qm/api`）→ 同一 `runs.enqueue`，回复经 API/SSE 取回。
 
@@ -172,21 +171,16 @@ HTTP 入口同构：`POST /v1/turns`（`@qm/api`）→ 同一 `runs.enqueue`，�
   name: '@qm/web-ui'
   config: { port: 0 }
 
-# IM provider 按 profile 挂载（真机档见 profiles/im-smoke.yml / im-e2e.yml /
-# multi-im.yml 双渠道档；凭据一律 !!js 读 env，不写字面量）
+# IM provider 按 profile 挂载（真机档见 profiles/im-smoke.yml / im-e2e.yml；
+# 凭据一律 !!js 读 env，不写字面量）
 - id: feishu
   name: '@qm/im-feishu'
   config:
     appId: !!js "process.env.FEISHU_APP_ID"
     appSecret: !!js "process.env.FEISHU_APP_SECRET"
-- id: slack
-  name: '@qm/im-slack'
-  config:
-    appToken: !!js "process.env.SLACK_APP_TOKEN"
-    botToken: !!js "process.env.SLACK_BOT_TOKEN"
 ```
 
-环境差异用 profile 变体表达（内存 store/无 IM 的 cordis.yml 为默认；im-smoke/im-e2e/multi-im 挂真渠道）。
+环境差异用 profile 变体表达（内存 store/无 IM 的 cordis.yml 为默认；im-smoke/im-e2e 挂真渠道）。
 
 ## 9. 事件契约（声明合并，@mode 标注）
 

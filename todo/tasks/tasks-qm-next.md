@@ -4,7 +4,7 @@ Based on [ai-dev-tasks](https://github.com/snarktank/ai-dev-tasks) task format, 
 
 **PRD:** [prd-qm-next.md](prd-qm-next.md)
 **Created:** 2026-09-12
-**Status:** In Progress（M0/M1/M2/M3 done，M4 收尾：18/20.1 自动化/21.1/21.2 done，双渠道真机 + tag 待用户）
+**Status:** In Progress（M0-M3 done，M4 收尾完成——范围拍板 2026-09-13：v1 只做飞书；待用户 FF 合并 + tag v0.1.0）
 **Estimate:** ~11d 总工作量；双 agent 并行后墙钟 ~7-8d (ai:~7d test:~3d)
 
 <!--TOON:tasks_meta{id,feature,prd,status,est,est_ai,est_test,est_read,logged,started,completed}:
@@ -157,19 +157,15 @@ tasks-qm-next,qm-next（Cordis 重写 + 飞书 IM）,prd-qm-next,in_progress,~11
     - 真机飞书 e2e 通过（2026-09-13，用户客户端实测 + `.im-e2e.log` 终态文件日志）：①卡片点击——真实卡片送达，Approve→`echo: Approve: e2e-approval`、Reject→`echo: Reject: e2e-approval-1` 回复达线程，重复决定静默去重（途中修复：审批命令按轮次唯一化，requestId=`sessionId:command` 否则同会话第二张卡变僵尸卡；另需控制台开启卡片回调长连接）；②ambient 真频道——未@群聊消息经 judge→ambient turn→回复送达（`origin=ambient reply="echo: 测试 ambient"`；途中修复：飞书 SDK 默认 `requireMention:true` 在 SDK 层丢弃未@消息，channel factory 关闭之，bridge 收归寻址分诊：@/私信→人转、未@有 ambient 策略→judge、无策略→丢弃=旧行为）；③cron fire→真实 IM 投递——auto-arm（首条入站消息的 threadRef 自动发现 chat id，im-bridge 暴露 ambientPolicy 供 boot 后开容器）→一次性 cron fire→`echo: !run e2e cron fire` 送达真实群。新引导：`profiles/im-e2e.yml` + `scripts/boot-im-e2e.ts`（唯一审批命令 + auto-arm + 终态文件日志，10.x 遗留的 pnpm 管道缓冲丢日志已解），runbook `docs/e2e-feishu.md`；接线新增 approvals 关键词 stub judge、im-core containerKind、im-bridge ambient 配置+queue 暴露、TriggersService 调度器挂载（cordis.yml）；最终无 PG 192/182/10 skip 0 fail
   - [ ] 17.2 【串行门验收】打 tag `m3` ~0.5h
 
-### M4 多平台 + 收尾（3 适配器并行，~1d/墙钟 ~1d）
+### M4 收尾（2026-09-13 拍板：v1 只做飞书，slack/钉钉/企微延期）
 
-- [x] 18.0 【A】`im-slack`：qm `src/slack/` 按契约改造（mrkdwn/Socket Mode/Block Kit → Interaction）~0.5d
-  - 落地（feature/auto-20260913-120025 `d7d2db3`+`aa29932`）：`@qm/im-slack` — `@slack/socket-mode` WS 入站（免公网回调，与飞书选择一致）+ `@slack/web-api` 出站。入站 mapper：app_mention（剥离 bot 提及、mentionedBot=true）/DM/群消息诚实寻址（分诊归 core：containerKind + mentionedBot）、block_actions 交互（JSON 审批值，parseApprovalValue 直接受字符串）、reaction、member_joined 生命周期、own-bot/bot_message/message_changed 回环守卫、event_id + 复合去重。出站：send（mrkdwn 转换、thread_ts 从 threadId/replyToMessageId、Block Kit 卡、files.uploadV2 附件）、edit、delete；react/uploadFile 保持哨兵保留位。collectDirectory 分页拉 users+conversations（人/群目录、跳过 bot、full-roster replace）。mrkdwn 管道自 qm 平移（粗斜体/标题/列表/链接/表格/码块/批量提及中和）。SDK 藏于结构切片后（socket/clients double 注入），fixture 回放测试镜像 feishu 套件
-  - 契约增补（主会话裁决，additive）：`ImProvider.approvalCardRenderer?` —— 渲染归 provider；im-feishu 自带 lark 卡（自 bridge 迁出，M3 遗留清零）、im-slack 自带 Block Kit；bridge 解析链 = 注入覆盖 → provider 自带 → 中性文本兜底（`approvalRequestNotice`），内置 lark_md 卡已删
-  - 验证：typecheck 绿 + rescope-check OK；无 PG 220/210/10 skip 0 fail（新增 slack provider/mrkdwn/卡片 36 用例 + bridge 兜底/provider-owned 渲染用例 + feishu 卡片往返用例）
-- [ ] 19.0 【B】`im-dingtalk` Stream 模式起步（可选）~0.5d — 未启动（可选；用户拍板是否进 v0.1.0 或留后续）
-- [x] 20.0 双渠道并存验收 ~2h（自动化切片通过；真机档就绪待凭据）
-  - [x] 20.1 同一核心飞书 + Slack 并存运行 ~2h — 自动化：`packages/im-bridge/tests/dual-channel.test.ts` 真 provider（mock 传输）同 registry + 同 bridge：回复按各自渠道回流、双渠道 surface 共享同一核心、审批卡各用各的形状（lark elements 结构化值 / Block Kit JSON 值）、双渠道点击均可恢复 turn（2 用例全过）。真机：`profiles/multi-im.yml` 就绪（SLACK_APP_TOKEN/SLACK_BOT_TOKEN env + Socket Mode scopes 注释），待用户 Slack 应用凭据后按 10.x 方式实测
+- [-] 18.0 【A】`im-slack`：qm `src/slack/` 按契约改造 ~0.5d — **延期不做**（用户拍板 2026-09-13）。当次实现（`@slack/socket-mode` + web-api、诚实寻址 mapper、mrkdwn 管道、Block Kit 审批卡、目录分页同步）已移出包集，完整代码存 git `d7d2db3`，可按 `ImProvider` 契约复活。该车道沉淀的**契约增补保留**：`ImProvider.approvalCardRenderer?`（渲染归 provider，additive）——im-feishu 自带 lark 卡（自 bridge 迁出，M3 遗留清零），bridge 解析链 = 注入覆盖 → provider 自带 → 中性文本兜底（`approvalRequestNotice`）
+- [-] 19.0 【B】`im-dingtalk` Stream 模式起步（可选）~0.5d — **延期**（同上拍板）
+- [-] 20.0 双渠道并存验收 ~2h — **随范围延期**（v1 单渠道飞书；多渠道注册表/投递按 `Destination.type` 认领的机制已由契约保证）
 - [x] 21.0 收尾 ~0.5d (ai:0.3d test:0.2d)（21.3 待用户合并后打 tag）
   - [x] 21.1 CI grep 门禁：core services 无 `slack|feishu|lark|wecom|dingtalk` 符号 ~1h — `scripts/check-im-isolation.sh` + `pnpm check:im`：core 服务 src/ 零符号（tests 合法使用平台名做 fixture，不在扫描面）；门禁抓出并移除 web-ui `MeWire.slackWorkspaceUrl` 真实残留耦合（SPA 可选字段优雅降级，app/ 字节级不动）；core 注释措辞中性化
-  - [x] 21.2 README/架构文档/CHANGELOG ~2h — README 状态/门禁/组装档表更新；`docs/architecture.md` §5 IM 契约对齐 M2 冻结实貌（InboundEvent/OutboundOperation/ImProvider + M4 渲染端口）、§7 生命线补 Slack 同构与双渠道、§8 组装示例对齐真实 cordis.yml + multi-im、§12 门禁表更新；新建 `CHANGELOG.md`（v0.1.0 全里程碑记录）
-  - [ ] 21.3 最终验收 + tag `v0.1.0` ~0.5h — 待用户：①FF 合并本分支；②（可选）Slack 凭据真机双渠道验收；③合并时打 tag `v0.1.0`（tag 顺序参照 m0-m3）
+  - [x] 21.2 README/架构文档/CHANGELOG ~2h — README 状态/门禁/组装档表更新；`docs/architecture.md` §5 IM 契约对齐 M2 冻结实貌（InboundEvent/OutboundOperation/ImProvider + 渲染端口）、§7 生命线、§8 组装示例对齐真实 profiles、§12 门禁表；新建 `CHANGELOG.md`（v0.1.0 全里程碑记录 + 范围决策）
+  - [ ] 21.3 最终验收 + tag `v0.1.0` ~0.5h — 待用户：FF 合并本分支后打 tag `v0.1.0`
 
 ## Time Tracking
 

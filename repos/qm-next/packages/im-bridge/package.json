@@ -18,8 +18,6 @@
   },
   "devDependencies": {
     "@qm/api": "workspace:^",
-    "@qm/im-feishu": "workspace:^",
-    "@qm/im-slack": "workspace:^",
     "@qm/orchestrator": "workspace:^",
     "@qm/store": "workspace:^"
   }

@@ -7,8 +7,8 @@ qm-next 的全部显著变更记录在此文件。
 
 ## [0.1.0] - 2026-09-13
 
-首个里程碑版本：M0-M4 全部交付。Cordis 全插件重写 qm，IM 一等插件化，
-飞书首发、Slack 同级适配，同一核心双渠道并存。
+首个里程碑版本：M0-M4 交付。Cordis 全插件重写 qm，IM 一等插件化，
+**v1 渠道只做飞书**（2026-09-13 用户拍板：slack/钉钉/企微延期）。
 
 ### M0 基座
 
@@ -55,27 +55,22 @@ qm-next 的全部显著变更记录在此文件。
   crons/contexts live 视图）。
 - 真机飞书 e2e 三腿通过（卡片审批、ambient 真频道、cron fire 真投递）。
 
-### M4 多平台 + 收尾
+### M4 收尾
 
-- `@qm/im-slack`：`@slack/socket-mode` WS 入站（免公网回调）+
-  `@slack/web-api` 出站；app_mention/DM/群消息诚实寻址（分诊归 core）、
-  block_actions 交互（JSON 审批值往返）、reactions、bot 加入生命周期、
-  own-bot 回环守卫；mrkdwn 格式管道（自 qm 平移）；Block Kit 审批卡；
-  users/conversations 分页目录同步。
-- 审批卡渲染下沉 provider：`ImProvider.approvalCardRenderer?`（M4 契约
-  增补）；im-bridge 解析 注入覆盖 → provider 自带 → 中性文本兜底，
-  内置 lark 卡移除。
-- 双渠道并存（20.1）：一个 registry + 一个 bridge 同时挂 feishu/slack
-  真实 provider 的集成测试（回复按渠道回流、审批卡各用各的形状、双渠道
-  点击均可恢复 turn）；`profiles/multi-im.yml` 真机档。
-- IM 符号隔离门禁（21.1）：`pnpm check:im` —— core 服务 src/ 零
+- 审批卡渲染下沉 provider：`ImProvider.approvalCardRenderer?`（契约
+  additive 增补）；im-bridge 解析链 = 注入覆盖 → provider 自带 → 中性
+  文本兜底，内置 lark 卡移除（M3 遗留清零）。
+- IM 符号隔离门禁：`pnpm check:im` —— core 服务 src/ 零
   `slack|feishu|lark|wecom|dingtalk` 符号（顺手移除 web-ui
   `MeWire.slackWorkspaceUrl` 残留耦合）。
+- README/架构文档对齐实况；CHANGELOG 建立。
+- 范围决策（2026-09-13）：v1 只做飞书。im-slack 实现移出包集（完整实现
+  存 git 历史 `d7d2db3`，可按 `ImProvider` 契约复活）；双渠道真机验收
+  （原 20.0）随范围延期；钉钉/企微延期。
 
 ### 验证基线
 
 - `pnpm typecheck` 绿；`pnpm rescope-check` / `pnpm check:im` OK。
-- 无 PG 套件 220 tests / 210 pass / 10 PG skip / 0 fail；
-  `pnpm test:pg` 一次性容器全量对拍（M3 验收时 239/239）。
-- 真机：飞书全链路三腿通过；双渠道真机验收待 Slack 应用凭据
-  （`profiles/multi-im.yml` 就绪）。
+- 无 PG 套件全绿（0 fail，PG 用例按需 skip）；
+  `pnpm test:pg` 一次性容器全量对拍全过。
+- 真机：飞书全链路三腿通过（M2 冒烟 + M3 e2e）。

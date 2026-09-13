@@ -24,7 +24,6 @@
     "@qm/directory": "workspace:*",
     "@qm/im-bridge": "workspace:*",
     "@qm/im-feishu": "workspace:*",
-    "@qm/im-slack": "workspace:*",
     "@qm/reach": "workspace:*",
     "@qm/triggers": "workspace:*",
     "@qm/web-ui": "workspace:*",

@@ -209,3 +209,4 @@ m4-multi-platform,0.5d,0.5d,-,1d
 | Date | Author | Changes |
 |------|--------|---------|
 | 2026-09-12 | AI DevOps | Initial draft（基于两仓库图谱调研） |
+| 2026-09-13 | wxd | M4 范围拍板：v1 只做飞书；`im-slack`（当次实现存 git `d7d2db3` 后移出包集）、`im-dingtalk`、`im-wecom` 与双渠道真机验收全部延期。M4 收尾保留：provider 自带审批卡渲染（M3 遗留清零）+ `check:im` IM 符号隔离门禁 + 文档收尾 |

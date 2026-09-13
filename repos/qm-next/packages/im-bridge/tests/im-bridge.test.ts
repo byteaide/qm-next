@@ -49,7 +49,7 @@ interface RecorderCells {
 
 /**
  * Provider-owned card rendering, test double: same structured button
- * values the real feishu/slack renderers produce.
+ * values the real feishu renderer produces.
  */
 const testCardRenderer: ApprovalCardRenderer = {
   render: ({ runId, sessionId, approvals }) => ({
