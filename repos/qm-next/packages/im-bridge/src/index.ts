@@ -18,6 +18,7 @@ export type {
   ImReplyRoute,
   ImTurnBridge,
   ImTurnBridgeAck,
+  ImTurnBridgeAgentRequests,
   ImTurnBridgeAmbient,
   ImTurnBridgeDeps,
   ImTurnBridgeLoopOptions,

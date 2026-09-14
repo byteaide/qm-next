@@ -19,5 +19,12 @@ export {
   type AmbientJudgeModelDeps,
 } from './ambient-judge-model.ts'
 export { createMemoryAckEmojiPickStore } from './ack-emoji-pick.ts'
+export {
+  AGENT_REQUEST_INSTRUCTION,
+  createMemoryAgentRequestStore,
+  extractAgentRequests,
+  parseUserRef,
+  stripAgentRequestDirectives,
+} from './agent-requests.ts'
 export { createMemoryApprovalStore } from './memory-approval-store.ts'
 export { APPROVALS_SCHEMA_STATEMENTS, createPostgresApprovalStore } from './postgres-approval-store.ts'

@@ -21,10 +21,18 @@ export interface ImApprovalCardSpec {
  * (`OutboundBody.card`); button values must embed the approval action
  * value so decisions round-trip back through `parseApprovalValue`
  * (`@qm/approvals` codec — objects for platforms that carry structured
- * values, JSON strings for platforms that stringify).
+ * values, JSON strings for platforms that stringify). `renderAgentRequest`
+ * is the optional agent-request DM card (values embed
+ * `AgentRequestActionValue`).
  */
 export interface ImApprovalCardRenderer {
   render(spec: ImApprovalCardSpec): Record<string, unknown>
+  renderAgentRequest?(spec: {
+    requestId: string
+    originLabel: string
+    targetLabel: string
+    task: string
+  }): Record<string, unknown>
 }
 
 /** Minimal logger port; satisfied by any cordis logger. */

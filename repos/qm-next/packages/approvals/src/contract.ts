@@ -62,6 +62,89 @@ export function parseApprovalValue(value: unknown): ApprovalActionValue | null {
   }
 }
 
+/** Discriminator round-tripped through agent-request card button values. */
+export const AGENT_REQUEST_VALUE_KIND = 'qm.agent-request.v1'
+
+/** Which decision an agent-request card button carries. */
+export type AgentRequestDecision = 'approve' | 'reject'
+
+/** Value embedded in agent-request DM buttons; survives the provider round-trip. */
+export interface AgentRequestActionValue {
+  kind: typeof AGENT_REQUEST_VALUE_KIND
+  requestId: string
+  decision: AgentRequestDecision
+}
+
+export function encodeAgentRequestValue(value: AgentRequestActionValue): Record<string, unknown> {
+  return { ...value }
+}
+
+export function parseAgentRequestValue(value: unknown): AgentRequestActionValue | null {
+  let candidate: unknown = value
+  if (typeof candidate === 'string') {
+    try {
+      candidate = JSON.parse(candidate)
+    } catch {
+      return null
+    }
+  }
+  if (typeof candidate !== 'object' || candidate === null) return null
+  const record = candidate as Record<string, unknown>
+  if (record.kind !== AGENT_REQUEST_VALUE_KIND) return null
+  if (typeof record.requestId !== 'string' || !record.requestId) return null
+  if (record.decision !== 'approve' && record.decision !== 'reject') return null
+  return { kind: AGENT_REQUEST_VALUE_KIND, requestId: record.requestId, decision: record.decision }
+}
+
+/** A reply directive asking a person's personal agent to run a task. */
+export interface AgentRequestDirective {
+  /** Provider-native target user id (parsed from the directive ref). */
+  targetUserId: string
+  task: string
+}
+
+export type AgentRequestStatus = 'pending' | 'approved' | 'declined'
+
+/** Durable agent-request record keyed by requestId. */
+export interface AgentRequestRecord {
+  requestId: string
+  originRunId: string
+  originSessionId: string
+  provider: string
+  targetUserId: string
+  task: string
+  /** The requesting actor in the origin conversation. */
+  requesterId: string
+  requesterName?: string
+  /** Where the result/decline posts back (the origin conversation). */
+  destination: Destination
+  threadId?: string
+  replyToMessageId?: string
+  status: AgentRequestStatus
+  decidedBy?: string
+  decidedAt?: number
+  createdAt: number
+}
+
+export type AgentRequestDecisionOutcome =
+  | { outcome: 'decided'; approved: boolean; record: AgentRequestRecord }
+  | { outcome: 'already_decided'; approved: boolean; record: AgentRequestRecord }
+  | { outcome: 'forbidden'; record: AgentRequestRecord }
+  | { outcome: 'not_found' }
+
+/**
+ * Durable agent-request registry. `decide` mirrors the approval state
+ * machine (one transition, duplicate dedupe) but only the TARGET user may
+ * decide — it is their personal setup being asked for.
+ */
+export interface AgentRequestStore {
+  record(input: Omit<AgentRequestRecord, 'status' | 'decidedBy' | 'decidedAt'>): Promise<AgentRequestRecord>
+  get(requestId: string): Promise<AgentRequestRecord | null>
+  decide(requestId: string, decision: { approved: boolean; decidedBy: string }): Promise<AgentRequestDecisionOutcome>
+  listPending(opts?: { limit?: number }): Promise<AgentRequestRecord[]>
+  close?(): Promise<void>
+}
+
 /** What a surface records when a turn pauses on pending approvals. */
 export interface ApprovalRecordInput {
   requestId: string

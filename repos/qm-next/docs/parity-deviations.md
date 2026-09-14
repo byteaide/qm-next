@@ -553,3 +553,23 @@ Each entry names the qm source shape, the qm-next shape, and why.
     trigger-message ref) never schedule acks; (f) pick observability
     lands in `ack_emoji_picks` with qm's columns, and
     `/v1/admin/ack-emoji-picks` reads it.
+
+53. **Agent-request adaptations (14.0 tranche 3)** — qm's `[[ask-agent]]`
+    flow is Slack-shaped (directory classify, conversations.open DM,
+    Block Kit cards); the qm-next port is provider-neutral: (a) the
+    directive regex accepts any provider-native user id (`<@id>`, `@id`,
+    or bare); (b) DM resolution is a bridge port (`resolveDm`) backed by
+    the directory sync (dm spaces + membership) — requests whose DM
+    cannot resolve stay pending with a warning instead of degrading;
+    (c) the approval card rides the provider renderer's optional
+    `renderAgentRequest` (Lark implemented; button values embed the
+    `qm.agent-request.v1` codec) with a neutral actionable-text fallback;
+    (d) the approved personal turn runs as the target user in their dm
+    thread (`provider:dm:<id>`) with qm's handoff instruction, and the
+    result delivers back into the origin thread via the recorded route —
+    qm additionally updates per-message status texts and labels, which
+    the non-streaming bridge expresses as plain deliveries; (e) only the
+    target user may decide (store-enforced), duplicates dedupe, and
+    re-recording never resurrects a decided request; (f) the registry is
+    memory in `@qm/approvals` and Postgres (`agent_requests`) via the
+    api's durable-by-default flag.

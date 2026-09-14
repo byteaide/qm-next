@@ -30,8 +30,10 @@ import {
 import { createMemoryReplayDedupe, createPostgresReplayDedupe, type ReplayDedupe } from '@qm/auth'
 import {
   createMemoryAckEmojiPickStore,
+  createMemoryAgentRequestStore,
   createMemoryAmbientJudgmentStore,
   type AckEmojiPickStore,
+  type AgentRequestStore,
   type AmbientCursorStore,
   type AmbientJudgmentStore,
 } from '@qm/approvals'
@@ -73,8 +75,9 @@ import {
   createPostgresSlackMap,
   createSurfaceContextQueue,
 } from './services/index.ts'
-import { createAmbientCursorStore, createPostgresAckEmojiPickStore, createPostgresAmbientJudgmentStore } from './services/ambient-stores.ts'
+import { createAmbientCursorStore, createPostgresAckEmojiPickStore, createPostgresAgentRequestStore, createPostgresAmbientJudgmentStore } from './services/ambient-stores.ts'
 import type { ChannelPolicyStore as ApiChannelPolicyStore } from './services/channel-policy-store.ts'
+import type { DirectoryStore } from '@qm/directory'
 import type { CronScheduler, CronStore } from '@qm/triggers'
 import type {
   Harness,
@@ -181,6 +184,8 @@ export interface ApiConfig {
   databaseUrl?: string
   /** Ambient observability (14.0): judgment + cursor stores for the IM ambient slice. */
   ambient?: boolean
+  /** Agent-request directives (14.0): durable registry for IM reply directives. */
+  agentRequests?: boolean
   /** Skill-pack management (11.0). */
   skillPacks?: boolean
   /** Per-principal model credentials (11.0). */
@@ -294,6 +299,7 @@ export const Config = Schema.object({
   adminGrants: Schema.string().description('qm ADMIN_GRANTS grammar (principal:role,...) seeding durable grant stores'),
   databaseUrl: Schema.string().description('Postgres connection string; swaps memory stores for durable PG twins'),
   ambient: Schema.boolean().description('Ambient observability (14.0): judgment + cursor stores for the IM ambient slice'),
+  agentRequests: Schema.boolean().description('Agent-request directives (14.0): durable registry for IM reply directives'),
   skillPacks: Schema.boolean().description('Skill-pack management (11.0)'),
   userModelAuth: Schema.boolean().description('Per-principal model credentials (11.0)'),
   secretDrops: Schema.boolean().description('Secret-drop links (11.0)'),
@@ -388,6 +394,10 @@ export class ApiService extends Service<ApiConfig> {
   /** Reaction-as-ack ingredients (14.0): the harness emoji picker + pick records. */
   ackEmoji?: { pick(text: string, candidates: readonly string[]): Promise<string | undefined> }
   ackPicks?: AckEmojiPickStore
+  /** The synced directory (when configured); the im-bridge resolves DMs from it. */
+  directory?: DirectoryStore
+  /** Durable agent-request registry (14.0): the bridge records reply directives here. */
+  agentRequests?: AgentRequestStore
 
   constructor(ctx: Context, public config: ApiConfig) {
     super(ctx, 'api')
@@ -608,6 +618,12 @@ export class ApiService extends Service<ApiConfig> {
       this.ackPicks = databaseUrl ? createPostgresAckEmojiPickStore(databaseUrl, orgId) : createMemoryAckEmojiPickStore()
     }
     if (channelPolicyStore) this.channelPolicy = channelPolicyStore
+    if (directoryStore) this.directory = directoryStore
+    if (this.config.agentRequests) {
+      this.agentRequests = databaseUrl
+        ? createPostgresAgentRequestStore(databaseUrl, orgId)
+        : createMemoryAgentRequestStore()
+    }
     const skillPackStore = this.config.skillPacks ? createMemorySkillPackStore() : undefined
     const userModelCredentials = this.config.userModelAuth ? createMemoryUserModelCredentialsStore() : undefined
     const secretDropStore = this.config.secretDrops ? createMemorySecretDropStore() : undefined

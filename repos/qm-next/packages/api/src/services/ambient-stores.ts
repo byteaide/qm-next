@@ -14,12 +14,16 @@ import type {
   AckEmojiPick,
   AckEmojiPickStore,
   AckPickOutcome,
+  AgentRequestRecord,
+  AgentRequestStore,
+  AgentRequestStatus,
   AmbientCursorStore,
   AmbientDecisionKind,
   AmbientJudgment,
   AmbientJudgmentCounts,
   AmbientJudgmentStore,
 } from '@qm/approvals'
+import type { Destination } from '@qm/types'
 
 const emptyCounts = (): AmbientJudgmentCounts => ({ act: 0, ignore: 0, fastlane: 0 })
 const emptyPickCounts = (): { picked: number; declined: number } => ({ picked: 0, declined: 0 })
@@ -248,6 +252,121 @@ export function createPostgresAckEmojiPickStore(connectionString: string, orgId:
       const out = emptyPickCounts()
       for (const r of rows) if ((r.outcome as string) in out) out[r.outcome as AckPickOutcome] = Number(r.n)
       return out
+    },
+    close,
+  }
+}
+
+interface AgentRequestRow extends Record<string, unknown> {
+  request_id: string
+  origin_run_id: string
+  origin_session_id: string
+  provider: string
+  target_user_id: string
+  task: string
+  requester_id: string
+  requester_name: string | null
+  destination: Destination
+  thread_id: string | null
+  reply_to_message_id: string | null
+  status: AgentRequestStatus
+  decided_by: string | null
+  decided_at: number | null
+  created_at: number
+}
+
+export function createPostgresAgentRequestStore(connectionString: string, orgId: string): AgentRequestStore {
+  const { q, close } = createPgPool(connectionString, [
+    `CREATE TABLE IF NOT EXISTS agent_requests(
+        request_id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL, origin_run_id TEXT NOT NULL, origin_session_id TEXT NOT NULL,
+        provider TEXT NOT NULL, target_user_id TEXT NOT NULL, task TEXT NOT NULL,
+        requester_id TEXT NOT NULL, requester_name TEXT,
+        destination JSONB NOT NULL, thread_id TEXT, reply_to_message_id TEXT,
+        status TEXT NOT NULL DEFAULT 'pending', decided_by TEXT, decided_at BIGINT,
+        created_at BIGINT NOT NULL
+      )`,
+    `CREATE INDEX IF NOT EXISTS agent_requests_org_status
+        ON agent_requests(org_id, status, created_at DESC)`,
+  ])
+  const row = (r: AgentRequestRow): AgentRequestRecord => ({
+    requestId: r.request_id,
+    originRunId: r.origin_run_id,
+    originSessionId: r.origin_session_id,
+    provider: r.provider,
+    targetUserId: r.target_user_id,
+    task: r.task,
+    requesterId: r.requester_id,
+    ...(r.requester_name != null ? { requesterName: r.requester_name } : {}),
+    destination: r.destination,
+    ...(r.thread_id != null ? { threadId: r.thread_id } : {}),
+    ...(r.reply_to_message_id != null ? { replyToMessageId: r.reply_to_message_id } : {}),
+    status: r.status,
+    ...(r.decided_by != null ? { decidedBy: r.decided_by } : {}),
+    ...(r.decided_at != null ? { decidedAt: Number(r.decided_at) } : {}),
+    createdAt: Number(r.created_at),
+  })
+  return {
+    async record(input) {
+      const existing = await q('SELECT * FROM agent_requests WHERE org_id = $1 AND request_id = $2', [
+        orgId,
+        input.requestId,
+      ])
+      if (existing[0]) return row(existing[0] as AgentRequestRow)
+      await q(
+        `INSERT INTO agent_requests(request_id, org_id, origin_run_id, origin_session_id, provider, target_user_id, task, requester_id, requester_name, destination, thread_id, reply_to_message_id, status, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',$13)`,
+        [
+          input.requestId,
+          orgId,
+          input.originRunId,
+          input.originSessionId,
+          input.provider,
+          input.targetUserId,
+          input.task,
+          input.requesterId,
+          input.requesterName ?? null,
+          JSON.stringify(input.destination),
+          input.threadId ?? null,
+          input.replyToMessageId ?? null,
+          input.createdAt,
+        ],
+      )
+      return { ...input, status: 'pending' }
+    },
+    async get(requestId) {
+      const rows = await q('SELECT * FROM agent_requests WHERE org_id = $1 AND request_id = $2', [orgId, requestId])
+      return rows[0] ? row(rows[0] as AgentRequestRow) : null
+    },
+    async decide(requestId, decision) {
+      const current = await q('SELECT * FROM agent_requests WHERE org_id = $1 AND request_id = $2', [orgId, requestId])
+      if (!current[0]) return { outcome: 'not_found' as const }
+      const record = current[0] as AgentRequestRow
+      if (record.status !== 'pending') {
+        return { outcome: 'already_decided' as const, approved: record.status === 'approved', record: row(record) }
+      }
+      if (decision.decidedBy !== `${record.provider}:${record.target_user_id}`) {
+        return { outcome: 'forbidden' as const, record: row(record) }
+      }
+      const status: AgentRequestStatus = decision.approved ? 'approved' : 'declined'
+      const updated = await q(
+        `UPDATE agent_requests SET status = $3, decided_by = $4, decided_at = $5
+         WHERE org_id = $1 AND request_id = $2 AND status = 'pending'
+         RETURNING *`,
+        [orgId, requestId, status, decision.decidedBy, Date.now()],
+      )
+      if (!updated[0]) {
+        return { outcome: 'already_decided' as const, approved: decision.approved, record: row(record) }
+      }
+      return { outcome: 'decided' as const, approved: decision.approved, record: row(updated[0] as AgentRequestRow) }
+    },
+    async listPending(opts) {
+      const limit = Math.max(1, Math.min(1000, opts?.limit ?? 100))
+      const rows = await q(
+        `SELECT * FROM agent_requests WHERE org_id = $1 AND status = 'pending' ORDER BY created_at DESC LIMIT $2`,
+        [orgId, limit],
+      )
+      return rows.map((r) => row(r as AgentRequestRow))
     },
     close,
   }

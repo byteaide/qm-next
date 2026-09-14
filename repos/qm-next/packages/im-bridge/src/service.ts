@@ -16,6 +16,7 @@
 import { Service, type Context } from '@qm/cordis'
 import {
   createKeywordAmbientJudge,
+  createMemoryAgentRequestStore,
   createMemoryChannelPolicyStore,
   createModelAmbientJudge,
   type ChannelPolicyStore,
@@ -54,6 +55,8 @@ export interface ImBridgeConfig {
   ackDelayMs?: number
   /** Candidate emoji override; qm's defaults when absent. */
   ackEmojiCandidates?: string[]
+  /** Agent-request directives (default off; needs the api registry, DMs from the directory). */
+  agentRequests?: boolean
 }
 
 export const Config = Schema.object({
@@ -71,6 +74,7 @@ export const Config = Schema.object({
   ackReactions: Schema.boolean().default(true).description('Reaction-as-ack while a run is in flight (providers without react stay inert)'),
   ackDelayMs: Schema.number().default(2_000).description('Delay before the ack reaction fires'),
   ackEmojiCandidates: Schema.array(Schema.string()).description('Candidate emoji override; qm defaults when absent'),
+  agentRequests: Schema.boolean().default(false).description('Agent-request reply directives ([[ask-agent]]) with DM approval'),
 })
 
 export class ImTurnBridgeService extends Service<ImBridgeConfig> {
@@ -156,6 +160,31 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
           : {}),
       }
     }
+    let agentRequests: ImTurnBridgeOptions['agentRequests'] | undefined
+    if (this.config.agentRequests) {
+      const store = api.agentRequests ?? createMemoryAgentRequestStore()
+      const directory = api.directory
+      agentRequests = {
+        store,
+        ...(directory
+          ? {
+              resolveDm: async (provider, targetUserId) => {
+                const spaces = await directory.listSpaces(provider)
+                for (const space of spaces) {
+                  if (space.kind !== 'dm') continue
+                  if (await directory.spaceMember(provider, space.spaceId, targetUserId)) {
+                    return { destination: { type: provider, target: space.spaceId } }
+                  }
+                }
+                return null
+              },
+            }
+          : {}),
+      }
+      if (!directory) {
+        this.ctx.logger.warn('im-bridge: agentRequests enabled but the api exposes no directory — DM approval cannot resolve')
+      }
+    }
     this.bridge = createImTurnBridge(
       {
         runs: this.ctx.api.runs,
@@ -168,6 +197,7 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
         ...(this.config.replyAs ? { replyAs: this.config.replyAs } : {}),
         ...(ambient ? { ambient } : {}),
         ...(ack ? { ack } : {}),
+        ...(agentRequests ? { agentRequests } : {}),
         loop,
       },
     )

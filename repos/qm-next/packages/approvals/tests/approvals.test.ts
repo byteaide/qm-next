@@ -10,20 +10,28 @@ import { test } from 'node:test'
 import type { InboundMessageEvent } from '@qm/im-core'
 import type { Destination, Principal, TurnInput } from '@qm/types'
 import {
+  AGENT_REQUEST_INSTRUCTION,
+  AGENT_REQUEST_VALUE_KIND,
   AMBIENT_JUDGE_SYSTEM,
   APPROVAL_VALUE_KIND,
   createAmbientService,
   createKeywordAmbientJudge,
+  createMemoryAgentRequestStore,
   createMemoryApprovalStore,
   createMemoryAmbientCursorStore,
   createMemoryAmbientJudgmentStore,
   createMemoryChannelPolicyStore,
   createModelAmbientJudge,
   createNoopAmbientJudge,
+  encodeAgentRequestValue,
   encodeApprovalValue,
+  extractAgentRequests,
+  parseAgentRequestValue,
   parseAmbientDecision,
   parseApprovalValue,
+  parseUserRef,
   renderAmbientPrompt,
+  stripAgentRequestDirectives,
   type AmbientJudge,
   type AmbientRoute,
   type ApprovalActionValue,
@@ -521,4 +529,57 @@ test('ambient bot ledger: ignore skips, rollup holds inside the window, action f
   const unregistered = createAmbientService({ policy, judge: verdictJudge, submit: async () => {} })
   await unregistered.observe(ambientEvent({ eventId: 'stray', actor: { providerUserId: 'b9', displayName: 'Stray Bot', isBot: true } }))
   assert.equal(prompts.length, 2, 'unregistered bots stay skipped')
+})
+
+test('agent-request grammar: extraction strips directives and parses provider-neutral refs', () => {
+  const reply = 'Deploy info below.\n[[ask-agent: <@ou_target> | check my private deploy notes]]\nAlso [[ask-agent: u2 | pet the dog]].'
+  const { text, requests } = extractAgentRequests(reply)
+  assert.deepEqual(requests, [
+    { targetUserId: 'ou_target', task: 'check my private deploy notes' },
+    { targetUserId: 'u2', task: 'pet the dog' },
+  ])
+  assert.equal(text.includes('ask-agent'), false)
+  assert.equal(text.trim(), 'Deploy info below.\n\nAlso .')
+  assert.deepEqual(parseUserRef('<@U123|bob>'), 'U123')
+  assert.deepEqual(parseUserRef('@U123'), 'U123')
+  assert.deepEqual(parseUserRef('ou_x9'), 'ou_x9')
+  assert.equal(parseUserRef(''), undefined)
+  assert.equal(stripAgentRequestDirectives('a [[ask-agent: x | y]] b [[ask-agent: open'), 'a  b ')
+  assert.ok(AGENT_REQUEST_INSTRUCTION.includes('[[ask-agent:'))
+  assert.equal(
+    parseAgentRequestValue(encodeAgentRequestValue({ kind: AGENT_REQUEST_VALUE_KIND, requestId: 'r1', decision: 'approve' }))?.requestId,
+    'r1',
+  )
+  assert.equal(parseAgentRequestValue({ kind: APPROVAL_VALUE_KIND, requestId: 'r', decision: 'approve' }), null)
+})
+
+test('agent-request store: target-only decision state machine', async () => {
+  const store = createMemoryAgentRequestStore()
+  const base = {
+    requestId: 'ar-1',
+    originRunId: 'run-1',
+    originSessionId: 'sess-1',
+    provider: 'feishu',
+    targetUserId: 'ou_target',
+    task: 'check notes',
+    requesterId: 'feishu:u1',
+    destination: DESTINATION,
+    createdAt: 1,
+  }
+  const record = await store.record(base)
+  assert.equal(record.status, 'pending')
+  const stranger = await store.decide('ar-1', { approved: true, decidedBy: 'feishu:someone_else' })
+  assert.equal(stranger.outcome, 'forbidden')
+  const approved = await store.decide('ar-1', { approved: true, decidedBy: 'feishu:ou_target' })
+  assert.equal(approved.outcome, 'decided')
+  assert.equal(approved.approved, true)
+  const dup = await store.decide('ar-1', { approved: false, decidedBy: 'feishu:ou_target' })
+  assert.equal(dup.outcome, 'already_decided')
+  assert.equal(dup.approved, true, 'the first decision stands')
+  const missing = await store.decide('ar-404', { approved: true, decidedBy: 'feishu:ou_target' })
+  assert.equal(missing.outcome, 'not_found')
+  const reRecord = await store.record(base)
+  assert.equal(reRecord.status, 'approved', 're-recording never resurrects a decided request')
+  const pendingList = await store.listPending()
+  assert.equal(pendingList.length, 0)
 })

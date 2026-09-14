@@ -5,7 +5,16 @@
  * object — the Feishu SDK round-trips card values verbatim, and
  * `parseApprovalValue` accepts the object form.
  */
-import { APPROVAL_VALUE_KIND, encodeApprovalValue, type ApprovalActionValue, type ApprovalDecision } from '@qm/approvals'
+import {
+  AGENT_REQUEST_VALUE_KIND,
+  APPROVAL_VALUE_KIND,
+  encodeAgentRequestValue,
+  encodeApprovalValue,
+  type AgentRequestActionValue,
+  type AgentRequestDecision,
+  type ApprovalActionValue,
+  type ApprovalDecision,
+} from '@qm/approvals'
 import type { ImApprovalCardRenderer, ImApprovalCardSpec } from '@qm/im-core'
 
 export function larkApprovalCard(spec: ImApprovalCardSpec): Record<string, unknown> {
@@ -37,6 +46,38 @@ export function larkApprovalCard(spec: ImApprovalCardSpec): Record<string, unkno
   }
 }
 
+export function larkAgentRequestCard(spec: {
+  requestId: string
+  originLabel: string
+  targetLabel: string
+  task: string
+}): Record<string, unknown> {
+  const value = (decision: AgentRequestDecision): AgentRequestActionValue => ({
+    kind: AGENT_REQUEST_VALUE_KIND,
+    requestId: spec.requestId,
+    decision,
+  })
+  const task = spec.task.replace(/\s+/g, ' ').trim()
+  return {
+    config: { update_multi: true },
+    header: { title: { tag: 'plain_text', content: 'Personal agent request' }, template: 'blue' },
+    elements: [
+      { tag: 'div', text: { tag: 'lark_md', content: `**${spec.originLabel} → ${spec.targetLabel}**\n${task}` } },
+      {
+        tag: 'context',
+        elements: [{ tag: 'plain_text', content: 'This runs in your personal agent context. The result can be posted back to the original thread.' }],
+      },
+      {
+        tag: 'action',
+        actions: [
+          { tag: 'button', text: { tag: 'plain_text', content: 'Run with my setup' }, type: 'primary', value: encodeAgentRequestValue(value('approve')) },
+          { tag: 'button', text: { tag: 'plain_text', content: 'Decline' }, type: 'danger', value: encodeAgentRequestValue(value('reject')) },
+        ],
+      },
+    ],
+  }
+}
+
 export function createLarkApprovalCardRenderer(): ImApprovalCardRenderer {
-  return { render: larkApprovalCard }
+  return { render: larkApprovalCard, renderAgentRequest: larkAgentRequestCard }
 }

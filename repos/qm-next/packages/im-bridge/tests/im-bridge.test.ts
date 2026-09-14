@@ -8,20 +8,24 @@ import test from 'node:test'
 import { Context } from '@qm/cordis'
 import { createTurnRunner } from '@qm/api'
 import {
+  AGENT_REQUEST_VALUE_KIND,
+  createMemoryAgentRequestStore,
   createMemoryAmbientCursorStore,
   createMemoryAmbientJudgmentStore,
   createMemoryApprovalStore,
   createMemoryChannelPolicyStore,
+  encodeAgentRequestValue,
   type AmbientCursorStore,
   type AmbientJudge,
   type AmbientJudgmentStore,
+  type AgentRequestStore,
 } from '@qm/approvals'
 import type { ImCapabilities, ImProvider, ImProviderStartContext, InboundInteractionEvent, InboundMessageEvent, OutboundOperation, SendOperation } from '@qm/im-core'
 import { createImRegistry } from '@qm/im-core/runtime'
 import { createHarnessRouter, createMockHarness, OrchestratorService, type MockTurnStep } from '@qm/orchestrator'
 import { createMemoryRunStore, createMemorySessionStore } from '@qm/store'
 import type { IdentityService, ResolutionService } from '@qm/types'
-import { APPROVAL_VALUE_KIND, approvalRequestNotice, createImTurnBridge, DEFAULT_ACK_REACTIONS, parseApprovalValue, type ApprovalActionValue, type ApprovalCardRenderer, type ImTurnBridge, type ImTurnBridgeAck, type ImTurnBridgeAmbient } from '../src/index.ts'
+import { APPROVAL_VALUE_KIND, approvalRequestNotice, createImTurnBridge, DEFAULT_ACK_REACTIONS, parseApprovalValue, type ApprovalActionValue, type ApprovalCardRenderer, type ImTurnBridge, type ImTurnBridgeAck, type ImTurnBridgeAgentRequests, type ImTurnBridgeAmbient } from '../src/index.ts'
 
 function devResolution(): ResolutionService {
   return {
@@ -196,6 +200,8 @@ async function setup(
     ack?: ImTurnBridgeAck
     /** Wall-clock delay injected into every mock turn (ack-timing tests). */
     turnDelayMs?: number
+    /** Agent-request ingredients (tests inject the store + DM resolver). */
+    agentRequests?: ImTurnBridgeAgentRequests
   } = {},
 ): Promise<Harness> {
   const sessions = createMemorySessionStore()
@@ -242,6 +248,7 @@ async function setup(
       approvalStore,
       ...(ambient ? { ambient } : {}),
       ...(opts.ack ? { ack: opts.ack } : {}),
+      ...(opts.agentRequests ? { agentRequests: opts.agentRequests } : {}),
     },
   )
   await bridge.start()
@@ -695,4 +702,145 @@ test('ack reaction: inert when the provider lacks the react capability', async (
 
 test('DEFAULT_ACK_REACTIONS mirrors the qm candidate list', () => {
   assert.deepEqual(DEFAULT_ACK_REACTIONS, ['eyes', 'mag', 'hourglass_flowing_sand', 'telescope', 'saluting_face'])
+})
+
+function agentRequestRig(store: AgentRequestStore): ImTurnBridgeAgentRequests {
+  return {
+    store,
+    resolveDm: async (provider, targetUserId) =>
+      targetUserId === 'ou_unknown' ? null : { destination: { type: provider, target: `oc_dm_${targetUserId}` } },
+    originLabel: 'The deploy channel agent',
+    targetLabel: (targetUserId) => `your personal agent (${targetUserId})`,
+  }
+}
+
+test('agent request: reply directive DMs the target, approval runs a personal turn back into the thread', async () => {
+  const t = await setup({
+    script: [{ reply: 'Deploy info below.\n[[ask-agent: <@ou_target> | check my private deploy notes]]' }, { reply: 'deploy notes say Friday' }],
+    agentRequests: agentRequestRig(createMemoryAgentRequestStore()),
+  })
+  try {
+    await t.cells.ctx!.emit(messageEvent({ eventId: 'ar-1', replyToMessageId: 'om_origin' }))
+    assert.ok(await waitFor(() => t.sent.length >= 2), 'expected the cleaned reply plus the DM')
+    const dm = t.sent.find((op) => (op as SendOperation).destination.target === 'oc_dm_ou_target') as SendOperation
+    assert.ok(dm, 'the DM went to the resolved target destination')
+    assert.ok(dm.body.text?.includes('asks your personal agent (ou_target)'), 'no renderer method on the test card — neutral text fallback')
+    assert.ok(dm.body.text?.includes('check my private deploy notes'))
+    const reply = t.sent.find((op) => (op as SendOperation).destination.target === 'oc_chat1') as SendOperation
+    assert.equal(reply.body.markdown, 'Deploy info below.\n', 'the directive is stripped from the visible reply')
+
+    const runs = await t.runs.list()
+    assert.equal(runs.length, 1)
+    const requestId = `${runs[0]!.id}:ar0`
+    await t.cells.ctx!.emit({
+      kind: 'interaction',
+      provider: 'feishu',
+      instanceId: 'test',
+      eventId: 'ar-click-1',
+      occurredAt: 3,
+      receivedAt: 4,
+      ref: { destination: { type: 'feishu', target: 'oc_dm_ou_target' }, messageId: 'om_dm1' },
+      actor: { providerUserId: 'ou_target', displayName: 'Target' },
+      action: { value: encodeAgentRequestValue({ kind: AGENT_REQUEST_VALUE_KIND, requestId, decision: 'approve' }) },
+    } as InboundInteractionEvent)
+    assert.ok(await waitFor(() => t.sent.length >= 3), 'expected the personal result delivery')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const allRuns = await t.runs.list()
+    assert.equal(allRuns.length, 2)
+    const personal = allRuns.find((r) => r.request.actor.id === 'feishu:ou_target')
+    assert.ok(personal, 'the personal turn ran as the target user')
+    assert.equal(personal.request.conversation.kind, 'dm')
+    assert.equal(personal.request.conversation.threadRef, 'feishu:dm:ou_target')
+    assert.ok(personal.request.text.includes('check my private deploy notes'))
+    const result = t.sent[t.sent.length - 1] as SendOperation
+    assert.deepEqual(result.body, { markdown: 'deploy notes say Friday' }, 'the personal result delivers like any reply')
+    assert.equal(result.threadId, 'om_thread1', 'the result lands in the origin thread')
+    assert.equal(result.replyToMessageId, 'om_origin')
+  } finally {
+    await t.dispose()
+  }
+})
+
+test('agent request: decline posts the notice to the origin thread and no personal turn runs', async () => {
+  const t = await setup({
+    script: [{ reply: '[[ask-agent: <@ou_target> | tidy the scratch dir]]' }],
+    agentRequests: agentRequestRig(createMemoryAgentRequestStore()),
+  })
+  try {
+    await t.cells.ctx!.emit(messageEvent({ eventId: 'ar-2', replyToMessageId: 'om_origin' }))
+    assert.ok(await waitFor(() => t.sent.length >= 2))
+    const runs = await t.runs.list()
+    const requestId = `${runs[0]!.id}:ar0`
+    await t.cells.ctx!.emit({
+      kind: 'interaction',
+      provider: 'feishu',
+      instanceId: 'test',
+      eventId: 'ar-click-2',
+      occurredAt: 3,
+      receivedAt: 4,
+      ref: { destination: { type: 'feishu', target: 'oc_dm_ou_target' }, messageId: 'om_dm2' },
+      actor: { providerUserId: 'ou_target' },
+      action: { value: encodeAgentRequestValue({ kind: AGENT_REQUEST_VALUE_KIND, requestId, decision: 'reject' }) },
+    } as InboundInteractionEvent)
+    assert.ok(await waitFor(() => t.sent.length >= 3))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.equal((await t.runs.list()).length, 1, 'no personal turn after a decline')
+    const notice = t.sent[t.sent.length - 1] as SendOperation
+    assert.match(notice.body.text ?? '', /declined/i)
+    assert.equal(notice.destination.target, 'oc_chat1', 'the decline notice posts back to the origin thread')
+  } finally {
+    await t.dispose()
+  }
+})
+
+test('agent request: a click by anyone but the target is refused and the request stays pending', async () => {
+  const store = createMemoryAgentRequestStore()
+  const t = await setup({
+    script: [{ reply: '[[ask-agent: <@ou_target> | water the plants]]' }],
+    agentRequests: agentRequestRig(store),
+  })
+  try {
+    await t.cells.ctx!.emit(messageEvent({ eventId: 'ar-3', replyToMessageId: 'om_origin' }))
+    assert.ok(await waitFor(() => t.sent.length >= 2))
+    const runs = await t.runs.list()
+    const requestId = `${runs[0]!.id}:ar0`
+    await t.cells.ctx!.emit({
+      kind: 'interaction',
+      provider: 'feishu',
+      instanceId: 'test',
+      eventId: 'ar-click-3',
+      occurredAt: 3,
+      receivedAt: 4,
+      ref: { destination: { type: 'feishu', target: 'oc_dm_ou_target' }, messageId: 'om_dm3' },
+      actor: { providerUserId: 'ou_stranger' },
+      action: { value: encodeAgentRequestValue({ kind: AGENT_REQUEST_VALUE_KIND, requestId, decision: 'approve' }) },
+    } as InboundInteractionEvent)
+    assert.ok(await waitFor(() => t.sent.length >= 3))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const refusal = t.sent[t.sent.length - 1] as SendOperation
+    assert.match(refusal.body.text ?? '', /Only the person who was asked/)
+    const record = await store.get(requestId)
+    assert.equal(record?.status, 'pending', 'a forbidden click never decides')
+  } finally {
+    await t.dispose()
+  }
+})
+
+test('agent request: an unresolvable DM destination leaves the request pending with a warning', async () => {
+  const store = createMemoryAgentRequestStore()
+  const t = await setup({
+    script: [{ reply: '[[ask-agent: <@ou_unknown> | open the vault]]' }],
+    agentRequests: agentRequestRig(store),
+  })
+  try {
+    await t.cells.ctx!.emit(messageEvent({ eventId: 'ar-4', replyToMessageId: 'om_origin' }))
+    assert.ok(await waitFor(() => t.sent.length >= 1))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.equal(t.sent.length, 1, 'only the cleaned reply delivered — no DM')
+    const runs = await t.runs.list()
+    const record = await store.get(`${runs[0]!.id}:ar0`)
+    assert.equal(record?.status, 'pending')
+  } finally {
+    await t.dispose()
+  }
 })

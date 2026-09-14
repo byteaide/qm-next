@@ -32,11 +32,16 @@ import {
   APPROVAL_VALUE_KIND,
   createAmbientService,
   createMemoryApprovalStore,
+  extractAgentRequests,
+  parseAgentRequestValue,
   parseApprovalValue,
   type AmbientCursorStore,
   type AmbientJudge,
   type AmbientJudgmentStore,
   type AmbientService,
+  type AgentRequestActionValue,
+  type AgentRequestRecord,
+  type AgentRequestStore,
   type ApprovalActionValue,
   type ApprovalCardRenderer,
   type ApprovalStore,
@@ -131,6 +136,21 @@ export interface ImTurnBridgeAck {
   }): void
 }
 
+/**
+ * Agent-request ingredients (14.0 tranche 3): the durable registry plus
+ * the DM resolver for reaching the target person. `resolveDm` maps a
+ * provider user to their direct-message destination (directory-backed in
+ * production); without it requests stay pending and the bridge warns.
+ */
+export interface ImTurnBridgeAgentRequests {
+  store: AgentRequestStore
+  resolveDm?(provider: string, targetUserId: string): Promise<{ destination: Destination; threadId?: string } | null>
+  /** Label for the requesting agent in DM cards. */
+  originLabel?: string
+  /** Label for the target's personal agent in DM cards. */
+  targetLabel?(targetUserId: string): string
+}
+
 export interface ImTurnBridgeOptions {
   /** Principal type assigned to IM actors (directory mapping is M3). */
   actorType?: PrincipalType
@@ -150,6 +170,8 @@ export interface ImTurnBridgeOptions {
   ambient?: ImTurnBridgeAmbient
   /** Reaction-as-ack; absent means no ack reactions. */
   ack?: ImTurnBridgeAck
+  /** Agent-request directives; absent means the grammar stays inert. */
+  agentRequests?: ImTurnBridgeAgentRequests
   loop?: ImTurnBridgeLoopOptions
 }
 
@@ -385,11 +407,20 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
   }
 
   async function submitInteraction(event: InboundInteractionEvent): Promise<void> {
-    const value = parseApprovalValue(event.action.value)
-    if (!value) {
-      logger.debug(`im-bridge: interaction ${event.eventId} carries no approval value; ignored`)
+    const approvalValue = parseApprovalValue(event.action.value)
+    if (approvalValue) {
+      await submitApprovalInteraction(event, approvalValue)
       return
     }
+    const agentRequestValue = parseAgentRequestValue(event.action.value)
+    if (agentRequestValue) {
+      await submitAgentRequestInteraction(event, agentRequestValue)
+      return
+    }
+    logger.debug(`im-bridge: interaction ${event.eventId} carries no decision value; ignored`)
+  }
+
+  async function submitApprovalInteraction(event: InboundInteractionEvent, value: ApprovalActionValue): Promise<void> {
     const actor = principalOf(event.provider, event.actor)
     const decided = await approvalStore.decide(value.requestId, {
       approved: value.decision === 'approve',
@@ -428,6 +459,115 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
     await enqueueTurn(input, route)
   }
 
+  /** qm's personal-agent handoff prompt, provider-neutral. */
+  function personalAgentTurnText(record: AgentRequestRecord): string {
+    return (
+      'An agent handoff: another conversation\'s agent asked your personal agent for help. ' +
+      `Task: ${record.task}\n\n` +
+      'Work only with this user\'s personal context and return a concise result safe to share ' +
+      'back to the originating thread.'
+    )
+  }
+
+  async function submitAgentRequestInteraction(event: InboundInteractionEvent, value: AgentRequestActionValue): Promise<void> {
+    const agentRequests = options.agentRequests
+    if (!agentRequests) return
+    const actor = principalOf(event.provider, event.actor)
+    const decided = await agentRequests.store.decide(value.requestId, {
+      approved: value.decision === 'approve',
+      decidedBy: actor.id,
+    })
+    if (decided.outcome === 'not_found') {
+      logger.info(`im-bridge: agent request ${value.requestId} not found; click treated as expired`)
+      await deliverNotice(event, 'That personal-agent request could not be found — it may have expired.')
+      return
+    }
+    if (decided.outcome === 'forbidden') {
+      logger.info(`im-bridge: agent request ${value.requestId} clicked by non-target ${actor.id}; refused`)
+      await deliverNotice(event, 'Only the person who was asked can run or decline this request.')
+      return
+    }
+    if (decided.outcome === 'already_decided') {
+      logger.info(`im-bridge: agent request ${value.requestId} already decided; duplicate click ignored`)
+      return
+    }
+    const record = decided.record
+    if (!decided.approved) {
+      await queue.enqueue({
+        provider: record.destination.type,
+        op: {
+          op: 'send',
+          destination: record.destination,
+          body: { text: `The personal-agent request was declined — \`${record.task.slice(0, 120)}\` was not run.` },
+          ...(record.threadId ? { threadId: record.threadId } : {}),
+          ...(record.replyToMessageId ? { replyToMessageId: record.replyToMessageId } : {}),
+        },
+        idempotencyKey: `agent-request-declined:${record.requestId}`,
+      })
+      return
+    }
+    const target: Principal = {
+      id: `${record.provider}:${record.targetUserId}`,
+      type: options.actorType ?? 'internal',
+    }
+    const conversation: Conversation = {
+      kind: 'dm',
+      threadRef: `${record.provider}:dm:${record.targetUserId}`,
+      audience: [target],
+    }
+    const originRoute: ImReplyRoute = {
+      destination: record.destination,
+      ...(record.threadId ? { threadId: record.threadId } : {}),
+      ...(record.replyToMessageId ? { replyToMessageId: record.replyToMessageId } : {}),
+      conversation,
+    }
+    await enqueueTurn(
+      {
+        surface: record.provider,
+        actor: target,
+        conversation,
+        origin: { kind: 'human' },
+        text: personalAgentTurnText(record),
+      },
+      originRoute,
+    )
+  }
+
+  async function deliverAgentRequestDm(record: AgentRequestRecord): Promise<void> {
+    const agentRequests = options.agentRequests
+    if (!agentRequests) return
+    const dm = agentRequests.resolveDm
+      ? await agentRequests.resolveDm(record.provider, record.targetUserId).catch(() => null)
+      : null
+    if (!dm) {
+      logger.warn(
+        `im-bridge: no DM destination for agent-request target ${record.provider}:${record.targetUserId}; request ${record.requestId} stays pending`,
+      )
+      return
+    }
+    const provider = deps.im.get(record.provider)
+    const renderer = provider?.approvalCardRenderer?.renderAgentRequest
+    const originLabel = agentRequests.originLabel ?? 'The channel agent'
+    const targetLabel = agentRequests.targetLabel?.(record.targetUserId) ?? `your personal agent (${record.targetUserId})`
+    const body = renderer
+      ? { card: renderer({ requestId: record.requestId, originLabel, targetLabel, task: record.task }) }
+      : {
+          text:
+            `${originLabel} asks ${targetLabel} to run a personal-scope task: ${record.task} — ` +
+            'reply to the requesting thread to approve or decline.',
+        }
+    await queue.enqueue({
+      provider: record.provider,
+      op: {
+        op: 'send',
+        destination: dm.destination,
+        body,
+        ...(dm.threadId ? { threadId: dm.threadId } : {}),
+      },
+      idempotencyKey: `agent-request:${record.requestId}`,
+    })
+  }
+
   const sink: ImInboundSink = async (events) => {
     for (const event of events) {
       if (event.kind === 'message') {
@@ -450,8 +590,32 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
       const route = routes.get(run.id)
       if (!route) return
       if (isPendingApprovalResult(run)) await rememberPendingApprovals(run, route)
+      let result = run.result
+      if (options.agentRequests && result?.status === 'ok' && result.reply !== undefined) {
+        const { text, requests } = extractAgentRequests(result.reply)
+        if (requests.length) {
+          result = { ...result, reply: text }
+          for (const [index, request] of requests.entries()) {
+            const record = await options.agentRequests.store.record({
+              requestId: `${run.id}:ar${index}`,
+              originRunId: run.id,
+              originSessionId: run.sessionId,
+              provider: route.destination.type,
+              targetUserId: request.targetUserId,
+              task: request.task,
+              requesterId: run.request.actor.id,
+              ...(run.request.actor.displayName ? { requesterName: run.request.actor.displayName } : {}),
+              destination: route.destination,
+              ...(route.threadId ? { threadId: route.threadId } : {}),
+              ...(route.replyToMessageId ? { replyToMessageId: route.replyToMessageId } : {}),
+              createdAt: Date.now(),
+            })
+            await deliverAgentRequestDm(record)
+          }
+        }
+      }
       const cards = options.approvalCards ?? deps.im.get(route.destination.type)?.approvalCardRenderer
-      const delivery = imRunResultDelivery(run, route, options.replyAs ?? 'markdown', cards)
+      const delivery = imRunResultDelivery({ ...run, result }, route, options.replyAs ?? 'markdown', cards)
       if (!delivery) return
       await queue.enqueue(delivery)
     })().catch((err) => {
