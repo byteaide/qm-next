@@ -609,3 +609,90 @@ Each entry names the qm source shape, the qm-next shape, and why.
     sourceSessionId`) stamped by the fire engine and consumed by
     `/v1/admin/deliveries/shadow`, which lists live trigger-provenanced
     deliveries rather than qm's shadow dry-runs (no shadow mode exists).
+
+## P4 15.0 lane B — memory/skills/reach completion (2026-09-14)
+
+Memory strategy modes (per-turn, agent-only, consolidation,
+scratch-promote), scratch-tier storage port, provider router (capture
+policy + fail-open + manage routing), and the memorable relay are
+ported per qm. Notable adaptations: (a) `ScopeMemory.capture?` is an
+additive optional method so notebook providers keep working unchanged
+and only the memorable provider overrides it; the strategy layer
+routes through a small `captureFacts` helper. (b) `WorkspaceStore` is
+replaced by a structural `ScratchLogStore` (memory `Map` /
+Postgres `DurableMap`); durable-by-default means the scratch tier gets
+the same persistence guarantees as the notebook. (c) The MCP memory
+provider is refused by `parseMemoryProviderConfig` (the
+`@qm/memory` config parser raises an explicit "mcp package" error) —
+the mcp client lands with parity 16.0; until then, `type: "mcp"`
+entries in `MEMORY_PROVIDER_CONFIG` throw at boot rather than silently
+no-op. (d) `ccCaptureToPersonal` keeps qm's channel/group → personal
+mapping via `parseScopeId`. (e) `MemorableProviderDeps.inject` /
+`.relay` are dependency-injected so tests can drive both without a
+real CLI — the production defaults are the `memorable inject`/`record`
+spawners. (f) `memorableInject`/relay timeout and stdout/stderr caps
+match qm (15s/8 KiB for inject, 120s/2 KiB stderr for record). (g)
+The route used to mask secrets before relay is recreated locally; we
+do not depend on `@qm/sandbox`'s `secret-masking` to keep the memory
+package free of sandbox imports. (h) Capture-policy gating on the
+routed service follows qm: an explicit capture is rejected by routes
+that only set `capture: "automatic"`; a throwing provider is only
+fail-open when the route opts in.
+
+Reach: `ReachDirectory` now optionally carries `openGroup` /
+`registerGroup`, and the resolver takes a `ReachOpts { mayOpenGroup? }`
+flag — qm's group-not-found → open-via-provider write-back is restored.
+`ReachResolution` error status widens to `400 | 403 | 404 | 409 |
+502` to carry the new 502 `group_open_failed`; the qm "needs someone
+besides you" 400 `bad_request` is also restored (the 14.0 contract
+silently accepted `participants: [<self>]`). The provider adapter
+that actually opens the group is the composition root's
+responsibility; the dev profile does not wire one (groups resolve to
+`group_not_found` and route to the openGroup callback when a
+deployment plugs in feishu/`im.chat.create`).
+
+Directory: `personKey`/`samePerson`/`personKeys` are now in
+`@qm/directory/src/person.ts` (single canonical home, with the
+`samePersonInDirectory` and `samePersonMatcher` adaptation that
+walks `listPeople` to resolve principalIds); the existing local
+copies in `@qm/credentials` and `@qm/admin` stay put (no public
+contract change in those packages — re-exporting would force a
+dependency on `@qm/directory`).
+
+Skills pack ingest / materialize / sync engine / full lifecycle
+land in `@qm/skills`. Notable adaptations: (a) the SkillStore
+contract gains optional `create`/`verify`/`restore`/`promote`/
+`move` (additive; 14.0 consumers are unaffected); the frozen 14.0
+`register`/`update`/`publish`/`archive`/`resolve`/`visibleFor`
+surface is unchanged. (b) `SkillFile` / `SkillManifest` /
+`SkillPackRef` types and `safeSkillFilePath` / canonical-files /
+HMAC sign-verify live in `manifest.ts`; `signingSecret` is
+per-store and process-local (the same limitation qm has — verify only
+works on records created in the same instance). (c) Schema
+migration: 14.0 skills tables are extended in place via
+`ALTER TABLE … ADD COLUMN IF NOT EXISTS …` (idempotent) for
+`files`, `granted_capabilities`, `approvals`, `pack`, `signature`.
+(d) `SkillMaterializer` writes the `skills/` tree plus the
+`.index`/`.tree` markers; the system-prompt renderer is a separate
+`servicesIndex` (the 14.0 `resolution.ts` keeps its own
+`skillsIndex`, and the new `skillsMaterializerIndex` is exported
+under that alias to avoid name collision). (e) `createGitFetcher`
+is the qm git fetcher ported — DNS-resolves the host, refuses
+loopback / private / ULA addresses via a tiny `isPrivateNetworkIp`,
+scrubs auth headers from error output, and uses `git clone
+--no-checkout` + `git checkout --detach` in a temp dir. (f) Pack
+ingest (`planIngest` + `importPack`) honors `PackConfig` globs /
+excludes, the `private`/`scope: personal` / native-name collision /
+binary-asset filters, and surfaces `SkillPackCollisionError` on
+control-path / claimed-path clashes. (g) `SkillSyncEngine` is a
+leader-leased sweeper; tracked mode reconciles on a head move,
+pinned mode flips `updateAvailable`. (h) The API `skill-pack`
+routes close **deviation #46**: the lane-A stub `SkillPackFetchError`
+is gone, and `catalog` / `import` / `sync` run the real
+fetcher+ingest pipeline whenever the composition root supplies a
+`SkillPackFetcher` (dev profiles without one still answer 400
+"git pack fetching is not available" — the test contract is
+updated to drop the "register records the fetch-error import" step
+since the stub no longer writes a fake error row). The
+api/service imports the real `@qm/skills` pack store via a
+re-export shim in `services/skill-pack-store.ts`.
