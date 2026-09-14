@@ -60,17 +60,17 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
   - [x] 2.2 secret-drop/device-flow/resident-auth 按引用跟进 ~3h（resident-auth/device-flow-persist/device-flow-cutover 落地 6 测试过；tar 编解码下移 @qm/credentials——deviations #21-22；secret-drop 随 P3 控制面、codex-device-login 随 3.2 harness 落地）
   - [x] 2.3 `packages/model` 核心：pi-models/catalog-gateway/provider-endpoints/custom-providers ~4h（11 测试过）
   - [x] 2.5 【A 余量】model-catalog + custom-provider-store + model-credential-store + user-model-credential-store + subscription-oauth ~4h（7 测试过；claude token 端点参数注入——deviations #19-20）
-  - [ ] 2.4 parity 对拍测试（对照 qm `test/postgres-*` 相关用例形状） ~2h（契约测试已写；PG 对拍待容器轮次）
+  - [ ] 2.4 parity 对拍测试（对照 qm `test/postgres-*` 相关用例形状） ~2h（契约测试已写；PG 对拍待容器轮次——2026-09-14 起 PG 轮常态化全绿，容器侧已验；对拍用例形状核对仍待补）
 - [ ] 3.0 【B】pi-harness 平移 ~2.5d（2026-09-13 主会话本地执行）
   - [x] 3.1 `packages/sandbox`：local-sandbox 全量（docker-exec/exec-process-session/ro-layers/exec-file-ops/exec-kill/sandbox-env/process-poll/await-exit；mock dockerExec+daemon 11 测试过） ~5h（blob staging 延后 P3、layerData seam、secret-masking 重建——deviations #16-18）
   - [x] 3.2 `packages/harness-pi`：pi-harness 主体（2190L）+ pi-tools（3097L） ~8h（pi-coding-agent tgz 从 npm 镜像解决——上游 0.82.0 底座 vendor 为 @qm/pi-coding-agent（fork swap 待 github 可达，deviations #23-25）；@qm/types 增量扩展 harness 契约）
   - [x] 3.3 共享件：tape-fold/replay/context-compaction/goal/grind（入 `packages/harness-pi`，1.1 定） ~4h（另含 run-signal-store/tokens/message-tag/define-harness/security-posture 纯函数；tape audience 过滤随 P4——#25）
   - [ ] 3.4 真模型单测（跳过式：有 key 才跑）+ mock 对拍 ~3h（mock 对拍 21 测试过：output-guard/detect/title/tape/replay/goal/pi-tools 只读与审批流；真模型跳过式待 key）
-- [ ] 4.0 【汇合】真任务验收 ~1d
+- [x] 4.0 【汇合】真任务验收 ~1d
   - [x] 4.1 profile 组装：im-feishu → orchestrator → pi-harness → model → credentials 全链 ~2h（api 组合根 `defaultHarness: 'pi'` 注册真引擎并接 modelGateway；profiles/im-agent.yml + scripts/boot-im-agent.ts；boot 测试覆盖 agent stanza 环境插值 boot）
   - [x] 4.2 飞书 @机器人真实编码任务对拍（2026-09-13 通过，tag p1）：飞书群 @机器人 "计算 100 以内素数之和"→ glm-5.2 经 orchestrator→pi→ToolContext 在 docker 沙箱 write primes_under_100.py（503B）+ execute python3 验证 → in-thread 回复；沙箱容器 qm-sbx-org-default-11b9eb 物证（20:10:05 冷启动）+ 脚本独立复跑 25 素数/和 1060 正确；qm 侧无本机可跑环境（Slack dev workspace 未配置），对拍以 qm 行为契约为基准（真实任务/工具执行/in-thread 回复全满足）；流式增量投递到 IM 未实现（qm 有 progress 投递——记入后续车道） ~2h
   - [x] 4.2a 【汇合暴露】per-turn ToolContext 装配（2026-09-13 完成）：orchestrator deps.tools 工厂 → runTurn({tools})；createSandboxToolContext（orchestrator 包）实现 execute/read/write/computerStatus/restartComputer/background*（process sessions），memory/publish/mcp/cron/webhook/soul 按契约优雅不可用；api 组合根 sandbox 配置 → LocalSandbox + per-scope handle 缓存 + dispose teardown(destroy)；镜像链 fly/Dockerfile（轻量子集：node24+git/gh/aws/venv）+ local/Dockerfile + agent.mjs（91 行 daemon）+ pnpm sandbox:local:build（宿主侧下载注入，容器网络不通 github）；真机验证 glm-5.2 execute echo 3.4s / fib(10)=55 10.5s；坑：schemastery 嵌套 object 未传归一化 {}（truthy）→ 须运行时守卫 Object.keys().length；偏差 #26-28 已记档 ~4h 实际
-  - [ ] 4.3 `test:pg` 基线扩充 + 全绿；【串行门验收】打 tag `p1` ~2h（PG16 全套 exit 0 实证：stores/keychain 等 7 包 PG 门用例实跑；tag 待 4.2 通过）
+  - [x] 4.3 `test:pg` 基线扩充 + 全绿；【串行门验收】打 tag `p1` ~2h（2026-09-13 通过，tag `p1`；PG16 全套 exit 0 实证：stores/keychain 等 7 包 PG 门用例实跑；p2/p3 轮持续全绿——2026-09-14 PG 轮 512✔）
 
 ### P2 多引擎 + runs 深化（3 并行 + 汇合，~4d）
 
@@ -92,6 +92,7 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
 ### P4 长尾子系统 + M3 砍除项回填（多车道，~5d）
 
 - [ ] 14.0 【A】IM 域回填 ~1.5d：judge 真模型 + ambient cursors、reaction-as-ack（`react` 位落地）、agent-request directives、consent/keychain-ask/edit-notice/provenance
+  - [x] 14.0a ambient 真模型 judge + cursors + 判决/观测库（2026-09-14：qm AMBIENT_JUDGE_SYSTEM + JSON 决定语法平移入 `@qm/approvals`（`createModelAmbientJudge`，单候选/次）；ambient service 升级——bot ledger（ignore 跳过/rollup 窗口持/action 触发行进 orders，经 `AmbientCandidate.orders` 随候选传 judge）、cursor（`ambient_cursors` DurableMap，memory+PG）、judgment 记录（`ambient_judgments`，qm 列对齐，memory+PG）；ApiService 暴露 `ambientJudge`（默认 harness 的 models.judge）+`ambientCursors/Judgments`+`channelPolicy`；im-bridge `ambientJudgeMode: 'keyword'|'model'` + `ambientPolicySource: 'boot'|'api'`（context-policy 店可共享，api store 补 setAmbient/close）；admin `/v1/admin/ambient-judgments` 接真店（list 摘要+counts+?id+过滤）；偏差 #51；approvals 19✔、im-bridge 16✔、api tranche14 路由+PG 用例、五门禁+PG 轮全绿）
 - [ ] 15.0 【B】memory/skills/reach 完整化 ~1.5d：strategy modes/memorable relay/pack 摄取/sync engine；skills pack store/ingest/materialize/sync engine/collision 全量；reach identity merge/openGroup 写回
 - [ ] 16.0 【C】长尾子系统 ~2.5d：mcp/connectors 全量/monitors/tasks/environments/projects/acl/security-screener/processes/insights/classify/webhooks/search/egress-authz/deploy（aws/docker/fly/porter）/deployment layers + job-queue（pg-boss）
 - [ ] 17.0 【汇合】v0.1.0 OUT 项逐条对账关闭 + `test:pg` 全绿；打 tag `p4` ~0.5d

@@ -7,7 +7,15 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Context } from '@qm/cordis'
 import { createTurnRunner } from '@qm/api'
-import { createMemoryApprovalStore, createMemoryChannelPolicyStore, type AmbientJudge } from '@qm/approvals'
+import {
+  createMemoryAmbientCursorStore,
+  createMemoryAmbientJudgmentStore,
+  createMemoryApprovalStore,
+  createMemoryChannelPolicyStore,
+  type AmbientCursorStore,
+  type AmbientJudge,
+  type AmbientJudgmentStore,
+} from '@qm/approvals'
 import type { ImCapabilities, ImProvider, ImProviderStartContext, InboundInteractionEvent, InboundMessageEvent, OutboundOperation, SendOperation } from '@qm/im-core'
 import { createImRegistry } from '@qm/im-core/runtime'
 import { createHarnessRouter, createMockHarness, OrchestratorService, type MockTurnStep } from '@qm/orchestrator'
@@ -165,7 +173,14 @@ async function setup(
     script?: MockTurnStep[]
     actorType?: 'internal' | 'guest'
     /** Ambient ingredients: containers preloaded into a memory policy. */
-    ambient?: { containers: string[]; judge: AmbientJudge }
+    ambient?: {
+      containers: string[]
+      judge: AmbientJudge
+      cursors?: AmbientCursorStore
+      judgments?: AmbientJudgmentStore
+      self?: { name?: string; mentionId?: string }
+      judgeModel?: string
+    }
     /** When false the provider ships no card renderer (fallback-path tests). */
     providerCardRenderer?: boolean
   } = {},
@@ -193,7 +208,14 @@ async function setup(
   if (opts.ambient) {
     const policy = createMemoryChannelPolicyStore()
     for (const container of opts.ambient.containers) await policy.setAmbient(container, true)
-    ambient = { policy, judge: opts.ambient.judge }
+    ambient = {
+      policy,
+      judge: opts.ambient.judge,
+      ...(opts.ambient.cursors ? { cursors: opts.ambient.cursors } : {}),
+      ...(opts.ambient.judgments ? { judgments: opts.ambient.judgments } : {}),
+      ...(opts.ambient.self ? { self: opts.ambient.self } : {}),
+      ...(opts.ambient.judgeModel ? { judgeModel: opts.ambient.judgeModel } : {}),
+    }
   }
   bridge = createImTurnBridge(
     { runs, sessions, resolution: devResolution(), im: registry },
@@ -264,6 +286,36 @@ test('ambient: unaddressed channel chatter in an enabled container goes to the j
     const op = t.sent[0] as SendOperation
     assert.deepEqual(op.body, { markdown: 'echo: hello bot' }, 'the ambient reply delivers like any reply')
     assert.equal(op.threadId, 'om_thread1', 'ambient replies stay in the overheard thread')
+  } finally {
+    await t.dispose()
+  }
+})
+
+test('ambient observability: judgments and cursors ride the bridge options', async () => {
+  const judgments = createMemoryAmbientJudgmentStore()
+  const cursors = createMemoryAmbientCursorStore()
+  const t = await setup({
+    ambient: {
+      containers: ['feishu:oc_chat1'],
+      judge: { consider: async () => ({ engage: true, reason: 'test verdict' }) },
+      judgments,
+      cursors,
+      judgeModel: 'test-mini',
+    },
+  })
+  try {
+    await t.cells.ctx!.emit(messageEvent({ eventId: 'amb-obs-1', mentionedBot: false, containerKind: 'channel' }))
+    assert.ok(await waitFor(() => t.sent.length === 1), 'expected the ambient reply delivery')
+    const listed = await judgments.list()
+    assert.equal(listed.length, 1)
+    assert.equal(listed[0]!.decision, 'act')
+    assert.equal(listed[0]!.reason, 'test verdict')
+    assert.equal(listed[0]!.model, 'test-mini')
+    assert.equal(listed[0]!.container, 'feishu:oc_chat1')
+    const cursor = await cursors.get('feishu:feishu:oc_chat1')
+    assert.ok(cursor, 'the judged message advanced the container cursor')
+    assert.ok(cursor!.lastJudgedTs.length > 0)
+    assert.ok((cursor!.lastJudgedAt ?? 0) > 0)
   } finally {
     await t.dispose()
   }

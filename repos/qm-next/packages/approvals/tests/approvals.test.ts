@@ -10,14 +10,20 @@ import { test } from 'node:test'
 import type { InboundMessageEvent } from '@qm/im-core'
 import type { Destination, Principal, TurnInput } from '@qm/types'
 import {
+  AMBIENT_JUDGE_SYSTEM,
   APPROVAL_VALUE_KIND,
   createAmbientService,
   createKeywordAmbientJudge,
   createMemoryApprovalStore,
+  createMemoryAmbientCursorStore,
+  createMemoryAmbientJudgmentStore,
   createMemoryChannelPolicyStore,
+  createModelAmbientJudge,
   createNoopAmbientJudge,
   encodeApprovalValue,
+  parseAmbientDecision,
   parseApprovalValue,
+  renderAmbientPrompt,
   type AmbientJudge,
   type AmbientRoute,
   type ApprovalActionValue,
@@ -366,4 +372,153 @@ test('the keyword stub judge engages on case-insensitive matches and star, verba
   assert.deepEqual(await star.consider({ ...candidate, text: 'anything at all' }), { engage: true })
   assert.equal(createKeywordAmbientJudge('  ').consider === undefined, false)
   assert.equal((await createKeywordAmbientJudge('   ').consider(candidate)).engage, false, 'blank keyword never engages')
+})
+
+test('the model judge renders the qm prompt and parses the JSON decision grammar', async () => {
+  const candidate = {
+    provider: 'feishu',
+    destination: DESTINATION,
+    actor: { providerUserId: 'u9', displayName: 'Chatter' },
+    text: 'anyone knows the deploy window?',
+    occurredAt: 1_700_000_000_000,
+  }
+  let seen: { system: string; prompt: string } | undefined
+  const judge = createModelAmbientJudge({
+    judge: async (system, prompt) => {
+      seen = { system, prompt }
+      return 'Sure! {"act": true, "reason": "They need deploy info."} trailing'
+    },
+    self: { name: 'qm', mentionId: 'ou_bot' },
+    orders: 'Post a standup digest at 9am.',
+  })
+  const verdict = await judge.consider(candidate)
+  assert.equal(verdict.engage, true)
+  assert.equal(verdict.reason, 'They need deploy info.')
+  assert.ok(seen)
+  assert.ok(seen.system.includes('Silence is the default'))
+  assert.ok(seen.prompt.includes('ASSISTANT IDENTITY: you are "qm" (mentioned as <@ou_bot>)'))
+  assert.ok(seen.prompt.includes('STANDING ORDERS:'))
+  assert.ok(seen.prompt.includes('[1700000000000] Chatter: anyone knows the deploy window?'))
+  assert.equal(verdict.prompt, seen.prompt)
+  const declined = createModelAmbientJudge({ judge: async () => '{"act": false}' })
+  assert.equal((await declined.consider(candidate)).engage, false)
+  const garbage = createModelAmbientJudge({ judge: async () => 'not json at all' })
+  assert.equal((await garbage.consider(candidate)).engage, false)
+  const empty = createModelAmbientJudge({ judge: async () => undefined })
+  assert.equal((await empty.consider(candidate)).engage, false)
+})
+
+test('parseAmbientDecision accepts only well-formed act decisions', () => {
+  assert.deepEqual(parseAmbientDecision(undefined), { act: false })
+  assert.deepEqual(parseAmbientDecision('{"act": false}'), { act: false })
+  assert.deepEqual(parseAmbientDecision('{"act": true, "reason": "r"}'), { act: true, reason: 'r' })
+  assert.deepEqual(parseAmbientDecision('x {"act":true,"reason":"  r  ","asked_by":"[m1]"} y'), {
+    act: true,
+    reason: 'r',
+    askedBy: 'm1',
+  })
+  assert.deepEqual(parseAmbientDecision('{"act": 1}'), { act: false })
+  assert.deepEqual(parseAmbientDecision('{broken'), { act: false })
+  assert.ok(AMBIENT_JUDGE_SYSTEM.length > 100)
+  assert.ok(renderAmbientPrompt(
+    { provider: 'feishu', destination: DESTINATION, actor: { providerUserId: 'u' }, text: 'hi', occurredAt: 5 },
+    { judge: async () => undefined },
+  ).includes('[5] u: hi'))
+})
+
+test('ambient records judgments and advances cursors around the judge', async () => {
+  const submits: Array<{ input: TurnInput; route: AmbientRoute }> = []
+  const policy = createMemoryChannelPolicyStore()
+  await policy.setAmbient('feishu:oc_chat1', true)
+  const cursors = createMemoryAmbientCursorStore()
+  const judgments = createMemoryAmbientJudgmentStore()
+  let model = 0
+  const service = createAmbientService({
+    policy,
+    judge: engagingJudge('Engaging: deploy question'),
+    submit: async (input, route) => {
+      submits.push({ input, route })
+    },
+    cursors,
+    judgments,
+    judgeModel: 'test-mini',
+    now: () => (model += 5),
+  })
+  await service.observe(ambientEvent({ occurredAt: 1_700_000_000_000 }))
+  assert.equal(submits.length, 1)
+  const cursor = await cursors.get('feishu:feishu:oc_chat1')
+  assert.equal(cursor?.lastJudgedTs, '1700000000000')
+  const listed = await judgments.list()
+  assert.equal(listed.length, 1)
+  assert.equal(listed[0]!.decision, 'act')
+  assert.equal(listed[0]!.model, 'test-mini')
+  assert.equal(listed[0]!.tsFrom, '1700000000000')
+  assert.ok((listed[0]!.latencyMs ?? 0) > 0)
+  assert.ok(!('prompt' in listed[0]!), 'list views strip the prompt body')
+  const full = await judgments.get(listed[0]!.id!)
+  assert.ok(full?.prompt?.includes('Chatter'))
+  const counts = await judgments.counts()
+  assert.deepEqual(counts, { act: 1, ignore: 0, fastlane: 0 })
+  const declined = createAmbientService({
+    policy,
+    judge: { consider: async () => ({ engage: false, reason: 'nothing needed' }) },
+    submit: async () => {},
+    judgments,
+  })
+  await declined.observe(ambientEvent({ occurredAt: 1_700_000_000_001 }))
+  assert.equal((await judgments.counts()).ignore, 1)
+})
+
+test('ambient bot ledger: ignore skips, rollup holds inside the window, action feeds judge orders', async () => {
+  const prompts: string[] = []
+  const verdictJudge: AmbientJudge = {
+    consider: async (candidate) => {
+      prompts.push(candidate.text)
+      return { engage: false }
+    },
+  }
+  const policy = createMemoryChannelPolicyStore()
+  await policy.set('feishu:oc_chat1', 'Watch the deploy channel.', {
+    bots: { 'Feed Bot': { mode: 'rollup', rollupHours: 1 }, 'Alert Bot': { mode: 'action' }, 'Noise Bot': { mode: 'ignore' } },
+    ambientEnabled: true,
+  })
+  let clock = 1_000_000
+  const cursors = createMemoryAmbientCursorStore()
+  const judgments = createMemoryAmbientJudgmentStore()
+  const service = createAmbientService({
+    policy,
+    judge: verdictJudge,
+    submit: async () => {},
+    cursors,
+    judgments,
+    now: () => clock,
+  })
+  await service.observe(ambientEvent({ eventId: 'noise', actor: { providerUserId: 'b1', displayName: 'Noise Bot', isBot: true } }))
+  assert.equal(prompts.length, 0, 'ignore-mode bots never reach the judge')
+  const key = 'feishu:feishu:oc_chat1'
+  await cursors.put(key, { lastJudgedTs: '0', lastJudgedAt: clock })
+  await service.observe(ambientEvent({ eventId: 'feed', actor: { providerUserId: 'b2', displayName: 'Feed Bot', isBot: true } }))
+  assert.equal(prompts.length, 0, 'rollup bots hold inside their window')
+  clock += 2 * 3_600_000
+  await service.observe(ambientEvent({ eventId: 'feed2', actor: { providerUserId: 'b2', displayName: 'Feed Bot', isBot: true } }))
+  assert.equal(prompts.length, 1, 'rollup bots are judged once the window passes')
+  await service.observe(ambientEvent({ eventId: 'alert', actor: { providerUserId: 'b3', displayName: 'Alert Bot', isBot: true } }))
+  assert.equal(prompts.length, 2, 'action-mode bots always reach the judge')
+  const captured: string[] = []
+  const modelJudge = createModelAmbientJudge({
+    judge: async (_system, prompt) => {
+      captured.push(prompt)
+      return '{"act": false}'
+    },
+    orders: 'Ignored fallback — candidate orders win.',
+  })
+  const modelService = createAmbientService({ policy, judge: modelJudge, submit: async () => {} })
+  await modelService.observe(ambientEvent({ eventId: 'alert2', actor: { providerUserId: 'b3', displayName: 'Alert Bot', isBot: true } }))
+  const lastPrompt = captured[captured.length - 1]!
+  assert.ok(lastPrompt.includes('Posts from bot "Alert Bot" are triggers'), 'service-composed action lines ride the candidate')
+  assert.ok(lastPrompt.includes('Watch the deploy channel.'), 'standing orders join the action lines')
+  assert.equal(lastPrompt.includes('Ignored fallback'), false)
+  const unregistered = createAmbientService({ policy, judge: verdictJudge, submit: async () => {} })
+  await unregistered.observe(ambientEvent({ eventId: 'stray', actor: { providerUserId: 'b9', displayName: 'Stray Bot', isBot: true } }))
+  assert.equal(prompts.length, 2, 'unregistered bots stay skipped')
 })

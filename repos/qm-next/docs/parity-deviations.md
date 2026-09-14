@@ -508,3 +508,27 @@ Each entry names the qm source shape, the qm-next shape, and why.
     check-im-isolation clean; (f) the principals allow-list and the
     portal-identity auth mode arrive via web-ui config (qm reads
     WEB_UI_PRINCIPALS / PORTAL_IDENTITY_SECRET from env).
+
+51. **Ambient model judge adaptations (14.0 tranche 1)** — qm judges ambient
+    chatter in batches replayed from the surface cache (delta since the
+    container cursor, backdrop rows, rollup holds, solicited wakes via
+    `asked_by`). qm-next judges each overheard message live as the bridge
+    observes it, so: (a) one candidate per judge call — the qm prompt and
+    JSON decision grammar are ported verbatim but the batch canvas is a
+    single message; (b) standing orders (including the action-bot trigger
+    lines) are composed per container from the channel policy and ride the
+    candidate (`AmbientCandidate.orders`) instead of a batch field;
+    (c) `asked_by` is parsed but not yet acted on — ambient turns keep the
+    `ambient` origin, so solicited wakes degrade to proactive; (d) the bot
+    ledger applies per event (ignore-mode bots skip, rollup-mode bots hold
+    inside their window against the cursor, action-mode bots always judge)
+    and unregistered bot events stay skipped, matching qm's self-exclusion
+    without a self marker; (e) cursors are a per-container DurableMap
+    (`ambient_cursors`) rather than qm's artifact map, and judgment records
+    land in `ambient_judgments` with qm's columns; (f) the judge port is
+    qm's `models.judge` from the default harness via
+    `ApiService.ambientJudge` — `ambientJudgeMode: 'keyword'` keeps the
+    deterministic stub for smokes and the e2e. The context-policy managed
+    store can be shared as the ambient policy
+    (`ambientPolicySource: 'api'`); the boot-local memory store remains
+    the default for e2e arming.

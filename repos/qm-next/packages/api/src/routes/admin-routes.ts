@@ -46,6 +46,7 @@ export interface AdminDeps {
   metrics?: MetricsSink
   errors?: ErrorLog
   credentialUsage?: CredentialUsageSink
+  ambientJudgments?: import('@qm/approvals').AmbientJudgmentStore
 }
 
 interface Authz {
@@ -449,9 +450,33 @@ async function listSlackMirrorMessages(ctx: ApiRouteContext, deps: AdminDeps): P
 async function listAmbientJudgments(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const authz = await requireScopedAdmin(ctx, deps)
   if (!authz) return undefined
+  const store = deps.ambientJudgments
+  if (!store) return { scopeId: authz.scope, judgments: [], counts: { act: 0, ignore: 0, fastlane: 0 } }
   const id = ctx.query.id
-  if (id) return notFound(ctx)
-  return { scopeId: authz.scope, judgments: [], counts: { act: 0, ignore: 0, fastlane: 0 } }
+  if (id) {
+    const judgment = await store.get(Number(id))
+    if (!judgment) return notFound(ctx)
+    return { scopeId: authz.scope, judgment }
+  }
+  const container = ctx.query.container
+  const decisionParam = ctx.query.decision
+  const decisions = decisionParam
+    ? (decisionParam.split(',').filter((d) => d === 'act' || d === 'ignore' || d === 'fastlane') as Array<
+        'act' | 'ignore' | 'fastlane'
+      >)
+    : undefined
+  const limit = Math.max(1, Math.min(1000, Number(ctx.query.limit ?? 100) || 100))
+  const before = ctx.query.before !== undefined ? Number(ctx.query.before) : undefined
+  const beforeId = ctx.query.beforeId !== undefined ? Number(ctx.query.beforeId) : undefined
+  const opts = {
+    ...(container ? { container } : {}),
+    ...(decisions?.length ? { decision: decisions } : {}),
+    ...(before !== undefined && Number.isFinite(before) ? { before } : {}),
+    ...(beforeId !== undefined && Number.isFinite(beforeId) ? { beforeId } : {}),
+    limit,
+  }
+  const [judgments, counts] = await Promise.all([store.list(opts), store.counts(container ? { container } : {})])
+  return { scopeId: authz.scope, judgments, counts, hasMore: judgments.length === limit, limit }
 }
 
 async function listAckEmojiPicks(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {

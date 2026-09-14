@@ -33,7 +33,9 @@ import {
   createAmbientService,
   createMemoryApprovalStore,
   parseApprovalValue,
+  type AmbientCursorStore,
   type AmbientJudge,
+  type AmbientJudgmentStore,
   type AmbientService,
   type ApprovalActionValue,
   type ApprovalCardRenderer,
@@ -87,11 +89,17 @@ export interface ImTurnBridgeLoopOptions {
  * Ambient ingredients: the container policy plus the engagement judge.
  * The bridge builds the `AmbientService` internally so the ambient
  * submit seam enqueues through the same route-recording turn path as
- * human turns — ambient replies deliver like any other reply.
+ * human turns — ambient replies deliver like any other reply. Cursors,
+ * judgment records, and the self identity are optional observability
+ * and prompt-context add-ons (14.0).
  */
 export interface ImTurnBridgeAmbient {
   policy: ChannelPolicyStore
   judge: AmbientJudge
+  cursors?: AmbientCursorStore
+  judgments?: AmbientJudgmentStore
+  self?: { name?: string; mentionId?: string }
+  judgeModel?: string
 }
 
 export interface ImTurnBridgeOptions {
@@ -239,6 +247,10 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
         judge: options.ambient.judge,
         submit: (input, route) => enqueueTurn(input, route),
         ...(options.actorType ? { actorType: options.actorType } : {}),
+        ...(options.ambient.cursors ? { cursors: options.ambient.cursors } : {}),
+        ...(options.ambient.judgments ? { judgments: options.ambient.judgments } : {}),
+        ...(options.ambient.self ? { self: options.ambient.self } : {}),
+        ...(options.ambient.judgeModel ? { judgeModel: options.ambient.judgeModel } : {}),
         logger,
       })
     : undefined

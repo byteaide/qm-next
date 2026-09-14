@@ -4,15 +4,20 @@
  * claim loop. Turn storage comes from the ApiService composition root via
  * injection; production deployments swap each piece independently.
  *
- * Ambient (M3 minimal slice): `ambientContainers` + `ambientKeyword`
- * build a memory channel policy and the keyword stub judge. Both must be
- * provided for ambient to activate — containers without a judge stay
- * fully inert so a half-configured deployment cannot silence the bot.
+ * Ambient (14.0): `ambientJudgeMode` picks the judge — `keyword` uses the
+ * deterministic stub with `ambientKeyword` (smokes, e2e), `model` uses the
+ * api's harness judge port (qm's real-model ambient mind). Judgment and
+ * cursor stores ride in from the api when its `ambient` observability is
+ * on; `ambientPolicySource: 'api'` shares the context-policy-managed
+ * store instead of a boot-local one. All modes stay fully inert when
+ * their ingredients are missing, so a half-configured deployment cannot
+ * silence the bot.
  */
 import { Service, type Context } from '@qm/cordis'
 import {
   createKeywordAmbientJudge,
   createMemoryChannelPolicyStore,
+  createModelAmbientJudge,
   type ChannelPolicyStore,
 } from '@qm/approvals'
 import type { ImDeliveryQueue } from '@qm/im-core'
@@ -37,8 +42,12 @@ export interface ImBridgeConfig {
   backoffMs?: number
   /** Containers (`provider:target`) with ambient enabled at boot. */
   ambientContainers?: string[]
-  /** Stub judge keyword (`*` engages all); required with ambientContainers. */
+  /** Stub judge keyword (`*` engages all); required with keyword mode. */
   ambientKeyword?: string
+  /** Ambient judge flavor: the deterministic keyword stub or the api's harness judge. */
+  ambientJudgeMode?: 'keyword' | 'model'
+  /** Policy source: boot-local memory store or the api's context-policy store. */
+  ambientPolicySource?: 'boot' | 'api'
 }
 
 export const Config = Schema.object({
@@ -51,6 +60,8 @@ export const Config = Schema.object({
   backoffMs: Schema.number().default(1_000).description('Base backoff for failed deliveries in ms'),
   ambientContainers: Schema.array(Schema.string()).default([]).description('Containers (provider:target) with ambient enabled'),
   ambientKeyword: Schema.string().description('Ambient stub judge keyword; * engages all'),
+  ambientJudgeMode: Schema.union(['keyword', 'model']).default('keyword').description('Ambient judge flavor: keyword stub or the api harness judge'),
+  ambientPolicySource: Schema.union(['boot', 'api']).default('boot').description('Ambient policy store: boot-local memory or the api context-policy store'),
 })
 
 export class ImTurnBridgeService extends Service<ImBridgeConfig> {
@@ -83,17 +94,40 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
       ...(this.config.backoffMs !== undefined ? { backoffMs: this.config.backoffMs } : {}),
     }
     const containers = this.config.ambientContainers ?? []
+    const mode = this.config.ambientJudgeMode ?? 'keyword'
+    const api = this.ctx.api
+    const sharedPolicy = this.config.ambientPolicySource === 'api' ? api.channelPolicy : undefined
+    if (this.config.ambientPolicySource === 'api' && !sharedPolicy) {
+      this.ctx.logger.warn('im-bridge: ambientPolicySource "api" but the api exposes no channel policy — using a boot-local store')
+    }
+    const policy: ChannelPolicyStore = sharedPolicy ?? createMemoryChannelPolicyStore()
     let ambient: ImTurnBridgeOptions['ambient'] | undefined
-    if (this.config.ambientKeyword) {
+    const modelJudge = mode === 'model' ? api.ambientJudge : undefined
+    if (mode === 'model' && !modelJudge) {
+      this.ctx.logger.warn('im-bridge: ambientJudgeMode "model" but the api exposes no harness judge — ambient stays inert')
+    } else if (mode === 'model' && modelJudge) {
+      ambient = {
+        policy,
+        judge: createModelAmbientJudge({ judge: modelJudge.judge }),
+        ...(api.ambientCursors ? { cursors: api.ambientCursors } : {}),
+        ...(api.ambientJudgments ? { judgments: api.ambientJudgments } : {}),
+        ...(modelJudge.model ? { judgeModel: modelJudge.model } : {}),
+      }
+      this.ambientPolicy = policy
+    } else if (this.config.ambientKeyword) {
       // With a judge keyword the policy store exists even with no
       // containers preloaded: absent entries stay inert, and tooling can
       // enable containers after boot via `ambientPolicy`.
-      const policy = createMemoryChannelPolicyStore()
       for (const container of containers) await policy.setAmbient(container, true)
-      ambient = { policy, judge: createKeywordAmbientJudge(this.config.ambientKeyword) }
+      ambient = {
+        policy,
+        judge: createKeywordAmbientJudge(this.config.ambientKeyword),
+        ...(api.ambientCursors ? { cursors: api.ambientCursors } : {}),
+        ...(api.ambientJudgments ? { judgments: api.ambientJudgments } : {}),
+      }
       this.ambientPolicy = policy
     } else if (containers.length > 0) {
-      this.ctx.logger.warn('im-bridge: ambientContainers set without ambientKeyword — ambient stays inert')
+      this.ctx.logger.warn('im-bridge: ambientContainers set without a judge — ambient stays inert')
     }
     const registry = new ImRegistryService(this.ctx, {
       onEvent: (events) => (this.bridge ? this.bridge.sink(events) : Promise.resolve()),

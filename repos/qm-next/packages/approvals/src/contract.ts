@@ -139,10 +139,25 @@ export interface ApprovalCardRenderer {
   render(spec: ApprovalCardSpec): Record<string, unknown>
 }
 
-/** Per-container (channel) policy record for the ambient minimal slice. */
+/** Ledger entry for one external bot's posts inside a container. */
+export interface AmbientBotPolicy {
+  mode: 'ignore' | 'rollup' | 'action' | 'user'
+  /** Rollup batch window in hours (rollup mode only). */
+  rollupHours?: number
+}
+
+/** Rollup batches judge at most once per window; qm's default. */
+export const DEFAULT_ROLLUP_HOURS = 24
+
+/** Per-container (channel) policy record for the ambient slice. */
 export interface ChannelPolicy {
   container: string
-  ambientEnabled: boolean
+  /** Standing orders rendered into every ambient judgment (qm proactivity policy). */
+  orders: string
+  /** External bot ledger keyed by author name (case-insensitive at lookup). */
+  bots: Record<string, AmbientBotPolicy>
+  ambientEnabled?: boolean
+  setBy?: string
   updatedAt: number
 }
 
@@ -152,7 +167,18 @@ export interface ChannelPolicy {
  */
 export interface ChannelPolicyStore {
   get(container: string): Promise<ChannelPolicy | null>
-  setAmbient(container: string, enabled: boolean, opts?: { setBy?: string }): Promise<ChannelPolicy>
+  /** Full policy write (orders, ledger, ambient opt-in) — qm's `set`. */
+  set(
+    container: string,
+    orders: string,
+    opts?: { setBy?: string; bots?: Record<string, AmbientBotPolicy>; ambientEnabled?: boolean | null },
+  ): Promise<ChannelPolicy>
+  /** Ambient-only opt-in sugar (legacy shape: empty orders, empty ledger). */
+  setAmbient(
+    container: string,
+    enabled: boolean,
+    opts?: { setBy?: string },
+  ): Promise<ChannelPolicy>
   close(): Promise<void>
 }
 
@@ -164,6 +190,8 @@ export interface AmbientCandidate {
   actor: InboundActor
   text: string
   occurredAt: number
+  /** Composed standing orders (incl. action-bot trigger lines), attached by the service. */
+  orders?: string
 }
 
 export interface AmbientVerdict {
@@ -171,14 +199,66 @@ export interface AmbientVerdict {
   /** Replacement turn text; defaults to the observed message text. */
   text?: string
   reason?: string
+  /** The exact prompt the judge sent to the model, for judgment records. */
+  prompt?: string
 }
 
 /**
  * Pluggable ambient judge. qm's judge model decides whether overheard
- * chatter warrants engagement; M3 ships the port with a no-op default.
+ * chatter warrants engagement; the keyword stub and the model judge in
+ * `ambient-judge-model.ts` both implement this port.
  */
 export interface AmbientJudge {
   consider(candidate: AmbientCandidate): Promise<AmbientVerdict>
+}
+
+/** Durable per-container marker of the last judged message (qm ambient_cursors). */
+export interface AmbientCursor {
+  lastJudgedTs: string
+  lastJudgedAt?: number
+}
+
+export interface AmbientCursorStore {
+  get(key: string): Promise<AmbientCursor | null>
+  put(key: string, value: AmbientCursor): Promise<void>
+  close?(): Promise<void>
+}
+
+export type AmbientDecisionKind = 'act' | 'ignore' | 'fastlane'
+
+/** One recorded ambient judgment (qm ambient_judgments row). */
+export interface AmbientJudgment {
+  id?: number
+  surface: string
+  container: string
+  decision: AmbientDecisionKind
+  reason?: string
+  askedBy?: string
+  prompt?: string
+  model?: string
+  latencyMs?: number
+  tsFrom?: string
+  tsTo?: string
+  createdAt: number
+}
+
+/** Summary view: everything except the prompt body. */
+export type AmbientJudgmentSummary = Omit<AmbientJudgment, 'prompt'>
+
+export type AmbientJudgmentCounts = Record<AmbientDecisionKind, number>
+
+export interface AmbientJudgmentStore {
+  record(j: AmbientJudgment): Promise<void>
+  list(opts?: {
+    container?: string
+    decision?: AmbientDecisionKind[]
+    before?: number
+    beforeId?: number
+    limit?: number
+  }): Promise<AmbientJudgmentSummary[]>
+  get(id: number): Promise<AmbientJudgment | null>
+  counts(opts?: { container?: string }): Promise<AmbientJudgmentCounts>
+  close(): Promise<void>
 }
 
 export function createNoopAmbientJudge(): AmbientJudge {
@@ -199,6 +279,16 @@ export interface AmbientServiceOptions {
   submit: AmbientSubmit
   actorType?: PrincipalType
   logger?: ImLogger
+  /** Per-container last-judged markers; absent means no cursor tracking. */
+  cursors?: AmbientCursorStore
+  /** Judgment recording; absent means judgments are not kept. */
+  judgments?: AmbientJudgmentStore
+  /** The assistant's own surface identity, rendered into judge prompts. */
+  self?: { name?: string; mentionId?: string }
+  /** Model label recorded with judgments (for cost/latency views). */
+  judgeModel?: string
+  /** Injectable clock for tests. */
+  now?: () => number
 }
 
 export interface AmbientService {

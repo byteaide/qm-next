@@ -54,6 +54,9 @@ export interface ChannelPolicyStore {
     orders: string,
     opts?: { setBy?: string; bots?: Record<string, BotPolicy>; ambientEnabled?: boolean | null },
   ): Promise<ChannelPolicy>
+  /** Ambient-only opt-in sugar preserving orders/ledger (satisfies @qm/approvals' ambient port). */
+  setAmbient(container: string, enabled: boolean, opts?: { setBy?: string }): Promise<ChannelPolicy>
+  close(): Promise<void>
 }
 
 export function createMemoryChannelPolicyStore(opts: { now?: () => number } = {}): ChannelPolicyStore {
@@ -82,5 +85,10 @@ export function createMemoryChannelPolicyStore(opts: { now?: () => number } = {}
       policies.set(container, p)
       return { ...p, bots: { ...p.bots } }
     },
+    async setAmbient(container, enabled, opts2 = {}) {
+      const prev = await this.get(container)
+      return this.set(container, prev?.orders ?? '', { ...opts2, ambientEnabled: enabled })
+    },
+    async close() {},
   }
 }

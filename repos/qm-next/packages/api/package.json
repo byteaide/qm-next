@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@qm/admin": "workspace:^",
+    "@qm/approvals": "workspace:^",
     "@qm/auth": "workspace:^",
     "@qm/credentials": "workspace:^",
     "@qm/cordis": "workspace:^",
@@ -34,5 +35,9 @@
     "@qm/types": "workspace:^",
     "fastify": "^5.12.1",
     "jose": "^6.2.3"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0",
+    "pg": "^8.13.0"
   }
 }

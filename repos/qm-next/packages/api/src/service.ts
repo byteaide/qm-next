@@ -28,6 +28,11 @@ import {
   type MetricsSink,
 } from '@qm/admin'
 import { createMemoryReplayDedupe, createPostgresReplayDedupe, type ReplayDedupe } from '@qm/auth'
+import {
+  createMemoryAmbientJudgmentStore,
+  type AmbientCursorStore,
+  type AmbientJudgmentStore,
+} from '@qm/approvals'
 import { createMemoryDirectoryStore } from '@qm/directory'
 import { createKeychain, deriveConnectorKey } from '@qm/credentials'
 import { createClaudeHarness } from '@qm/harness-claude'
@@ -66,6 +71,8 @@ import {
   createPostgresSlackMap,
   createSurfaceContextQueue,
 } from './services/index.ts'
+import { createAmbientCursorStore, createPostgresAmbientJudgmentStore } from './services/ambient-stores.ts'
+import type { ChannelPolicyStore as ApiChannelPolicyStore } from './services/channel-policy-store.ts'
 import type { CronScheduler, CronStore } from '@qm/triggers'
 import type {
   Harness,
@@ -170,6 +177,8 @@ export interface ApiConfig {
   adminGrants?: string
   /** Postgres connection string; durable-by-default swaps every memory store for its PG twin. */
   databaseUrl?: string
+  /** Ambient observability (14.0): judgment + cursor stores for the IM ambient slice. */
+  ambient?: boolean
   /** Skill-pack management (11.0). */
   skillPacks?: boolean
   /** Per-principal model credentials (11.0). */
@@ -282,6 +291,7 @@ export const Config = Schema.object({
   admins: Schema.array(Schema.string()).description('Bootstrap org admins (principal ids)'),
   adminGrants: Schema.string().description('qm ADMIN_GRANTS grammar (principal:role,...) seeding durable grant stores'),
   databaseUrl: Schema.string().description('Postgres connection string; swaps memory stores for durable PG twins'),
+  ambient: Schema.boolean().description('Ambient observability (14.0): judgment + cursor stores for the IM ambient slice'),
   skillPacks: Schema.boolean().description('Skill-pack management (11.0)'),
   userModelAuth: Schema.boolean().description('Per-principal model credentials (11.0)'),
   secretDrops: Schema.boolean().description('Secret-drop links (11.0)'),
@@ -362,6 +372,18 @@ export class ApiService extends Service<ApiConfig> {
    */
   cronsRuntime?: { crons: CronStore; scheduler?: CronScheduler } | undefined
 
+  /**
+   * Ambient ingredients (14.0): the default harness's judge port for the
+   * IM ambient slice, plus the judgment/cursor stores (durable when
+   * databaseUrl is set) and the shared channel-policy store. The
+   * im-bridge consumes all three; each stays undefined while its
+   * configuring flag is off, and the bridge stays inert accordingly.
+   */
+  ambientJudge?: { judge(systemPrompt: string, prompt: string): Promise<string | undefined>; model?: string }
+  ambientCursors?: AmbientCursorStore
+  ambientJudgments?: AmbientJudgmentStore
+  channelPolicy?: ApiChannelPolicyStore
+
   constructor(ctx: Context, public config: ApiConfig) {
     super(ctx, 'api')
   }
@@ -434,6 +456,8 @@ export class ApiService extends Service<ApiConfig> {
       booted.push(engine)
     }
     engine = booted.find((candidate) => candidate.profile.id === harnessId) ?? booted[booted.length - 1]
+    const defaultJudge = registry.get(harnessId)?.models.judge
+    if (defaultJudge) this.ambientJudge = { judge: defaultJudge }
     const resolution = devResolution(this.config)
     let toolFactory: OrchestratorDeps['tools'] | undefined
     const sandboxHandles = new Map<ScopeId, SandboxHandle>()
@@ -569,6 +593,13 @@ export class ApiService extends Service<ApiConfig> {
     if (this.config.authBroker) {
       replayDedupe = databaseUrl ? createPostgresReplayDedupe(databaseUrl) : createMemoryReplayDedupe()
     }
+    if (this.config.ambient) {
+      this.ambientJudgments = databaseUrl
+        ? createPostgresAmbientJudgmentStore(databaseUrl, orgId)
+        : createMemoryAmbientJudgmentStore()
+      this.ambientCursors = createAmbientCursorStore(databaseUrl, orgId)
+    }
+    if (channelPolicyStore) this.channelPolicy = channelPolicyStore
     const skillPackStore = this.config.skillPacks ? createMemorySkillPackStore() : undefined
     const userModelCredentials = this.config.userModelAuth ? createMemoryUserModelCredentialsStore() : undefined
     const secretDropStore = this.config.secretDrops ? createMemorySecretDropStore() : undefined
@@ -667,6 +698,7 @@ export class ApiService extends Service<ApiConfig> {
                 ...(metrics ? { metrics } : {}),
                 ...(errors ? { errors } : {}),
                 ...(credentialUsage ? { credentialUsage } : {}),
+                ...(this.ambientJudgments ? { ambientJudgments: this.ambientJudgments } : {}),
               },
             }
           : {}),
