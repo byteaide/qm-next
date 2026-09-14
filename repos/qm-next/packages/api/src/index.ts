@@ -12,3 +12,24 @@ export { keychainRoutes, type KeychainRoutesDeps } from './routes/keychain-route
 export { surfaceRoutes, type SurfaceRoutesDeps } from './routes/surface-routes.ts'
 export { memoryRoutes, type MemoryRoutesDeps } from './routes/memory-routes.ts'
 export { skillRoutes, type SkillRoutesDeps } from './routes/skill-routes.ts'
+export { searchRoutes, type SearchRoutesDeps } from './routes/search-routes.ts'
+export { contextRoutes, type ContextRoutesDeps } from './routes/context-routes.ts'
+export { contextPolicyRoutes, type ContextPolicyRoutesDeps } from './routes/context-policy-routes.ts'
+export { surfaceCacheRoutes, toEvent, type SurfaceCacheRoutesDeps } from './routes/surface-cache-routes.ts'
+export { environmentRoutes, type EnvironmentRoutesDeps } from './routes/environment-routes.ts'
+export { projectRoutes, projectView, type ProjectRoutesDeps } from './routes/project-routes.ts'
+export { sessionStateRoutes, streamSessionStates, type SessionStateRoutesDeps } from './routes/session-state-routes.ts'
+export {
+  createMemoryChannelPolicyStore,
+  createMemoryEnvironmentRegistry,
+  createMemoryProjectStore,
+  createMemorySurfaceCacheStore,
+  createSurfaceContextQueue,
+  parseBotLedger,
+  type ChannelPolicyStore,
+  type IngestEvent,
+  type Project,
+  type ProjectMutation,
+  type ProjectStore,
+  type SurfaceContextQueue,
+} from './services/index.ts'

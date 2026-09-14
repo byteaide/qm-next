@@ -103,7 +103,7 @@ destination/capability 双模：capability 模走 `deps.control`（ControlServic
 | 路由 | 请求 | 响应 | 级别 |
 |------|------|------|------|
 | POST `/v1/surface-context` | `{ channel?（`\#name` 或 C/G id）, count?（1..200，缺省100）, before?, match?（≤200字符） }`（capability 必需 → 401；channel 不可见 → `403 {error:"not_visible"\|"identity_unverified"}`；无 channel 且 destination 非 slack → `400 {error:"no_conversation"}`） | `200 {channel?: "#name", …SurfaceContextResult}`（messages/hasMore/nextBefore/note/file/group） | 兼容 |
-| POST `/v1/surface-file` | `{ ts:string, threadTs?, name?, channel? }`（缺 ts → 400） | `200 {file:{name,sizeBytes,mimetype?,author?}, download:{path:"/v1/blobs/:id", header, token(5min TTL blob-read capability), expiresInSeconds}, note}` / `502`（surface 无法取文件） | 兼容 |
+| POST `/v1/surface-file` | `{ ts:string, threadTs?, name?, channel? }`（缺 ts → 400） | `200 {file:{name,sizeBytes,mimetype?,author?}, download:{path:"/v1/blobs/:id", header, token(5min TTL blob-read capability), expiresInSeconds}, note}` / `502`（surface 无法取文件） | 子集（lane A `download:null`，偏差 #44） |
 | GET `/v1/surface-context/pending?source=&waitMs=` | — | `200 {requests:[{id, query}]}`（长轮询 ≤20s，poll 100ms；source 缺省 "slack"） | 兼容 |
 | POST `/v1/surface-context/:id/result` | `{ error?} \| { messages?[], hasMore?, nextBefore?, note?, file?{blobId,name,sizeBytes,mimetype?,author?}, group?{groupId} }` | `200 {ok:true}` / `404`（过期或已答） | 兼容 |
 

@@ -14,6 +14,7 @@ import { createOpenCodeHarness } from '@qm/harness-opencode'
 import { createPiHarness } from '@qm/harness-pi'
 import { createModelGateway, setCustomProviders, validateCustomProviderSpec, type CustomProviderSpec } from '@qm/model'
 import { createMemoryScopeMemory } from '@qm/memory'
+import { createMemorySessionStateBus } from '@qm/runs'
 import { createMemorySkillStore } from '@qm/skills'
 import type { RuntimeRouteConfig } from '@qm/orchestrator'
 import { createHarnessRouter, createMockHarness, createSandboxToolContext, OrchestratorService } from '@qm/orchestrator'
@@ -22,6 +23,13 @@ import { createLocalSandbox } from '@qm/sandbox'
 import { createMemoryRunEventBus, createMemoryRunStore, createMemorySessionStore } from '@qm/store'
 import { createMemoryMap } from '@qm/store'
 import { reachDirectory } from '@qm/reach'
+import {
+  createMemoryChannelPolicyStore,
+  createMemoryEnvironmentRegistry,
+  createMemoryProjectStore,
+  createMemorySurfaceCacheStore,
+  createSurfaceContextQueue,
+} from './services/index.ts'
 import type { CronScheduler, CronStore } from '@qm/triggers'
 import type {
   Harness,
@@ -90,6 +98,16 @@ export interface ApiConfig {
   memory?: boolean
   /** Skills surface (11.0): skill registry behind the /v1/skills routes. */
   skills?: boolean
+  /** Context surface (11.0): surface-context pull queue + channel policy routes. */
+  context?: boolean
+  /** Surface-cache surface (11.0): connector ingest + surface-cache policy routes. */
+  surfaceCache?: boolean
+  /** Environments surface (11.0): agent environment registry behind /v1/environments. */
+  environments?: boolean
+  /** Projects surface (11.0): web project store behind /v1/projects. */
+  projects?: boolean
+  /** Session-state surface (11.0): SSE stream over the session-state bus. */
+  sessionState?: boolean
 }
 
 export const Config = Schema.object({
@@ -126,6 +144,11 @@ export const Config = Schema.object({
   keychain: Schema.boolean().description('Keychain surface (11.0): agent keychain behind the /v1/keychain routes'),
   memory: Schema.boolean().description('Memory surface (11.0): scope memory behind the /v1/memory routes'),
   skills: Schema.boolean().description('Skills surface (11.0): skill registry behind the /v1/skills routes'),
+  context: Schema.boolean().description('Context surface (11.0): surface-context queue + channel policy routes'),
+  surfaceCache: Schema.boolean().description('Surface-cache surface (11.0): connector ingest + policy routes'),
+  environments: Schema.boolean().description('Environments surface (11.0): agent environment registry'),
+  projects: Schema.boolean().description('Projects surface (11.0): web project store'),
+  sessionState: Schema.boolean().description('Session-state surface (11.0): SSE event stream'),
 })
 
 function devIdentity(): IdentityService {
@@ -318,6 +341,15 @@ export class ApiService extends Service<ApiConfig> {
       : undefined
     const memoryStore = this.config.memory ? createMemoryScopeMemory() : undefined
     const skillStore = this.config.skills ? createMemorySkillStore() : undefined
+    const contextQueue = this.config.context ? createSurfaceContextQueue() : undefined
+    const channelPolicyStore =
+      this.config.context || this.config.surfaceCache ? createMemoryChannelPolicyStore() : undefined
+    const surfaceCacheStore = this.config.surfaceCache ? createMemorySurfaceCacheStore() : undefined
+    const environmentRegistry = this.config.environments ? createMemoryEnvironmentRegistry() : undefined
+    const projectStore = this.config.projects
+      ? createMemoryProjectStore({ orgId: (this.config.scopeId ?? 'org:default').replace(/^org:/, '') })
+      : undefined
+    const sessionStateBus = this.config.sessionState ? createMemorySessionStateBus() : undefined
     const app = createApiServer(
       {
         orchestrator,
@@ -335,6 +367,25 @@ export class ApiService extends Service<ApiConfig> {
         ...(keychain ? { keychain: { keychain: () => keychain, scopeFor: (actorId) => `personal:${actorId}` } } : {}),
         ...(memoryStore ? { memory: { memory: memoryStore, scopeFor: () => this.config.scopeId ?? 'org:default' } } : {}),
         ...(skillStore ? { skills: { skills: skillStore, scopeFor: () => this.config.scopeId ?? 'org:default' } } : {}),
+        ...(contextQueue
+          ? {
+              context: { queue: contextQueue },
+              contextPolicy: { ...(channelPolicyStore ? { channelPolicy: channelPolicyStore } : {}) },
+            }
+          : {}),
+        ...(surfaceCacheStore && channelPolicyStore
+          ? {
+              surfaceCache: {
+                cache: surfaceCacheStore,
+                policy: (container: string) => channelPolicyStore.get(container),
+                setPolicy: (container: string, orders: string, setBy?: string) =>
+                  channelPolicyStore.set(container, orders, { ...(setBy ? { setBy } : {}) }),
+              },
+            }
+          : {}),
+        ...(environmentRegistry ? { environments: { environments: environmentRegistry } } : {}),
+        ...(projectStore ? { projects: { projects: projectStore } } : {}),
+        ...(sessionStateBus ? { sessionState: { bus: sessionStateBus } } : {}),
         crons: {
           crons: () => this.cronsRuntime?.crons,
           scheduler: () => this.cronsRuntime?.scheduler,

@@ -16,6 +16,13 @@ import { keychainRoutes, type KeychainRoutesDeps } from './routes/keychain-route
 import { surfaceRoutes, type SurfaceRoutesDeps } from './routes/surface-routes.ts'
 import { memoryRoutes, type MemoryRoutesDeps } from './routes/memory-routes.ts'
 import { skillRoutes, type SkillRoutesDeps } from './routes/skill-routes.ts'
+import { searchRoutes, type SearchRoutesDeps } from './routes/search-routes.ts'
+import { contextRoutes, type ContextRoutesDeps } from './routes/context-routes.ts'
+import { contextPolicyRoutes, type ContextPolicyRoutesDeps } from './routes/context-policy-routes.ts'
+import { surfaceCacheRoutes, type SurfaceCacheRoutesDeps } from './routes/surface-cache-routes.ts'
+import { environmentRoutes, type EnvironmentRoutesDeps } from './routes/environment-routes.ts'
+import { projectRoutes, type ProjectRoutesDeps } from './routes/project-routes.ts'
+import { sessionStateRoutes, type SessionStateRoutesDeps } from './routes/session-state-routes.ts'
 
 export interface ApiDeps {
   orchestrator: Orchestrator
@@ -36,6 +43,20 @@ export interface ApiDeps {
   memory?: MemoryRoutesDeps
   /** Parity surface (11.0): skill registry routes when a SkillStore is wired. */
   skills?: SkillRoutesDeps
+  /** Parity surface (11.0): the search route when a search backend is wired. */
+  search?: SearchRoutesDeps
+  /** Parity surface (11.0): surface-context pull protocol when the queue is wired. */
+  context?: ContextRoutesDeps
+  /** Parity surface (11.0): channel policy routes when a policy store is wired. */
+  contextPolicy?: ContextPolicyRoutesDeps
+  /** Parity surface (11.0): surface-cache ingest/policy when a cache is wired. */
+  surfaceCache?: SurfaceCacheRoutesDeps
+  /** Parity surface (11.0): environment routes when a registry is wired. */
+  environments?: EnvironmentRoutesDeps
+  /** Parity surface (11.0): project routes when a project store is wired. */
+  projects?: ProjectRoutesDeps
+  /** Parity surface (11.0): the session-state SSE stream over the run bus. */
+  sessionState?: SessionStateRoutesDeps
 }
 
 export interface ApiServerOptions {
@@ -121,6 +142,27 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
   }
   if (deps.skills) {
     registerRouteTable(app, opts, skillRoutes(deps.skills))
+  }
+  if (deps.search) {
+    registerRouteTable(app, opts, searchRoutes(deps.search))
+  }
+  if (deps.context) {
+    registerRouteTable(app, opts, contextRoutes(deps.context))
+  }
+  if (deps.contextPolicy) {
+    registerRouteTable(app, opts, contextPolicyRoutes(deps.contextPolicy))
+  }
+  if (deps.surfaceCache) {
+    registerRouteTable(app, opts, surfaceCacheRoutes(deps.surfaceCache))
+  }
+  if (deps.environments) {
+    registerRouteTable(app, opts, environmentRoutes(deps.environments))
+  }
+  if (deps.projects) {
+    registerRouteTable(app, opts, projectRoutes(deps.projects))
+  }
+  if (deps.sessionState) {
+    registerRouteTable(app, opts, sessionStateRoutes(deps.sessionState))
   }
 
   app.get('/v1/runs/:id', async (request, reply) => {

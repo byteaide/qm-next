@@ -22,6 +22,7 @@
     "@qm/model": "workspace:^",
     "@qm/orchestrator": "workspace:^",
     "@qm/reach": "workspace:^",
+    "@qm/runs": "workspace:^",
     "@qm/sandbox": "workspace:^",
     "@qm/schemastery": "workspace:^",
     "@qm/skills": "workspace:^",

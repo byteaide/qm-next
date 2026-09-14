@@ -321,3 +321,22 @@ Each entry names the qm source shape, the qm-next shape, and why.
     a soft archive (restore republishes) matching qm; hard delete stays a
     store-level operation. Audit events (`memory.self.*`, `memory.agent.*`,
     skill audit) land with the 12.0 audit sinks.
+
+44. **Context/surface-cache/projects lane-A service substitutions** —
+    qm-next has no surface channel registry or directory of Slack channels
+    yet, so: (a) surface-context queues requests as addressed — the
+    `not_visible`/`identity_unverified` 403 pre-checks, `channel_not_found`
+    404 and `ambiguous_channel` 409 need the IM bridge (13.0); (b)
+    `/v1/surface-file` answers `download: null` (子集) because blob-read
+    capability tokens land with the control plane (12.0); (c) context-policy
+    accepts any `principalId` — qm's `listContexts` membership check needs
+    the context registry; (d) projects treat every bearer principal as
+    internal, members render `displayName: principalId`, slack-channel
+    linking accepts any channel id and the in-use guard compares other
+    projects' links instead of channel sessions; (e) the in-memory
+    queue/cache/policy/project registries are per-process (Postgres swaps in
+    behind the same interfaces); (f) audit events (`search.query`,
+    `surface.ingest`, `surface.policy.set`, `project.*`) land with the 12.0
+    sinks; (g) environments list only the viewer's own registries, the
+    attach scope is the caller's personal scope, and the capability-missing
+    403 maps to an unauthenticated request (deviation #43 equivalence).
