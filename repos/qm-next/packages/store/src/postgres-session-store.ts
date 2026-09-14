@@ -18,7 +18,10 @@ import type {
   NewTapeRecord,
   ScopeId,
   Session,
+  SessionEntryHit,
   SessionEntry,
+  SessionForkResult,
+  SessionPatch,
   SessionStore,
   SessionType,
   TapeRecord,
@@ -42,6 +45,9 @@ function rowToSession(r: Record<string, unknown>): Session {
     ...(r.title != null ? { title: r.title as string } : {}),
     ...(r.channel_name != null ? { channelName: r.channel_name as string } : {}),
     ...(r.last_activity != null ? { lastActivityAt: Number(r.last_activity) } : {}),
+    ...(r.archived != null ? { archived: Boolean(r.archived) } : {}),
+    ...(r.pinned != null ? { pinned: Boolean(r.pinned) } : {}),
+    ...(r.color !== undefined ? { color: (r.color as string | null) ?? null } : {}),
   }
 }
 
@@ -410,6 +416,120 @@ export function createPostgresSessionStore(
         [sessionId],
       )
       return rows.map((r) => r.principal_id as string)
+    },
+
+    async listByParticipant(principalId): Promise<Session[]> {
+      const rows = await q(
+        `SELECT s.* FROM sessions s
+           JOIN participants p ON p.session_id = s.id AND p.principal_id = $1 AND p.valid_to IS NULL
+          ORDER BY s.created_at DESC`,
+        [principalId],
+      )
+      return rows.map(rowToSession)
+    },
+
+    async searchEntries(principalId, query, limit = 20): Promise<SessionEntryHit[]> {
+      const term = `%${query.trim().toLowerCase()}%`
+      if (query.trim() === '') return []
+      const rows = await q(
+        `SELECT e.session_id, e.seq, e.type, e.payload, e.created_at
+           FROM session_entries e
+           JOIN participants p ON p.session_id = e.session_id
+                AND p.principal_id = $1 AND p.valid_to IS NULL
+          WHERE LOWER(e.payload) LIKE $2
+          ORDER BY e.created_at DESC LIMIT $3`,
+        [principalId, term, limit],
+      )
+      return rows.map((r) => {
+        const payload = r.payload != null ? JSON.parse(r.payload as string) : null
+        const text = typeof payload === 'string' ? payload : typeof (payload as { text?: unknown })?.text === 'string' ? (payload as { text: string }).text : ''
+        return {
+          sessionId: r.session_id as string,
+          seq: Number(r.seq),
+          type: r.type as SessionEntryHit['type'],
+          text,
+          createdAt: Number(r.created_at),
+        }
+      })
+    },
+
+    async patchSession(sessionId, patch: SessionPatch): Promise<Session | null> {
+      const sets: string[] = []
+      const params: unknown[] = []
+      if (patch.title !== undefined) {
+        params.push(patch.title)
+        sets.push(`title = $${params.length}`)
+      }
+      if (patch.archived !== undefined) {
+        params.push(patch.archived)
+        sets.push(`archived = $${params.length}`)
+      }
+      if (patch.pinned !== undefined) {
+        params.push(patch.pinned)
+        sets.push(`pinned = $${params.length}`)
+      }
+      if (patch.color !== undefined) {
+        params.push(patch.color)
+        sets.push(`color = $${params.length}`)
+      }
+      if (!sets.length) return this.get(sessionId)
+      params.push(sessionId)
+      const rows = await q(
+        `UPDATE sessions SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`,
+        params,
+      )
+      return rows[0] ? rowToSession(rows[0]) : null
+    },
+
+    async forkSession(sessionId, by, opts?): Promise<SessionForkResult | null> {
+      return withPgTransaction(await store.pool(), async (client) => {
+        await lockSession(client, sessionId)
+        const origRows = await client.query('SELECT * FROM sessions WHERE id = $1', [sessionId])
+        const orig = origRows.rows[0]
+        if (!orig) return null
+        const upTo = opts?.upToSeq ?? Number((await client.query('SELECT COALESCE(MAX(seq), -1) AS m FROM session_entries WHERE session_id = $1', [sessionId])).rows[0]!.m)
+        const copiedRows = await client.query(
+          'SELECT seq, parent_seq, type, payload, scope_label, created_at FROM session_entries WHERE session_id = $1 AND seq <= $2 ORDER BY seq',
+          [sessionId, upTo],
+        )
+        const forkId = randomUUID()
+        const forkRef = `fork:${sessionId}:${randomUUID().slice(0, 8)}`
+        await client.query(
+          `INSERT INTO sessions(id, type, scope_id, thread_ref, created_at, title, channel_name, surface, archived, pinned, color)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,FALSE,FALSE,$9)`,
+          [forkId, orig.type, orig.scope_id, forkRef, now(), orig.title ?? null, orig.channel_name ?? null, orig.surface ?? null, orig.color ?? null],
+        )
+        for (const row of copiedRows.rows) {
+          await client.query(
+            'INSERT INTO session_entries(session_id, seq, parent_seq, type, payload, scope_label, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+            [forkId, Number(row.seq), row.parent_seq === null ? null : Number(row.parent_seq), row.type, row.payload, row.scope_label, Number(row.created_at)],
+          )
+        }
+        await client.query(
+          'INSERT INTO participants(session_id, principal_id, valid_from, valid_to, valid_from_seq, valid_to_seq) VALUES ($1,$2,$3,NULL,$4,NULL) ON CONFLICT (session_id, principal_id) DO NOTHING',
+          [forkId, by, now(), copiedRows.rows.length],
+        )
+        const forkRows = await client.query('SELECT * FROM sessions WHERE id = $1', [forkId])
+        return { session: rowToSession(forkRows.rows[0]!), entriesCopied: copiedRows.rows.length }
+      })
+    },
+
+    async discardSession(sessionId, by): Promise<boolean> {
+      return withPgTransaction(await store.pool(), async (client) => {
+        await lockSession(client, sessionId)
+        const member = await client.query(
+          'SELECT 1 FROM participants WHERE session_id = $1 AND principal_id = $2 AND valid_to IS NULL',
+          [sessionId, by],
+        )
+        if (!member.rows[0]) return false
+        await client.query('DELETE FROM session_entries WHERE session_id = $1', [sessionId])
+        await client.query('DELETE FROM session_tape WHERE session_id = $1', [sessionId])
+        await client.query('DELETE FROM llm_requests WHERE session_id = $1', [sessionId])
+        await client.query('DELETE FROM session_leases WHERE session_id = $1', [sessionId])
+        await client.query('DELETE FROM participants WHERE session_id = $1', [sessionId])
+        await client.query('DELETE FROM sessions WHERE id = $1', [sessionId])
+        return true
+      })
     },
 
     async close(): Promise<void> {

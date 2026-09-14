@@ -7,7 +7,7 @@
  * search, and admin listings remain deferred; additions must be additive.
  */
 import type { ScopeId } from './identity.ts'
-import type { GetEntriesOptions, NewEntry, Session, SessionEntry, SessionType } from './session.ts'
+import type { GetEntriesOptions, NewEntry, Session, SessionEntry, SessionPatch, SessionType } from './session.ts'
 
 export type LeaseHolder = 'turn' | 'compaction' | 'fork' | 'backfill'
 
@@ -149,6 +149,22 @@ export interface ListLlmRequestsOptions {
   omitRequest?: boolean
 }
 
+/** One raw transcript-search hit (composed into view shapes by callers). */
+export interface SessionEntryHit {
+  sessionId: string
+  seq: number
+  type: SessionEntry['type']
+  text: string
+  createdAt: number
+  author?: string
+}
+
+/** Result of forking a session: the fresh copy plus how much moved over. */
+export interface SessionForkResult {
+  session: Session
+  entriesCopied: number
+}
+
 export interface SessionStore {
   getOrCreateByThread(
     threadRef: string,
@@ -178,4 +194,17 @@ export interface SessionStore {
   addParticipant(sessionId: string, principalId: string): Promise<void>
   removeParticipant(sessionId: string, principalId: string): Promise<void>
   participantsOf(sessionId: string): Promise<string[]>
+
+  // --- P3 surface lane (additive; sessions/conversations routes) ---
+
+  /** Sessions where the principal holds an active participant window. */
+  listByParticipant(principalId: string): Promise<Session[]>
+  /** Raw entry-text search over the principal's visible sessions. */
+  searchEntries(principalId: string, query: string, limit?: number): Promise<SessionEntryHit[]>
+  /** Metadata patch (title/archived/pinned/color); null when unknown. */
+  patchSession(sessionId: string, patch: SessionPatch): Promise<Session | null>
+  /** Copy the transcript (≤ upToSeq when given) into a fresh session. */
+  forkSession(sessionId: string, by: string, opts?: { upToSeq?: number }): Promise<SessionForkResult | null>
+  /** Drop a session and its transcript (seed-refusal rollback). */
+  discardSession(sessionId: string, by: string): Promise<boolean>
 }

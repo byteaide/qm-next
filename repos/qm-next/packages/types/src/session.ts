@@ -15,6 +15,18 @@ export interface Session {
   channelName?: string
   title?: string | null
   lastActivityAt?: number
+  /** Web-ui conversation flags (P3 surface lane; additive). */
+  archived?: boolean
+  pinned?: boolean
+  color?: string | null
+}
+
+/** Metadata patch applied by the sessions/conversations routes. */
+export interface SessionPatch {
+  title?: string | null
+  archived?: boolean
+  pinned?: boolean
+  color?: string | null
 }
 
 export type EntryType = 'user' | 'assistant' | 'thinking' | 'text' | 'tool_call' | 'tool_result' | 'system' | 'soul' | 'delivery'

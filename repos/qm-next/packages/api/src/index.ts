@@ -9,3 +9,4 @@ export { directoryRoutes, type DirectoryRoutesDeps, type DirectoryMeta } from '.
 export { cronRoutes, type CronRoutesDeps } from './routes/cron-routes.ts'
 export { reachRoutes, type ReachRoutesDeps } from './routes/reach-routes.ts'
 export { keychainRoutes, type KeychainRoutesDeps } from './routes/keychain-routes.ts'
+export { surfaceRoutes, type SurfaceRoutesDeps } from './routes/surface-routes.ts'

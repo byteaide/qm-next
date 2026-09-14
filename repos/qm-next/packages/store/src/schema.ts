@@ -22,8 +22,12 @@ export const SESSION_SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS sessions(
       id TEXT PRIMARY KEY, type TEXT NOT NULL, scope_id TEXT NOT NULL,
       thread_ref TEXT UNIQUE NOT NULL, created_at BIGINT NOT NULL,
-      title TEXT, channel_name TEXT, surface TEXT, last_activity BIGINT
+      title TEXT, channel_name TEXT, surface TEXT, last_activity BIGINT,
+      archived BOOLEAN NOT NULL DEFAULT FALSE, pinned BOOLEAN NOT NULL DEFAULT FALSE, color TEXT
     )`,
+  `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE`,
+  `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT FALSE`,
+  `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS color TEXT`,
   `CREATE TABLE IF NOT EXISTS session_entries(
       session_id TEXT NOT NULL, seq INT NOT NULL, parent_seq INT,
       type TEXT NOT NULL, payload TEXT, scope_label TEXT NOT NULL, created_at BIGINT NOT NULL,

@@ -314,6 +314,13 @@ export class ApiService extends Service<ApiConfig> {
         sessions,
         runs,
         resolution,
+        // Parity surface (11.0): sessions/conversations ride the session
+        // store every deployment already has.
+        surface: {
+          sessions,
+          orchestrator,
+          scopeFor: () => this.config.scopeId ?? 'org:default',
+        },
         ...(directoryStore ? { directory: { directory: directoryStore }, reach: { directory: directoryStore } } : {}),
         ...(keychain ? { keychain: { keychain: () => keychain, scopeFor: (actorId) => `personal:${actorId}` } } : {}),
         crons: {

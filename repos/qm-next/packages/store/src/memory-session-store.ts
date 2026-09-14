@@ -18,7 +18,10 @@ import type {
   NewTapeRecord,
   ScopeId,
   Session,
+  SessionEntryHit,
   SessionEntry,
+  SessionForkResult,
+  SessionPatch,
   SessionStore,
   TapeRecord,
 } from '@qm/types'
@@ -253,5 +256,102 @@ export function createMemorySessionStore(opts: MemoryStoreOptions = {}): Session
       if (!windows) return []
       return [...windows.entries()].filter(([, w]) => w.validTo === null).map(([principalId]) => principalId)
     },
+
+    async listByParticipant(principalId) {
+      const out: Session[] = []
+      for (const [sessionId, windows] of participants) {
+        const win = windows.get(principalId)
+        if (win && win.validTo === null) {
+          const s = sessions.get(sessionId)
+          if (s) out.push(s)
+        }
+      }
+      return out.sort((a, b) => b.createdAt - a.createdAt)
+    },
+
+    async searchEntries(principalId, query, limit = 20) {
+      const q = query.trim().toLowerCase()
+      if (!q) return []
+      const visible = new Set((await this.listByParticipant(principalId)).map((s) => s.id))
+      const hits: SessionEntryHit[] = []
+      for (const sessionId of visible) {
+        for (const entry of entries.get(sessionId) ?? []) {
+          const text = entryText(entry.payload)
+          if (!text.toLowerCase().includes(q)) continue
+          hits.push({
+            sessionId,
+            seq: entry.seq,
+            type: entry.type,
+            text,
+            createdAt: entry.createdAt,
+          })
+          if (hits.length >= limit) return hits
+        }
+      }
+      return hits
+    },
+
+    async patchSession(sessionId, patch: SessionPatch) {
+      const s = sessions.get(sessionId)
+      if (!s) return null
+      if (patch.title !== undefined) s.title = patch.title
+      if (patch.archived !== undefined) s.archived = patch.archived
+      if (patch.pinned !== undefined) s.pinned = patch.pinned
+      if (patch.color !== undefined) s.color = patch.color
+      return s
+    },
+
+    async forkSession(sessionId, by, opts?): Promise<SessionForkResult | null> {
+      const orig = sessions.get(sessionId)
+      if (!orig) return null
+      const log = entries.get(sessionId) ?? []
+      const upTo = opts?.upToSeq ?? log.length - 1
+      const copied = log.filter((e) => e.seq <= upTo)
+      const fork: Session = {
+        ...orig,
+        id: randomUUID(),
+        threadRef: `fork:${orig.id}:${randomUUID().slice(0, 8)}`,
+        createdAt: now(),
+        title: orig.title ?? null,
+        archived: false,
+        pinned: false,
+        color: orig.color ?? null,
+      }
+      sessions.set(fork.id, fork)
+      entries.set(fork.id, copied.map((e) => ({ ...e, sessionId: fork.id })))
+      byThread.set(fork.threadRef, fork.id)
+      let windows = participants.get(fork.id)
+      if (!windows) {
+        windows = new Map()
+        participants.set(fork.id, windows)
+      }
+      windows.set(by, { validFrom: now(), validTo: null, validFromSeq: copied.length, validToSeq: null })
+      return { session: fork, entriesCopied: copied.length }
+    },
+
+    async discardSession(sessionId, by) {
+      const windows = participants.get(sessionId)
+      if (!sessions.has(sessionId) || !windows?.has(by)) return false
+      sessions.delete(sessionId)
+      entries.delete(sessionId)
+      tape.delete(sessionId)
+      llmRequests.delete(sessionId)
+      leases.delete(sessionId)
+      participants.delete(sessionId)
+      const threadRef = [...byThread.entries()].find(([, id]) => id === sessionId)?.[0]
+      if (threadRef) byThread.delete(threadRef)
+      return true
+    },
   }
+}
+
+/** Extract searchable text from an entry payload (string or JSON scalar tree). */
+function entryText(payload: unknown): string {
+  if (typeof payload === 'string') return payload
+  if (payload === null || payload === undefined) return ''
+  if (typeof payload === 'object') {
+    const text = (payload as { text?: unknown }).text
+    if (typeof text === 'string') return text
+  }
+  return ''
 }

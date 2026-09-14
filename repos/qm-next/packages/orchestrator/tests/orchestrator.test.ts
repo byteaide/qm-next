@@ -99,6 +99,26 @@ class FakeSessions implements SessionStore {
     return []
   }
 
+  async listByParticipant(): Promise<any[]> {
+    return []
+  }
+  async searchEntries(): Promise<any[]> {
+    return []
+  }
+  async patchSession(sessionId: string, patch: any) {
+    const s = this.sessions.get(sessionId)
+    if (!s) return null
+    return { id: s.id, type: 'dm', scopeId: SCOPE, threadRef: s.threadRef, surface: s.surface, createdAt: 0, ...patch } as any
+  }
+  async forkSession(sessionId: string, _by: string, _opts?: any) {
+    const s = this.sessions.get(sessionId)
+    if (!s) return null
+    return { session: { ...s } as any, entriesCopied: 0 }
+  }
+  async discardSession(): Promise<boolean> {
+    return false
+  }
+
   tapeRows = new Map<string, any[]>()
   async appendTape(lease: { sessionId: string; token: string }, rec: any) {
     if (this.leases.get(lease.sessionId) !== lease.token) throw new Error('appendTape without a valid session lease')

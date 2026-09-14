@@ -287,3 +287,22 @@ Each entry names the qm source shape, the qm-next shape, and why.
     and the triggered-turn 403 need real capability tokens (12.0/14.0).
     `config.keychain` backs the routes with memory maps in lane A;
     production swaps Postgres maps without touching the routes.
+
+## P3 lane A tranche 3 (2026-09-14, surface sessions/conversations)
+
+42. **Surface sessions/conversations land on an additively extended
+    SessionStore** — `@qm/types` gains `Session.archived/pinned/color`,
+    `SessionPatch`, and five additive store methods (`listByParticipant`,
+    `searchEntries`, `patchSession`, `forkSession`, `discardSession`)
+    implemented by both the memory and Postgres stores (PG contract tests
+    stay PG-gated). Response shapes mirror qm's app layer
+    (`{session, entries, earlierEntries?}`, `SessionSearchHit` fields,
+    conversation view) with lane-A simplifications: transcript windowing
+    skips qm's 400 KB byte-budget trim and payload projection; search
+    snippets are composed in the route; `regenerateTitle` is deterministic
+    (first user entry) instead of the LLM title pass; the conversation seed
+    turn runs synchronously over the orchestrator (qm enqueues) so
+    seed-refusal rollback keeps its exact `409 seed_turn_refused` shape.
+    `POST /v1/session-cap` answers `503 not_configured` until capability
+    minting lands (12.0), and the background views stay dep-gated 404 until
+    the sandbox process-sessions lane; approvals answer qm's empty list.

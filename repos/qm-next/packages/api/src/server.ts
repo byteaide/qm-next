@@ -13,6 +13,7 @@ import { directoryRoutes, type DirectoryRoutesDeps } from './routes/directory-ro
 import { cronRoutes, type CronRoutesDeps } from './routes/cron-routes.ts'
 import { reachRoutes, type ReachRoutesDeps } from './routes/reach-routes.ts'
 import { keychainRoutes, type KeychainRoutesDeps } from './routes/keychain-routes.ts'
+import { surfaceRoutes, type SurfaceRoutesDeps } from './routes/surface-routes.ts'
 
 export interface ApiDeps {
   orchestrator: Orchestrator
@@ -27,6 +28,8 @@ export interface ApiDeps {
   reach?: ReachRoutesDeps
   /** Parity surface (11.0): keychain routes when a keychain is wired. */
   keychain?: KeychainRoutesDeps
+  /** Parity surface (11.0): sessions/conversations routes over the session store. */
+  surface?: SurfaceRoutesDeps
 }
 
 export interface ApiServerOptions {
@@ -103,6 +106,9 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
   }
   if (deps.keychain) {
     registerRouteTable(app, opts, keychainRoutes(deps.keychain))
+  }
+  if (deps.surface) {
+    registerRouteTable(app, opts, surfaceRoutes(deps.surface))
   }
 
   app.get('/v1/runs/:id', async (request, reply) => {
