@@ -29,6 +29,33 @@ export { connectorRoutes, connectorMatchRoutes, type ConnectorDeps } from './rou
 export { webhookRoutes, webhookRawRoutes, type WebhookDeps } from './routes/webhook-routes.ts'
 export { blobRoutes, type BlobDeps } from './routes/blob-routes.ts'
 export { registerRawRouteTable, rawSendJson, rawSendText, type RawRoute, type RawRouteContext } from './routes/raw-framework.ts'
+export { adminRoutes, type AdminDeps } from './routes/admin-routes.ts'
+export { skillPackRoutes, type SkillPackDeps } from './routes/skill-pack-routes.ts'
+export { userModelAuthRoutes, type UserModelAuthDeps } from './routes/user-model-auth-routes.ts'
+export {
+  authBrokerRoutes,
+  credentialRoutes,
+  emojiRoutes,
+  egressAuditRoutes,
+  secretDropRoutes,
+  type SecretDropDeps,
+} from './routes/parity-lanes-routes.ts'
+export {
+  createMemoryAdminService,
+  AdminError,
+  adminStatusFromGrants,
+  type AdminGrant,
+  type AdminService,
+  type AdminStatus,
+} from './services/admin-service.ts'
+export { createMemoryAuditLog, type AuditEvent, type AuditLog } from './services/audit-log.ts'
+export { createMemoryEgressAuditSink, type EgressAuditRecord, type EgressAuditSink } from './services/egress-audit-sink.ts'
+export { createMemorySecretDropStore, SECRET_DROP_TTL_MS, type SecretDropStore } from './services/secret-drop-store.ts'
+export { createMemorySkillPackStore, type SkillPack, type SkillPackStore } from './services/skill-pack-store.ts'
+export {
+  createMemoryUserModelCredentialsStore,
+  type UserModelCredentialsStore,
+} from './services/user-model-auth-store.ts'
 export {
   createMemoryChannelPolicyStore,
   createMemoryEnvironmentRegistry,

@@ -97,3 +97,31 @@ export {
   MAX_BLOB_BYTES,
   type BlobTransferService,
 } from './blob-transfer.ts'
+export {
+  createMemoryAdminService,
+  AdminError,
+  adminStatusFromGrants,
+  type AdminGrant,
+  type AdminService,
+  type AdminStatus,
+  type SlackInstallationRecord,
+} from './admin-service.ts'
+export { createMemoryAuditLog, type AuditEvent, type AuditLog } from './audit-log.ts'
+export { createMemoryEgressAuditSink, type EgressAuditRecord, type EgressAuditSink } from './egress-audit-sink.ts'
+export {
+  createMemorySecretDropStore,
+  SECRET_DROP_TTL_MS,
+  type SecretDropField,
+  type SecretDropStore,
+} from './secret-drop-store.ts'
+export {
+  createMemorySkillPackStore,
+  SkillPackFetchError,
+  type SkillPack,
+  type SkillPackStore,
+} from './skill-pack-store.ts'
+export {
+  createMemoryUserModelCredentialsStore,
+  type UserModelCredentialsStore,
+  type UserModelProvider,
+} from './user-model-auth-store.ts'

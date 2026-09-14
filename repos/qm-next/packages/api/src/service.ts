@@ -24,18 +24,24 @@ import { createMemoryRunEventBus, createMemoryRunStore, createMemorySessionStore
 import { createMemoryMap } from '@qm/store'
 import { reachDirectory } from '@qm/reach'
 import {
+  createMemoryAdminService,
+  createMemoryAuditLog,
   createMemoryBlobTransfer,
   createMemoryChannelPolicyStore,
   createMemoryConnectorTokenStore,
   createMemoryDeploymentLayerStore,
   createMemoryDeploymentStore,
   createMemoryEnvironmentRegistry,
+  createMemoryEgressAuditSink,
   createMemoryFileStore,
   createMemoryGrantLedger,
   createMemoryProjectStore,
   createMemoryRuntimeConfigStore,
+  createMemorySecretDropStore,
+  createMemorySkillPackStore,
   createMemorySoulStore,
   createMemorySurfaceCacheStore,
+  createMemoryUserModelCredentialsStore,
   createMemoryWebhookStore,
   createSurfaceContextQueue,
 } from './services/index.ts'
@@ -135,6 +141,24 @@ export interface ApiConfig {
   webhooks?: boolean
   /** Blobs surface (11.0): raw blob staging put/get. */
   blobs?: boolean
+  /** Admin surface (11.0): qm admin lanes over lane-A stores. */
+  admin?: boolean
+  /** Bootstrap org admins when the admin surface is on. */
+  admins?: string[]
+  /** Skill-pack management (11.0). */
+  skillPacks?: boolean
+  /** Per-principal model credentials (11.0). */
+  userModelAuth?: boolean
+  /** Secret-drop links (11.0). */
+  secretDrops?: boolean
+  /** Emoji upload gate (11.0; uploader needs the browser session store). */
+  emoji?: boolean
+  /** Egress audit sink ingest (11.0). */
+  egressAudit?: boolean
+  /** Credential broker gate (11.0; service creds land with 12.0). */
+  credentials?: boolean
+  /** Auth broker claim/email-allowed gates (11.0). */
+  authBroker?: boolean
   /** Public web base URL used for webhook inbound URLs. */
   publicUrl?: string
   /** Deploy apps domain for owner URLs (qm DEPLOY_APPS_DOMAIN). */
@@ -197,6 +221,15 @@ export const Config = Schema.object({
   connectors: Schema.boolean().description('Connectors surface (11.0): connector tokens + OAuth gates'),
   webhooks: Schema.boolean().description('Webhooks surface (11.0): webhook CRUD + raw incoming'),
   blobs: Schema.boolean().description('Blobs surface (11.0): raw blob staging'),
+  admin: Schema.boolean().description('Admin surface (11.0): qm admin lanes'),
+  admins: Schema.array(Schema.string()).description('Bootstrap org admins (principal ids)'),
+  skillPacks: Schema.boolean().description('Skill-pack management (11.0)'),
+  userModelAuth: Schema.boolean().description('Per-principal model credentials (11.0)'),
+  secretDrops: Schema.boolean().description('Secret-drop links (11.0)'),
+  emoji: Schema.boolean().description('Emoji upload gate (11.0)'),
+  egressAudit: Schema.boolean().description('Egress audit sink ingest (11.0)'),
+  credentials: Schema.boolean().description('Credential broker gate (11.0)'),
+  authBroker: Schema.boolean().description('Auth broker gates (11.0)'),
   publicUrl: Schema.string().description('Public web base URL for webhook inbound URLs'),
   deployAppsDomain: Schema.string().description('Deploy apps domain for deployment owner URLs'),
   surfaceConfig: Schema.any().description('Static surface-config values for GET /v1/surface-config'),
@@ -412,6 +445,15 @@ export class ApiService extends Service<ApiConfig> {
     const deploymentLayerStore = this.config.deploymentLayer ? createMemoryDeploymentLayerStore() : undefined
     const connectorTokens = this.config.connectors ? createMemoryConnectorTokenStore() : undefined
     const webhookStore = this.config.webhooks ? createMemoryWebhookStore() : undefined
+    const orgId = (this.config.scopeId ?? 'org:default').replace(/^org:/, '')
+    const adminService = this.config.admin
+      ? createMemoryAdminService({ orgId, ...(this.config.admins?.length ? { seedAdmins: this.config.admins } : {}) })
+      : undefined
+    const skillPackStore = this.config.skillPacks ? createMemorySkillPackStore() : undefined
+    const userModelCredentials = this.config.userModelAuth ? createMemoryUserModelCredentialsStore() : undefined
+    const secretDropStore = this.config.secretDrops ? createMemorySecretDropStore() : undefined
+    const egressAuditSink = this.config.egressAudit ? createMemoryEgressAuditSink() : undefined
+    const adminAuditLog = this.config.admin ? createMemoryAuditLog() : undefined
     const app = createApiServer(
       {
         orchestrator,
@@ -478,6 +520,33 @@ export class ApiService extends Service<ApiConfig> {
             }
           : {}),
         ...(blobTransfer ? { blobs: { blobTransfer } } : {}),
+        ...(adminService
+          ? {
+              admin: {
+                admin: adminService,
+                orgScope: this.config.scopeId ?? 'org:default',
+                sessions,
+                runs,
+                ...(memoryStore ? { memory: memoryStore } : {}),
+                ...(fileStore ? { files: fileStore, blobTransfer: blobTransfer! } : {}),
+                ...(deploymentStore ? { deployments: deploymentStore } : {}),
+                ...(skillStore ? { skills: skillStore } : {}),
+                ...(skillPackStore ? { skillPacks: skillPackStore } : {}),
+                crons: () => this.cronsRuntime?.crons,
+                ...(directoryStore ? { directory: directoryStore } : {}),
+                ...(environmentRegistry ? { environments: environmentRegistry } : {}),
+                ...(egressAuditSink ? { egressAudit: egressAuditSink } : {}),
+                ...(adminAuditLog ? { auditLog: adminAuditLog } : {}),
+              },
+            }
+          : {}),
+        ...(skillPackStore && adminService ? { skillPacks: { packs: skillPackStore, ...(skillStore ? { skills: skillStore } : {}), orgScope: this.config.scopeId ?? 'org:default', admins: adminService } } : {}),
+        ...(userModelCredentials ? { userModelAuth: { credentials: userModelCredentials } } : {}),
+        ...(secretDropStore ? { secretDrops: { drops: secretDropStore } } : {}),
+        ...(this.config.emoji ? { emoji: true } : {}),
+        ...(egressAuditSink ? { egressAudit: { sink: egressAuditSink } } : {}),
+        ...(this.config.credentials ? { credentials: true } : {}),
+        ...(this.config.authBroker ? { authBroker: true } : {}),
         crons: {
           crons: () => this.cronsRuntime?.crons,
           scheduler: () => this.cronsRuntime?.scheduler,

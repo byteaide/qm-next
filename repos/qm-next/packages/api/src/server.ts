@@ -33,6 +33,10 @@ import { connectorRoutes, connectorMatchRoutes, type ConnectorDeps } from './rou
 import { webhookRoutes, webhookRawRoutes, type WebhookDeps } from './routes/webhook-routes.ts'
 import { blobRoutes, type BlobDeps } from './routes/blob-routes.ts'
 import { registerRawRouteTable } from './routes/raw-framework.ts'
+import { adminRoutes, type AdminDeps } from './routes/admin-routes.ts'
+import { skillPackRoutes, type SkillPackDeps } from './routes/skill-pack-routes.ts'
+import { userModelAuthRoutes, type UserModelAuthDeps } from './routes/user-model-auth-routes.ts'
+import { authBrokerRoutes, credentialRoutes, egressAuditRoutes, emojiRoutes, secretDropRoutes, type SecretDropDeps } from './routes/parity-lanes-routes.ts'
 
 export interface ApiDeps {
   orchestrator: Orchestrator
@@ -85,6 +89,22 @@ export interface ApiDeps {
   webhooks?: WebhookDeps
   /** Parity surface (11.0): raw blob staging put/get. */
   blobs?: BlobDeps
+  /** Parity surface (11.0): the qm admin surface over lane-A stores. */
+  admin?: AdminDeps
+  /** Parity surface (11.0): skill-pack registry management. */
+  skillPacks?: SkillPackDeps
+  /** Parity surface (11.0): per-principal model credentials. */
+  userModelAuth?: UserModelAuthDeps
+  /** Parity surface (11.0): secret-drop links over the drop store. */
+  secretDrops?: SecretDropDeps
+  /** Parity surface (11.0): emoji upload gate (browser session store 13.0). */
+  emoji?: boolean
+  /** Parity surface (11.0): egress audit sink ingest. */
+  egressAudit?: { sink: NonNullable<AdminDeps['egressAudit']> }
+  /** Parity surface (11.0): credential broker gate (service creds 12.0). */
+  credentials?: boolean
+  /** Parity surface (11.0): auth broker claim/email-allowed gates. */
+  authBroker?: boolean
 }
 
 export interface ApiServerOptions {
@@ -221,6 +241,30 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
   }
   if (deps.blobs) {
     registerRawRouteTable(app, opts, blobRoutes(deps.blobs))
+  }
+  if (deps.admin) {
+    registerRouteTable(app, opts, adminRoutes(deps.admin))
+  }
+  if (deps.skillPacks) {
+    registerRouteTable(app, opts, skillPackRoutes(deps.skillPacks))
+  }
+  if (deps.userModelAuth) {
+    registerRouteTable(app, opts, userModelAuthRoutes(deps.userModelAuth))
+  }
+  if (deps.secretDrops) {
+    registerRouteTable(app, opts, secretDropRoutes(deps.secretDrops))
+  }
+  if (deps.emoji) {
+    registerRouteTable(app, opts, emojiRoutes())
+  }
+  if (deps.egressAudit) {
+    registerRouteTable(app, opts, egressAuditRoutes(deps.egressAudit))
+  }
+  if (deps.credentials) {
+    registerRouteTable(app, opts, credentialRoutes())
+  }
+  if (deps.authBroker) {
+    registerRouteTable(app, opts, authBrokerRoutes())
   }
 
   app.get('/v1/runs/:id', async (request, reply) => {

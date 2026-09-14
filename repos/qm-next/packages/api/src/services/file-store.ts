@@ -34,6 +34,8 @@ export interface FilePage {
 
 export interface FileStoreService {
   listForViewer(viewer: string, opts?: { limit?: number; cursor?: string }, scope?: string): Promise<FilePage>
+  /** Admin view: files owned by any of the scopes (no viewer grant check). */
+  listByScopes(scopes: string[], opts?: { limit?: number }): Promise<FilePage>
   openForViewer(id: string, viewer: string): Promise<(StoredFile & { bytes: Buffer }) | null>
   uploadForViewer(
     principalId: string,
@@ -63,6 +65,16 @@ export function createMemoryFileStore(deps: { blobTransfer: BlobTransferService;
       const startIndex = opts?.cursor ? all.findIndex((f) => f.id === opts.cursor) + 1 : 0
       const page = all.slice(Math.max(startIndex, 0), Math.max(startIndex, 0) + limit)
       const next = all[Math.max(startIndex, 0) + limit]
+      return next ? { files: page, nextCursor: next.id } : { files: page }
+    },
+    async listByScopes(scopes, opts) {
+      const limit = Math.min(Math.max(opts?.limit ?? 200, 1), 2000)
+      const scopeSet = new Set(scopes)
+      const all = [...files.values()]
+        .filter((f) => scopeSet.size === 0 || scopeSet.has(f.ownerScopeId))
+        .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? -1 : 1))
+      const page = all.slice(0, limit)
+      const next = all[limit]
       return next ? { files: page, nextCursor: next.id } : { files: page }
     },
     async openForViewer(id, viewer) {

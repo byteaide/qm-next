@@ -372,3 +372,36 @@ Each entry names the qm source shape, the qm-next shape, and why.
     anonymous callers (source-signature and blob-transfer-capability
     verification land with the 12.0 control plane; declared sha-256 is
     still enforced); (j) audits for this tranche land with the 12.0 sinks.
+
+46. **Admin block + closing modules lane-A substitutions** — (a) the admin
+    guard ladder is qm-verbatim (unwired admin → 404; missing `?scope=` →
+    400; no org-admin grant → 403) and every handler is timed()-wrapped,
+    but the heavy integrations answer qm's unwired shapes: identity →
+    external-users 404 / email-allowed false; model credentials, MCP
+    servers, slack-emoji, and the sandbox-routes surface → 404
+    (`not_supported` for sandbox-routes); observability aggregates
+    (metrics/runs) return empty latency summaries (the run store lacks a
+    list in lane A); the admin resource manifest is empty so
+    `PUT /scopes/:scope/:resource` answers 404 unknown resource, and
+    command-policy-simulate answers 501 (no policy engine — 13.0);
+    retention returns the scope id without the attribution report; (b)
+    admin file reads/downloads require the caller to already see the file
+    (owner-or-grant) — qm's admin bypass lands with the ACL (12.0), and
+    admin uploads land in the caller's personal scope; (c) onboarding
+    status is stored as a memory marker line (qm's notebook grammar lands
+    with 13.0); (d) users are composed from the directory roster plus
+    admin grants (participant attribution needs the session-store list
+    API); (e) skill-pack register/sync/import surface the lane-A fetch
+    error — register records qm's fetch-failure import row and returns the
+    pack, catalog/import/sync answer 400 with the fetch message (qm would
+    crash with a 500), importedCount is 0; (f) user-model-auth OAuth
+    device flows answer qm's 502 gates (no codex binary / subscription
+    OAuth); API keys are stored without provider-side validation; (g)
+    secret-drop mint requires an agent capability token (401 for everyone
+    until 12.0 mints tokens) while the form/redeem ladder is fully
+    functional over the in-memory drop store; keychain persistence of
+    redeemed drops lands with the 12.0 keychain service wiring; (h)
+    `/v1/credentials/broker` answers 404 (service creds unwired) and
+    `/v1/auth/broker/claim` answers qm's 503 (replay store not durable);
+    (i) the cron destination PUT maps qm's clear-to-undefined onto the
+    qm-next `destination: null` patch.
