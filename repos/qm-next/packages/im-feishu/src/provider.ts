@@ -31,13 +31,18 @@ function capabilities(): ImCapabilities {
     threads: true,
     edit: true,
     delete: true,
-    react: false,
+    react: true,
     uploadFile: false,
     interactive: true,
     streaming: true,
     directorySync: true,
     markdown: 'converted',
   }
+}
+
+/** Feishu emoji_type keys are uppercase snake_case of the common names. */
+function toFeishuEmojiType(emoji: string): string {
+  return emoji.trim().replace(/[\s-]+/g, '_').toUpperCase()
 }
 
 function defaultChannelFactory(config: FeishuProviderConfig): FeishuChannelLike {
@@ -147,7 +152,45 @@ export function createFeishuProvider(config: FeishuProviderConfig, deps: FeishuP
           throw unsupported('uploadFile', 'feishu uploads ride with send; put the attachment on the send body')
         }
         case 'react': {
-          throw unsupported('react', 'reserved position; v1 ships no reaction features')
+          const client = ch.rawClient
+          if (!client) throw unsupported('react', 'reactions need the raw client (absent in this channel)')
+          const emojiType = toFeishuEmojiType(op.emoji)
+          if (op.action === 'add') {
+            const res = await client.im.v1.messageReaction.create({
+              path: { message_id: op.ref.messageId },
+              data: { reaction_type: { emoji_type: emojiType } },
+            })
+            if (res.code !== undefined && res.code !== 0) {
+              throw new Error(`feishu: reaction add failed (code ${res.code})`)
+            }
+            receipts.push({ op: 'react' })
+            break
+          }
+          const page = await client.im.v1.messageReaction.list({
+            path: { message_id: op.ref.messageId },
+            params: { emoji_type: emojiType, page_size: 20 },
+          })
+          if (page.code !== undefined && page.code !== 0) {
+            throw new Error(`feishu: reaction list failed (code ${page.code})`)
+          }
+          const ids = (page.data?.items ?? []).map((item) => item.reaction_id).filter((id): id is string => Boolean(id))
+          if (!ids.length) {
+            receipts.push({ op: 'react' })
+            break
+          }
+          let removed = false
+          let lastCode: number | undefined
+          for (const reactionId of ids) {
+            const res = await client.im.v1.messageReaction.delete({ path: { message_id: op.ref.messageId, reaction_id: reactionId } })
+            if (res.code === undefined || res.code === 0) {
+              removed = true
+              break
+            }
+            lastCode = res.code
+          }
+          if (!removed) throw new Error(`feishu: reaction remove failed (code ${lastCode}) — none of ${ids.length} owned by the app`)
+          receipts.push({ op: 'react' })
+          break
         }
       }
     }

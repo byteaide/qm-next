@@ -47,6 +47,7 @@ export interface AdminDeps {
   errors?: ErrorLog
   credentialUsage?: CredentialUsageSink
   ambientJudgments?: import('@qm/approvals').AmbientJudgmentStore
+  ackEmojiPicks?: import('@qm/approvals').AckEmojiPickStore
 }
 
 interface Authz {
@@ -482,10 +483,33 @@ async function listAmbientJudgments(ctx: ApiRouteContext, deps: AdminDeps): Prom
 async function listAckEmojiPicks(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const authz = await requireScopedAdmin(ctx, deps)
   if (!authz) return undefined
+  const store = deps.ackEmojiPicks
+  const limit = Math.max(1, Math.min(1000, Number(ctx.query.limit ?? 50) || 50))
+  if (!store) {
+    return { scopeId: authz.scope, picks: [], counts: { picked: 0, declined: 0 }, hasMore: false, limit }
+  }
   const id = ctx.query.id
-  if (id) return notFound(ctx)
-  const limit = Number(ctx.query.limit ?? 50)
-  return { scopeId: authz.scope, picks: [], counts: { picked: 0, declined: 0 }, hasMore: false, limit }
+  if (id) {
+    const pick = await store.get(Number(id))
+    if (!pick) return notFound(ctx)
+    return { scopeId: authz.scope, pick }
+  }
+  const channel = ctx.query.channel
+  const outcomeParam = ctx.query.outcome
+  const outcomes = outcomeParam
+    ? (outcomeParam.split(',').filter((o) => o === 'picked' || o === 'declined') as Array<'picked' | 'declined'>)
+    : undefined
+  const before = ctx.query.before !== undefined ? Number(ctx.query.before) : undefined
+  const beforeId = ctx.query.beforeId !== undefined ? Number(ctx.query.beforeId) : undefined
+  const opts = {
+    ...(channel ? { channel } : {}),
+    ...(outcomes?.length ? { outcome: outcomes } : {}),
+    ...(before !== undefined && Number.isFinite(before) ? { before } : {}),
+    ...(beforeId !== undefined && Number.isFinite(beforeId) ? { beforeId } : {}),
+    limit,
+  }
+  const [picks, counts] = await Promise.all([store.list(opts), store.counts(channel ? { channel } : {})])
+  return { scopeId: authz.scope, picks, counts, hasMore: picks.length === limit, limit }
 }
 
 // --- files ---

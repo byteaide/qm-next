@@ -261,6 +261,47 @@ export interface AmbientJudgmentStore {
   close(): Promise<void>
 }
 
+export type AckPickOutcome = 'picked' | 'declined'
+
+/** One reaction-as-ack decision (qm ack_emoji_picks row). */
+export interface AckEmojiPick {
+  id?: number
+  surface: string
+  channel: string
+  /** Trigger message id. */
+  ts: string
+  outcome: AckPickOutcome
+  /** The emoji the model picked (absent when declined). */
+  picked?: string
+  /** The emoji actually applied (the model pick, else the random default). */
+  icon?: string
+  message?: string
+  /** Comma-joined candidate list offered to the picker. */
+  candidates?: string
+  model?: string
+  latencyMs?: number
+  createdAt: number
+}
+
+export type AckPickCounts = Record<AckPickOutcome, number>
+
+/** Summary view: everything except the candidate list. */
+export type AckEmojiPickSummary = Omit<AckEmojiPick, 'candidates'>
+
+export interface AckEmojiPickStore {
+  record(p: AckEmojiPick): Promise<void>
+  list(opts?: {
+    channel?: string
+    outcome?: AckPickOutcome[]
+    before?: number
+    beforeId?: number
+    limit?: number
+  }): Promise<AckEmojiPickSummary[]>
+  get(id: number): Promise<AckEmojiPick | null>
+  counts(opts?: { channel?: string }): Promise<AckPickCounts>
+  close(): Promise<void>
+}
+
 export function createNoopAmbientJudge(): AmbientJudge {
   return { consider: async () => ({ engage: false }) }
 }

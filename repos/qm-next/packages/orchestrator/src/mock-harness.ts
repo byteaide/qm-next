@@ -23,6 +23,8 @@ export interface MockHarnessOptions {
   detect?: (input: HarnessDetectInput) => Promise<HarnessDetectResult>
   /** Delta chunks streamed through `onDelta` before every reply. */
   deltas?: readonly string[]
+  /** Wall-clock delay before every runTurn resolves (ack-timing tests). */
+  turnDelayMs?: number
 }
 
 export const mockProfile: HarnessAdapterProfile = {
@@ -46,6 +48,7 @@ export function createMockHarness(opts: MockHarnessOptions = {}): MockHarness {
         calls.push(input)
         modelCalls += 1
         input.recordModelCall({ model: 'mock-1', inputTokens: 1, entryCount: input.history.length })
+        if (opts.turnDelayMs) await new Promise((resolve) => setTimeout(resolve, opts.turnDelayMs))
         const next = script.shift()
         if (next instanceof Error) throw next
         const result: HarnessTurnResult = next ?? {

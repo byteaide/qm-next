@@ -10,12 +10,14 @@ export type { ApprovalActionValue, ApprovalCardRenderer } from '@qm/approvals'
 export {
   approvalRequestNotice,
   createImTurnBridge,
+  DEFAULT_ACK_REACTIONS,
   imRunResultDelivery,
   isPendingApprovalResult,
 } from './bridge.ts'
 export type {
   ImReplyRoute,
   ImTurnBridge,
+  ImTurnBridgeAck,
   ImTurnBridgeAmbient,
   ImTurnBridgeDeps,
   ImTurnBridgeLoopOptions,

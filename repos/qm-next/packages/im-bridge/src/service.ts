@@ -48,6 +48,12 @@ export interface ImBridgeConfig {
   ambientJudgeMode?: 'keyword' | 'model'
   /** Policy source: boot-local memory store or the api's context-policy store. */
   ambientPolicySource?: 'boot' | 'api'
+  /** Reaction-as-ack (default on; inert on providers without react). */
+  ackReactions?: boolean
+  /** Delay before the ack reaction fires (qm default 2000ms). */
+  ackDelayMs?: number
+  /** Candidate emoji override; qm's defaults when absent. */
+  ackEmojiCandidates?: string[]
 }
 
 export const Config = Schema.object({
@@ -62,6 +68,9 @@ export const Config = Schema.object({
   ambientKeyword: Schema.string().description('Ambient stub judge keyword; * engages all'),
   ambientJudgeMode: Schema.union(['keyword', 'model']).default('keyword').description('Ambient judge flavor: keyword stub or the api harness judge'),
   ambientPolicySource: Schema.union(['boot', 'api']).default('boot').description('Ambient policy store: boot-local memory or the api context-policy store'),
+  ackReactions: Schema.boolean().default(true).description('Reaction-as-ack while a run is in flight (providers without react stay inert)'),
+  ackDelayMs: Schema.number().default(2_000).description('Delay before the ack reaction fires'),
+  ackEmojiCandidates: Schema.array(Schema.string()).description('Candidate emoji override; qm defaults when absent'),
 })
 
 export class ImTurnBridgeService extends Service<ImBridgeConfig> {
@@ -132,6 +141,21 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
     const registry = new ImRegistryService(this.ctx, {
       onEvent: (events) => (this.bridge ? this.bridge.sink(events) : Promise.resolve()),
     })
+    let ack: ImTurnBridgeOptions['ack'] | undefined
+    if (this.config.ackReactions !== false) {
+      ack = {
+        ...(this.config.ackDelayMs !== undefined ? { delayMs: this.config.ackDelayMs } : {}),
+        ...(this.config.ackEmojiCandidates?.length ? { candidates: this.config.ackEmojiCandidates } : {}),
+        ...(api.ackEmoji ? { pick: api.ackEmoji.pick } : {}),
+        ...(api.ackPicks
+          ? {
+              onPick: (rec) => {
+                void api.ackPicks!.record(rec).catch((err) => this.ctx.logger.error('im-bridge: ack pick record failed:', err))
+              },
+            }
+          : {}),
+      }
+    }
     this.bridge = createImTurnBridge(
       {
         runs: this.ctx.api.runs,
@@ -143,6 +167,7 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
         ...(this.config.actorType ? { actorType: this.config.actorType } : {}),
         ...(this.config.replyAs ? { replyAs: this.config.replyAs } : {}),
         ...(ambient ? { ambient } : {}),
+        ...(ack ? { ack } : {}),
         loop,
       },
     )

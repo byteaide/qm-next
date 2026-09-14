@@ -66,6 +66,17 @@ export interface FeishuChannelLike {
             }
           }>
         }
+        messageReaction: {
+          create(payload: { path: { message_id: string }; data: { reaction_type: { emoji_type: string } } }): Promise<{
+            code?: number
+            data?: { reaction_id?: string }
+          }>
+          list(payload: { path: { message_id: string }; params?: { emoji_type?: string; page_size?: number } }): Promise<{
+            code?: number
+            data?: { items?: Array<{ reaction_id?: string }> }
+          }>
+          delete(payload: { path: { message_id: string; reaction_id: string } }): Promise<{ code?: number }>
+        }
       }
     }
   }

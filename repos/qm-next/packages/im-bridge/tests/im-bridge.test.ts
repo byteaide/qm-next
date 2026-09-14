@@ -21,7 +21,7 @@ import { createImRegistry } from '@qm/im-core/runtime'
 import { createHarnessRouter, createMockHarness, OrchestratorService, type MockTurnStep } from '@qm/orchestrator'
 import { createMemoryRunStore, createMemorySessionStore } from '@qm/store'
 import type { IdentityService, ResolutionService } from '@qm/types'
-import { APPROVAL_VALUE_KIND, approvalRequestNotice, createImTurnBridge, parseApprovalValue, type ApprovalActionValue, type ApprovalCardRenderer, type ImTurnBridge, type ImTurnBridgeAmbient } from '../src/index.ts'
+import { APPROVAL_VALUE_KIND, approvalRequestNotice, createImTurnBridge, DEFAULT_ACK_REACTIONS, parseApprovalValue, type ApprovalActionValue, type ApprovalCardRenderer, type ImTurnBridge, type ImTurnBridgeAck, type ImTurnBridgeAmbient } from '../src/index.ts'
 
 function devResolution(): ResolutionService {
   return {
@@ -93,11 +93,18 @@ const testCardRenderer: ApprovalCardRenderer = {
   }),
 }
 
-function recorderProvider(sent: OutboundOperation[], cells: RecorderCells, withCardRenderer = true): ImProvider {
+function recorderProvider(
+  sent: OutboundOperation[],
+  cells: RecorderCells,
+  withCardRenderer = true,
+  reactSupport = false,
+): ImProvider {
   return {
     provider: 'feishu',
     instanceId: 'test',
-    capabilities,
+    capabilities: reactSupport
+      ? () => ({ ...capabilities(), react: true })
+      : capabilities,
     ...(withCardRenderer ? { approvalCardRenderer: testCardRenderer } : {}),
     start: async (ctx) => {
       cells.ctx = ctx
@@ -183,12 +190,23 @@ async function setup(
     }
     /** When false the provider ships no card renderer (fallback-path tests). */
     providerCardRenderer?: boolean
+    /** Provider advertises the react capability (ack-reaction tests). */
+    react?: boolean
+    /** Reaction-as-ack options; absent means no acks. */
+    ack?: ImTurnBridgeAck
+    /** Wall-clock delay injected into every mock turn (ack-timing tests). */
+    turnDelayMs?: number
   } = {},
 ): Promise<Harness> {
   const sessions = createMemorySessionStore()
   const runs = createMemoryRunStore()
   const harnessRouter = createHarnessRouter({ defaultId: 'mock' })
-  harnessRouter.register(createMockHarness({ ...(opts.script ? { script: opts.script } : {}) }))
+  harnessRouter.register(
+    createMockHarness({
+      ...(opts.script ? { script: opts.script } : {}),
+      ...(opts.turnDelayMs !== undefined ? { turnDelayMs: opts.turnDelayMs } : {}),
+    }),
+  )
   const orchestrator = new OrchestratorService(new Context(), {
     sessions,
     runs,
@@ -223,10 +241,11 @@ async function setup(
       ...(opts.actorType ? { actorType: opts.actorType } : {}),
       approvalStore,
       ...(ambient ? { ambient } : {}),
+      ...(opts.ack ? { ack: opts.ack } : {}),
     },
   )
   await bridge.start()
-  const disposer = await registry.register(recorderProvider(sent, cells, opts.providerCardRenderer !== false))
+  const disposer = await registry.register(recorderProvider(sent, cells, opts.providerCardRenderer !== false, opts.react === true))
   return {
     runs,
     bridge,
@@ -587,4 +606,93 @@ test('pending approval without any card renderer delivers the neutral text notic
   } finally {
     await t.dispose()
   }
+})
+
+test('ack reaction: reacts while the run is in flight, removed when the reply delivers', async () => {
+  const picks: Array<{ outcome: string; icon: string | undefined; picked: string | undefined; ts: string }> = []
+  const t = await setup({
+    react: true,
+    turnDelayMs: 150,
+    ack: {
+      delayMs: 20,
+      pick: async () => 'eyes',
+      onPick: (rec) => picks.push({ outcome: rec.outcome, icon: rec.icon, picked: rec.picked, ts: rec.ts }),
+    },
+  })
+  try {
+    await t.cells.ctx!.emit(messageEvent({ eventId: 'ack-1', replyToMessageId: 'om_trigger' }))
+    assert.ok(await waitFor(() => t.sent.length >= 3), 'expected remove + send after the ack')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const add = t.sent.find((op) => op.op === 'react' && op.action === 'add') as Extract<OutboundOperation, { op: 'react' }> | undefined
+    const remove = t.sent.find((op) => op.op === 'react' && op.action === 'remove') as Extract<OutboundOperation, { op: 'react' }> | undefined
+    assert.ok(add, 'the ack reaction was applied')
+    assert.equal(add.emoji, 'eyes')
+    assert.equal(add.ref.messageId, 'om_trigger', 'the reaction lands on the trigger message')
+    assert.ok(remove, 'the ack reaction was removed on delivery')
+    assert.equal(remove.emoji, 'eyes')
+    const sendIndex = t.sent.findIndex((op) => op.op === 'send')
+    const removeIndex = t.sent.findIndex((op) => op.op === 'react' && op.action === 'remove')
+    assert.ok(removeIndex !== -1 && removeIndex < sendIndex, 'removal precedes the reply delivery')
+    assert.equal(picks.length, 1)
+    assert.equal(picks[0]!.outcome, 'picked')
+    assert.equal(picks[0]!.icon, 'eyes')
+    assert.equal(picks[0]!.ts, 'om_trigger')
+  } finally {
+    await t.dispose()
+  }
+})
+
+test('ack reaction: skipped when the run finished before the delay fires', async () => {
+  const t = await setup({
+    react: true,
+    ack: { delayMs: 30, candidates: ['eyes'] },
+  })
+  try {
+    await t.cells.ctx!.emit(messageEvent({ eventId: 'ack-2', replyToMessageId: 'om_trigger' }))
+    assert.ok(await waitFor(() => t.sent.length === 1), 'expected only the reply delivery')
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    assert.equal(t.sent.filter((op) => op.op === 'react').length, 0, 'no reaction once the run is terminal')
+  } finally {
+    await t.dispose()
+  }
+})
+
+test('ack reaction: declined picker falls back to a random candidate and records declined', async () => {
+  const picks: Array<{ outcome: string; icon: string | undefined }> = []
+  const t = await setup({
+    react: true,
+    turnDelayMs: 120,
+    ack: {
+      delayMs: 20,
+      candidates: ['eyes'],
+      pick: async () => undefined,
+      onPick: (rec) => picks.push({ outcome: rec.outcome, icon: rec.icon }),
+    },
+  })
+  try {
+    await t.cells.ctx!.emit(messageEvent({ eventId: 'ack-3', replyToMessageId: 'om_trigger' }))
+    assert.ok(await waitFor(() => t.sent.length >= 3))
+    assert.equal(picks[0]!.outcome, 'declined')
+    assert.equal(picks[0]!.icon, 'eyes', 'the random fallback came from the candidate list')
+  } finally {
+    await t.dispose()
+  }
+})
+
+test('ack reaction: inert when the provider lacks the react capability', async () => {
+  const t = await setup({
+    ack: { delayMs: 10 },
+  })
+  try {
+    await t.cells.ctx!.emit(messageEvent({ eventId: 'ack-4', replyToMessageId: 'om_trigger' }))
+    assert.ok(await waitFor(() => t.sent.length === 1))
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    assert.equal(t.sent.filter((op) => op.op === 'react').length, 0, 'no reaction without provider support')
+  } finally {
+    await t.dispose()
+  }
+})
+
+test('DEFAULT_ACK_REACTIONS mirrors the qm candidate list', () => {
+  assert.deepEqual(DEFAULT_ACK_REACTIONS, ['eyes', 'mag', 'hourglass_flowing_sand', 'telescope', 'saluting_face'])
 })

@@ -203,7 +203,7 @@ test('provider start wires handlers, replays a fixture message through emit, sto
   const { provider, start, emitted, dispatch } = providerHarness()
   await start()
   assert.deepEqual(provider.capabilities(), {
-    threads: true, edit: true, delete: true, react: false, uploadFile: false,
+    threads: true, edit: true, delete: true, react: true, uploadFile: false,
     interactive: true, streaming: true, directorySync: true, markdown: 'converted',
   })
   await dispatch.message(messageFixture())
@@ -287,16 +287,112 @@ test('outbound: edit routes text → editMessage and card → updateCard; delete
   assert.deepEqual(recalls, ['om_1'])
 })
 
-test('outbound: react and uploadFile are reserved positions rejected with the contract sentinel', async () => {
+test('outbound: react needs the raw client; uploadFile stays a reserved position', async () => {
   const { provider, start } = providerHarness()
   await start()
   const ref = { destination: { type: 'feishu', target: 'oc_chat1' }, messageId: 'om_1' }
   await assert.rejects(
-    () => provider.outbound([{ op: 'react', ref, emoji: 'THUMBSUP', action: 'add' }]),
+    () => provider.outbound([{ op: 'react', ref, emoji: 'eyes', action: 'add' }]),
     (error: Error & { code?: string }) => error.code === IM_UNSUPPORTED_OP,
   )
   await assert.rejects(
     () => provider.outbound([{ op: 'uploadFile', destination: { type: 'feishu', target: 'oc' }, file: { name: 'f', mimetype: 'text/plain', sizeBytes: 1, blobId: 'b' }, content: new Uint8Array() }]),
     (error: Error & { code?: string }) => error.code === IM_UNSUPPORTED_OP,
   )
+})
+
+function reactionClient(overrides: {
+  createCode?: number
+  listCode?: number
+  ids?: string[]
+  deleteCodes?: number[]
+} = {}): {
+  rawClient: NonNullable<FeishuChannelLike['rawClient']>
+  created: Array<{ messageId: string; emojiType: string }>
+  listed: Array<{ messageId: string; emojiType: string | undefined }>
+  deleted: Array<{ messageId: string; reactionId: string }>
+} {
+  const created: Array<{ messageId: string; emojiType: string }> = []
+  const listed: Array<{ messageId: string; emojiType: string | undefined }> = []
+  const deleted: Array<{ messageId: string; reactionId: string }> = []
+  let deleteIndex = 0
+  const rawClient = {
+    im: {
+      v1: {
+        chat: { list: async () => ({ data: { items: [] } }) },
+        messageReaction: {
+          create: async (payload: { path: { message_id: string }; data: { reaction_type: { emoji_type: string } } }) => {
+            created.push({ messageId: payload.path.message_id, emojiType: payload.data.reaction_type.emoji_type })
+            return { code: overrides.createCode ?? 0, data: { reaction_id: 'reaction_1' } }
+          },
+          list: async (payload: { path: { message_id: string }; params?: { emoji_type?: string } }) => {
+            listed.push({ messageId: payload.path.message_id, emojiType: payload.params?.emoji_type })
+            return { code: overrides.listCode ?? 0, data: { items: (overrides.ids ?? []).map((reaction_id) => ({ reaction_id })) } }
+          },
+          delete: async (payload: { path: { message_id: string; reaction_id: string } }) => {
+            deleted.push({ messageId: payload.path.message_id, reactionId: payload.path.reaction_id })
+            const code = overrides.deleteCodes?.[deleteIndex++] ?? 0
+            return { code }
+          },
+        },
+      },
+    },
+  } as NonNullable<FeishuChannelLike['rawClient']>
+  return { rawClient, created, listed, deleted }
+}
+
+test('outbound: react add uppercases the emoji and posts through messageReaction.create', async () => {
+  const reactions = reactionClient()
+  const { provider, start } = providerHarness({ rawClient: reactions.rawClient })
+  await start()
+  const ref = { destination: { type: 'feishu', target: 'oc_chat1' }, messageId: 'om_1' }
+  const receipts = await provider.outbound([
+    { op: 'react', ref, emoji: 'eyes', action: 'add' },
+    { op: 'react', ref, emoji: 'hourglass_flowing_sand', action: 'add' },
+  ])
+  assert.deepEqual(reactions.created, [
+    { messageId: 'om_1', emojiType: 'EYES' },
+    { messageId: 'om_1', emojiType: 'HOURGLASS_FLOWING_SAND' },
+  ])
+  assert.deepEqual(receipts, [{ op: 'react' }, { op: 'react' }])
+})
+
+test('outbound: react add surfaces non-zero provider codes as failures', async () => {
+  const reactions = reactionClient({ createCode: 230001 })
+  const { provider, start } = providerHarness({ rawClient: reactions.rawClient })
+  await start()
+  const ref = { destination: { type: 'feishu', target: 'oc_chat1' }, messageId: 'om_1' }
+  await assert.rejects(() => provider.outbound([{ op: 'react', ref, emoji: 'EYES', action: 'add' }]), /code 230001/)
+})
+
+test('outbound: react remove lists by emoji type and deletes the app-owned reaction', async () => {
+  const reactions = reactionClient({ ids: ['r1', 'r2'], deleteCodes: [230002, 0] })
+  const { provider, start } = providerHarness({ rawClient: reactions.rawClient })
+  await start()
+  const ref = { destination: { type: 'feishu', target: 'oc_chat1' }, messageId: 'om_1' }
+  const receipts = await provider.outbound([{ op: 'react', ref, emoji: 'eyes', action: 'remove' }])
+  assert.deepEqual(reactions.listed, [{ messageId: 'om_1', emojiType: 'EYES' }])
+  assert.deepEqual(reactions.deleted, [
+    { messageId: 'om_1', reactionId: 'r1' },
+    { messageId: 'om_1', reactionId: 'r2' },
+  ], 'tries each listed reaction until the app-owned one deletes')
+  assert.deepEqual(receipts, [{ op: 'react' }])
+})
+
+test('outbound: react remove with no listed reactions succeeds as a no-op', async () => {
+  const reactions = reactionClient({ ids: [] })
+  const { provider, start } = providerHarness({ rawClient: reactions.rawClient })
+  await start()
+  const ref = { destination: { type: 'feishu', target: 'oc_chat1' }, messageId: 'om_1' }
+  const receipts = await provider.outbound([{ op: 'react', ref, emoji: 'eyes', action: 'remove' }])
+  assert.deepEqual(reactions.deleted, [])
+  assert.deepEqual(receipts, [{ op: 'react' }])
+})
+
+test('outbound: react remove fails when no listed reaction is app-owned', async () => {
+  const reactions = reactionClient({ ids: ['r1'], deleteCodes: [230002] })
+  const { provider, start } = providerHarness({ rawClient: reactions.rawClient })
+  await start()
+  const ref = { destination: { type: 'feishu', target: 'oc_chat1' }, messageId: 'om_1' }
+  await assert.rejects(() => provider.outbound([{ op: 'react', ref, emoji: 'eyes', action: 'remove' }]), /none of 1 owned/)
 })

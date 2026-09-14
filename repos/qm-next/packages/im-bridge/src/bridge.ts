@@ -65,6 +65,7 @@ import type {
   SessionStore,
   TurnInput,
 } from '@qm/types'
+import { isTerminal } from '@qm/types'
 
 export { APPROVAL_VALUE_KIND, parseApprovalValue }
 export type { ApprovalActionValue }
@@ -102,6 +103,34 @@ export interface ImTurnBridgeAmbient {
   judgeModel?: string
 }
 
+/**
+ * Reaction-as-ack ingredients (14.0 tranche 2): while a run is in flight,
+ * react to the triggering message after a short delay (qm's ack presenter,
+ * non-streaming variant); the reaction is removed when the reply delivers.
+ * `pick` is the harness emoji picker; `onPick` records observability.
+ */
+export interface ImTurnBridgeAck {
+  /** Delay before reacting (qm default 2000ms). */
+  delayMs?: number
+  /** Candidate emoji; qm's DEFAULT_ACK_REACTIONS when absent. */
+  candidates?: readonly string[]
+  /** Model emoji picker; a random candidate when absent or declined. */
+  pick?(text: string, candidates: readonly string[]): Promise<string | undefined>
+  /** Observability sink for pick decisions. */
+  onPick?(rec: {
+    surface: string
+    channel: string
+    ts: string
+    outcome: 'picked' | 'declined'
+    picked?: string
+    icon?: string
+    message?: string
+    candidates?: string
+    latencyMs?: number
+    createdAt: number
+  }): void
+}
+
 export interface ImTurnBridgeOptions {
   /** Principal type assigned to IM actors (directory mapping is M3). */
   actorType?: PrincipalType
@@ -119,6 +148,8 @@ export interface ImTurnBridgeOptions {
   approvalCards?: ApprovalCardRenderer
   /** Ambient ingredients; absent means ambient is fully inert. */
   ambient?: ImTurnBridgeAmbient
+  /** Reaction-as-ack; absent means no ack reactions. */
+  ack?: ImTurnBridgeAck
   loop?: ImTurnBridgeLoopOptions
 }
 
@@ -142,6 +173,9 @@ export interface ImTurnBridge {
 }
 
 const DEFAULT_MAX_ROUTES = 2000
+
+/** qm's default ack reaction candidates (provider-neutral names; providers map). */
+export const DEFAULT_ACK_REACTIONS = ['eyes', 'mag', 'hourglass_flowing_sand', 'telescope', 'saluting_face'] as const
 
 export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridgeOptions = {}): ImTurnBridge {
   const logger: ImLogger = deps.logger ?? console
@@ -182,7 +216,86 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
     )
     const { run } = await deps.runs.enqueue({ sessionId: session.id, request: input })
     rememberRoute(run.id, route)
+    scheduleAck(run.id, route, input.text)
     logger.info(`im-bridge: run ${run.id} queued from ${input.surface} session ${session.id}`)
+  }
+
+  /**
+   * Reaction-as-ack (qm ack presenter, non-streaming): after `delayMs`,
+   * if the run is still in flight, react to the triggering message; the
+   * reaction is removed when the terminal reply delivers. Providers
+   * without `react` capability (or acks with no trigger message ref)
+   * never schedule.
+   */
+  const ackTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const ackApplied = new Map<string, { messageId: string; destination: Destination; emoji: string }>()
+
+  function scheduleAck(runId: string, route: ImReplyRoute, text: string): void {
+    const ack = options.ack
+    const replyToMessageId = route.replyToMessageId
+    if (!ack || !replyToMessageId) return
+    const provider = deps.im.get(route.destination.type)
+    if (!provider?.capabilities?.().react) return
+    const candidates = ack.candidates?.length ? ack.candidates : DEFAULT_ACK_REACTIONS
+    const delayMs = ack.delayMs ?? 2_000
+    const timer = setTimeout(() => {
+      ackTimers.delete(runId)
+      void (async () => {
+        const run = await deps.runs.get(runId)
+        if (!run || isTerminal(run.status)) return
+        const startedAt = Date.now()
+        const picked = await ack.pick?.(text, candidates).catch(() => undefined)
+        const emoji = picked ?? candidates[Math.floor(Math.random() * candidates.length)]!
+        ackApplied.set(runId, { messageId: replyToMessageId, destination: route.destination, emoji })
+        ack.onPick?.({
+          surface: route.destination.type,
+          channel: route.destination.target,
+          ts: replyToMessageId,
+          outcome: picked ? 'picked' : 'declined',
+          ...(picked ? { picked } : {}),
+          icon: emoji,
+          ...(text ? { message: text } : {}),
+          candidates: candidates.join(','),
+          latencyMs: Date.now() - startedAt,
+          createdAt: Date.now(),
+        })
+        await queue.enqueue({
+          provider: route.destination.type,
+          op: {
+            op: 'react',
+            ref: { destination: route.destination, messageId: replyToMessageId },
+            emoji,
+            action: 'add',
+          },
+          idempotencyKey: `ack:${runId}`,
+        })
+      })().catch((err) => logger.error(`im-bridge: ack reaction failed for run ${runId}:`, err))
+    }, delayMs)
+    timer.unref?.()
+    ackTimers.set(runId, timer)
+  }
+
+  function settleAck(runId: string): void {
+    const timer = ackTimers.get(runId)
+    if (timer) {
+      clearTimeout(timer)
+      ackTimers.delete(runId)
+    }
+    const applied = ackApplied.get(runId)
+    if (!applied) return
+    ackApplied.delete(runId)
+    void queue
+      .enqueue({
+        provider: applied.destination.type,
+        op: {
+          op: 'react',
+          ref: { destination: applied.destination, messageId: applied.messageId },
+          emoji: applied.emoji,
+          action: 'remove',
+        },
+        idempotencyKey: `ack-remove:${runId}`,
+      })
+      .catch((err) => logger.error(`im-bridge: ack removal failed for run ${runId}:`, err))
   }
 
   async function submitMessage(event: InboundMessageEvent): Promise<void> {
@@ -333,6 +446,7 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
 
   function deliver(run: Run): void {
     void (async () => {
+      settleAck(run.id)
       const route = routes.get(run.id)
       if (!route) return
       if (isPendingApprovalResult(run)) await rememberPendingApprovals(run, route)
@@ -353,7 +467,11 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
     approvals: approvalStore,
     sink,
     start: () => loop.start(),
-    stop: () => loop.stop(),
+    stop: () => {
+      for (const timer of ackTimers.values()) clearTimeout(timer)
+      ackTimers.clear()
+      return loop.stop()
+    },
     routeFor: (runId) => routes.get(runId),
   }
 }

@@ -532,3 +532,24 @@ Each entry names the qm source shape, the qm-next shape, and why.
     store can be shared as the ambient policy
     (`ambientPolicySource: 'api'`); the boot-local memory store remains
     the default for e2e arming.
+
+52. **Reaction-as-ack adaptations (14.0 tranche 2)** — qm reacts to the
+    trigger message only while the reply is streaming in (remove on first
+    output block, ack text posted at the same moment); qm-next runs are
+    non-streaming to IM, so the ack is reaction-only: react after
+    `delayMs` (default 2s) if the run is still in flight, remove when the
+    terminal reply is enqueued for delivery. Consequences: (a) no ack
+    text line — the full reply is the first and only output; (b) the
+    feishu provider removes by listing the message's reactions of that
+    emoji type and deleting the first app-owned one (the API needs a
+    reaction id the add response carries but the queue does not retain),
+    so a user reacting with the same emoji may absorb the removal; (c) a
+    run finishing between the liveness check and the add enqueue can
+    leave an orphan reaction (qm has the same window); (d) emoji names
+    map to Feishu `emoji_type` keys by uppercasing with
+    spaces/dashes→underscores; unsupported names fail the op and burn the
+    delivery-loop retries, so deployments should keep candidates within
+    the platform set; (e) approval-resume turns and ambient turns (no
+    trigger-message ref) never schedule acks; (f) pick observability
+    lands in `ack_emoji_picks` with qm's columns, and
+    `/v1/admin/ack-emoji-picks` reads it.

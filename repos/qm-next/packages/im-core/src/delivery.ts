@@ -105,6 +105,8 @@ export interface ImProviderLike {
   outbound(ops: readonly OutboundOperation[]): Promise<import('./types.ts').OutboundReceipt[]>
   /** Optional provider-native approval card renderer (bridge consults it). */
   approvalCardRenderer?: import('./provider.ts').ImApprovalCardRenderer
+  /** Optional capability probe (bridge gates ack reactions on `react`). */
+  capabilities?(): import('./types.ts').ImCapabilities
 }
 
 export type { OutgoingAttachment, Destination }

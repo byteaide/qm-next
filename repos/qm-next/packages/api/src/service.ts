@@ -29,7 +29,9 @@ import {
 } from '@qm/admin'
 import { createMemoryReplayDedupe, createPostgresReplayDedupe, type ReplayDedupe } from '@qm/auth'
 import {
+  createMemoryAckEmojiPickStore,
   createMemoryAmbientJudgmentStore,
+  type AckEmojiPickStore,
   type AmbientCursorStore,
   type AmbientJudgmentStore,
 } from '@qm/approvals'
@@ -71,7 +73,7 @@ import {
   createPostgresSlackMap,
   createSurfaceContextQueue,
 } from './services/index.ts'
-import { createAmbientCursorStore, createPostgresAmbientJudgmentStore } from './services/ambient-stores.ts'
+import { createAmbientCursorStore, createPostgresAckEmojiPickStore, createPostgresAmbientJudgmentStore } from './services/ambient-stores.ts'
 import type { ChannelPolicyStore as ApiChannelPolicyStore } from './services/channel-policy-store.ts'
 import type { CronScheduler, CronStore } from '@qm/triggers'
 import type {
@@ -383,6 +385,9 @@ export class ApiService extends Service<ApiConfig> {
   ambientCursors?: AmbientCursorStore
   ambientJudgments?: AmbientJudgmentStore
   channelPolicy?: ApiChannelPolicyStore
+  /** Reaction-as-ack ingredients (14.0): the harness emoji picker + pick records. */
+  ackEmoji?: { pick(text: string, candidates: readonly string[]): Promise<string | undefined> }
+  ackPicks?: AckEmojiPickStore
 
   constructor(ctx: Context, public config: ApiConfig) {
     super(ctx, 'api')
@@ -458,6 +463,8 @@ export class ApiService extends Service<ApiConfig> {
     engine = booted.find((candidate) => candidate.profile.id === harnessId) ?? booted[booted.length - 1]
     const defaultJudge = registry.get(harnessId)?.models.judge
     if (defaultJudge) this.ambientJudge = { judge: defaultJudge }
+    const defaultPick = registry.get(harnessId)?.models.pickAckEmoji
+    if (defaultPick) this.ackEmoji = { pick: defaultPick }
     const resolution = devResolution(this.config)
     let toolFactory: OrchestratorDeps['tools'] | undefined
     const sandboxHandles = new Map<ScopeId, SandboxHandle>()
@@ -598,6 +605,7 @@ export class ApiService extends Service<ApiConfig> {
         ? createPostgresAmbientJudgmentStore(databaseUrl, orgId)
         : createMemoryAmbientJudgmentStore()
       this.ambientCursors = createAmbientCursorStore(databaseUrl, orgId)
+      this.ackPicks = databaseUrl ? createPostgresAckEmojiPickStore(databaseUrl, orgId) : createMemoryAckEmojiPickStore()
     }
     if (channelPolicyStore) this.channelPolicy = channelPolicyStore
     const skillPackStore = this.config.skillPacks ? createMemorySkillPackStore() : undefined
@@ -699,6 +707,7 @@ export class ApiService extends Service<ApiConfig> {
                 ...(errors ? { errors } : {}),
                 ...(credentialUsage ? { credentialUsage } : {}),
                 ...(this.ambientJudgments ? { ambientJudgments: this.ambientJudgments } : {}),
+                ...(this.ackPicks ? { ackEmojiPicks: this.ackPicks } : {}),
               },
             }
           : {}),
