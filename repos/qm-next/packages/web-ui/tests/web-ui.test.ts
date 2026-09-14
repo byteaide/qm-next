@@ -317,31 +317,33 @@ test('contexts and stubs: personal context present, M3-out surfaces answer empty
     const list = (contexts.json() as { contexts: Array<{ scopeId: string; kind: string }> }).contexts
     assert.ok(list.some((c) => c.scopeId === 'personal:dev' && c.kind === 'personal'))
 
-    const endpoints: Array<[string, string, unknown]> = [
-      ['GET', '/api/webhooks', { webhooks: [] }],
-      ['GET', '/api/files', { owned: [], shared: [] }],
-      ['GET', '/api/deployments', { deployments: [] }],
-      ['GET', '/api/connectors', { providers: {} }],
-      ['GET', '/api/search?q=x', { hits: [] }],
-      ['GET', '/api/memory', { content: '', revision: '0' }],
-      ['GET', '/api/memory/history', { revisions: [] }],
-      ['GET', '/api/user-model-auth/status', { individualModelAuth: false, connections: [] }],
+    // Convergence lanes relay into the api app; a relay-less rig answers 503.
+    const relayEndpoints = [
+      'GET /api/webhooks',
+      'GET /api/files',
+      'GET /api/deployments',
+      'GET /api/connectors',
+      'GET /api/search?q=x',
+      'GET /api/memory',
+      'GET /api/memory/history',
+      'GET /api/user-model-auth/status',
     ]
-    for (const [method, url, expected] of endpoints) {
-      const res = await rig.app.inject({ method: method as 'GET', url, headers: COOKIE })
-      assert.equal(res.statusCode, 200, `${method} ${url}`)
-      assert.deepEqual(res.json(), expected, url)
+    for (const lane of relayEndpoints) {
+      const [method, url] = lane.split(' ') as ['GET', string]
+      const res = await rig.app.inject({ method, url, headers: COOKIE })
+      assert.equal(res.statusCode, 503, lane)
+      assert.equal((res.json() as { error: string }).error, 'unavailable', lane)
     }
 
     const memorySave = await rig.app.inject({ method: 'POST', url: '/api/memory', headers: COOKIE, payload: { content: 'x' } })
-    assert.equal(memorySave.statusCode, 501)
+    assert.equal(memorySave.statusCode, 404)
     const blobs = await rig.app.inject({
       method: 'POST',
       url: '/api/blobs?sha=abc',
       headers: { ...COOKIE, 'content-type': 'application/octet-stream' },
       payload: Buffer.from('x'),
     })
-    assert.equal(blobs.statusCode, 501)
+    assert.equal(blobs.statusCode, 400)
 
     const uiPut = await rig.app.inject({
       method: 'PUT',

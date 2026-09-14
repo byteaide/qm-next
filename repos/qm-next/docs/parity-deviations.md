@@ -487,3 +487,24 @@ Each entry names the qm source shape, the qm-next shape, and why.
     loop-guard (auth endpoint on the portal's own origin), the local-bypass
     locality rule and session TTL sanity — the full qm production checklist
     lands with deployment hardening.
+
+50. **Web-ui convergence relay substitutions (13.0)** — qm's web-ui server
+    signs every `/api/*` request and relays it to the core over the private
+    network; qm-next runs one process, so the web server relays through
+    in-process Fastify injects carrying a short-TTL per-user bearer (the
+    same trust shape — a signed surface naming its user — with no wire hop;
+    the api app instance is exposed on ApiService for this). Substitutions:
+    (a) relay-only lanes that have no qm-next target stay heartbeat/501 —
+    `/api/deliveries/events` (web delivery drain needs the delivery bus),
+    `/api/sessions/:id/background/:pid/output` (process sessions have no web
+    surface yet); (b) `ui-state` stays a dev-local in-memory map (qm persists
+    it in core; the ui-state lane was outside the frozen 11.0 contract);
+    (c) `scope-resources` is composed in the web server from the file /
+    webhook / deployment relays plus the local crons and skills views, with
+    webhook secrets redacted — qm composes it inside core; (d) the file list
+    shape is translated (`{files}` over the api lane → `{owned, shared}` for
+    the SPA); (e) the webhook verification error copy names "the supported
+    signature schemes" instead of listing platform names, keeping
+    check-im-isolation clean; (f) the principals allow-list and the
+    portal-identity auth mode arrive via web-ui config (qm reads
+    WEB_UI_PRINCIPALS / PORTAL_IDENTITY_SECRET from env).

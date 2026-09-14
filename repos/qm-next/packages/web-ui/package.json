@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@qm/api": "workspace:^",
+    "@qm/auth": "workspace:^",
     "@qm/cordis": "workspace:^",
     "@qm/directory": "workspace:^",
     "@qm/schemastery": "workspace:^",
@@ -30,6 +31,8 @@
     "@earendil-works/pi-ai": "0.77.0",
     "@earendil-works/pi-web-ui": "0.75.3",
     "@mariozechner/mini-lit": "^0.2.0",
+    "@qm/credentials": "workspace:^",
+    "@qm/memory": "workspace:^",
     "@qm/orchestrator": "workspace:^",
     "@qm/store": "workspace:^",
     "@types/jsdom": "^28.0.3",

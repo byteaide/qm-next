@@ -13,6 +13,16 @@
   config:
     port: 0
     secrets: ['dev-m1-secret']
+    keychain: true
+    memory: true
+    files: true
+    grants: true
+    blobs: true
+    webhooks: true
+    connectors: true
+    deployments: true
+    userModelAuth: true
+    config: true
 - id: im-bridge
   name: '@qm/im-bridge'
 - id: triggers

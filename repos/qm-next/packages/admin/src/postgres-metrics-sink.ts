@@ -77,6 +77,7 @@ export function createPostgresMetricsSink(connectionString: string): MetricsSink
         sets.push(`slack_inflight_ms = $${params.length}`)
       }
       if (!sets.length) return
+      await sink.flush()
       params.push(runId)
       await sink
         .q(`UPDATE turn_metrics SET ${sets.join(', ')} WHERE run_id = $${params.length}`, params)

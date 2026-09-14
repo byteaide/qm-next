@@ -1,11 +1,14 @@
 /**
  * The web-ui server half: the SPA's HTTP surface over the M1/M3 stores.
- * Cookie principal (dev mode, loopback bind), turn/run proxy, SSE
- * run-events off the frozen RunEventBus, live skills/crons/contexts
- * views, and stub-empty answers for every surface outside the M3
- * boundary (files, webhooks, connectors, deploys, memory, ...).
+ * Cookie or portal-identity principal, turn/run proxy, SSE run-events off
+ * the frozen RunEventBus, live skills/crons/contexts views, and per-user
+ * relays into the api parity lanes for everything else (files, webhooks,
+ * connectors, keychain, memory, deployments, search, user-model-auth) —
+ * qm's signed core relays, in-process (13.0).
  */
+import { randomBytes } from 'node:crypto'
 import { createFireEngine, manualFireKey, renderCronFireInput, type CronSchedule, type CronStore } from '@qm/triggers'
+import { WEBHOOK_SCHEMES } from '@qm/api'
 import type { DirectoryStore } from '@qm/directory'
 import type { SkillStore } from '@qm/skills'
 import type {
@@ -23,7 +26,8 @@ import type {
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
 import { readFile, stat } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
-import { clearSessionCookie, cookieUser, sessionCookie } from './principal.ts'
+import { clearSessionCookie, identifyRequest, identityOf, sessionCookie, type AuthOptions } from './principal.ts'
+import type { ApiRelay } from './relay.ts'
 import {
   contextWire,
   cronWire,
@@ -44,6 +48,12 @@ export interface WebUiDeps {
   skills: SkillStore
   crons: CronStore
   directory: DirectoryStore
+  /** In-process relay into the api parity lanes; per-user bearer minting. */
+  relay?: ApiRelay
+  /** Public web base URL (connector OAuth redirect targets). */
+  publicUrl?: string
+  /** Identity verification + principal allow-list (qm WEB_UI hardening). */
+  auth?: AuthOptions
 }
 
 export interface WebUiServerOptions {
@@ -57,6 +67,21 @@ export interface WebUiServerOptions {
 }
 
 const SSE_HEARTBEAT_MS = 15_000
+
+const UNTRUSTED_CONTENT_SANDBOX_CSP = 'sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads'
+const PLAYGROUND_CSP = [
+  'sandbox allow-scripts allow-pointer-lock',
+  "default-src 'none'",
+  "script-src 'unsafe-inline'",
+  "style-src 'unsafe-inline'",
+  'img-src data: blob:',
+  'media-src data: blob:',
+  'font-src data:',
+  "connect-src 'none'",
+  'worker-src blob:',
+  "base-uri 'none'",
+  "form-action 'none'",
+].join('; ')
 
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -77,12 +102,18 @@ function isObj(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
-function authed(req: FastifyRequest): string | null {
-  return cookieUser(req)
+function safeParse<T>(text: string): T | null {
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    return null
+  }
 }
 
-function unauthorized(reply: FastifyReply): FastifyReply {
-  return reply.code(401).send({ mode: 'dev', reason: 'unauthenticated' })
+function asBuffer(body: unknown): Buffer {
+  if (Buffer.isBuffer(body)) return body
+  if (typeof body === 'string') return Buffer.from(body)
+  return Buffer.from([])
 }
 
 function notFound(reply: FastifyReply, error = 'not_found'): FastifyReply {
@@ -110,23 +141,11 @@ function sseComment(raw: FastifyReply['raw'], comment: string): void {
 interface MeWire {
   user: string
   org: string
-  mode: 'dev'
+  mode: 'dev' | 'portal'
   impersonatedBy: string | null
   permissions: string[]
   individualModelAuth: boolean
   modelAuthConnected: boolean
-}
-
-function meWire(user: string, org: string): MeWire {
-  return {
-    user,
-    org,
-    mode: 'dev',
-    impersonatedBy: null,
-    permissions: ['admin'],
-    individualModelAuth: false,
-    modelAuthConnected: false,
-  }
 }
 
 interface RuntimeConfigWire {
@@ -173,6 +192,39 @@ export function createWebUiServer(deps: WebUiDeps, opts: WebUiServerOptions): Fa
   const app = Fastify({ logger: false })
   const personalScope = `personal:${opts.user}`
   const orgScope = 'org:default'
+  const auth: AuthOptions = deps.auth ?? {}
+  const relay = deps.relay
+  const relayJson = async (
+    user: string,
+    method: 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT',
+    pathWithQuery: string,
+    rawBody?: string,
+  ): Promise<{ status: number; text: string } | null> => {
+    if (!relay) return null
+    const r = await relay.json(user, method, pathWithQuery, rawBody)
+    return { status: r.status, text: r.text }
+  }
+  const replyRelay = (reply: FastifyReply, r: { status: number; text: string } | null): FastifyReply => {
+    if (!r) return reply.code(503).send({ error: 'unavailable', message: 'api relay not wired' })
+    return reply.code(r.status).type('application/json').send(r.text)
+  }
+  function authed(req: FastifyRequest): string | null {
+    const outcome = identityOf(req)
+    return outcome && typeof outcome !== 'string' ? outcome.user : null
+  }
+  function identityImpersonator(req: FastifyRequest): string | null {
+    const outcome = identityOf(req)
+    return outcome && typeof outcome !== 'string' ? outcome.impersonator : null
+  }
+  function unauthorized(reply: FastifyReply, req?: FastifyRequest): FastifyReply {
+    const mode = auth.portalIdentitySecret ? 'portal' : 'dev'
+    const outcome = req ? identityOf(req) : undefined
+    const reason: string = typeof outcome === 'string' ? outcome : 'unauthenticated'
+    return reply.code(401).send({ error: 'sign in', mode, reason })
+  }
+  app.addHook('onRequest', (req, _reply, done) => {
+    void identifyRequest(req, auth).then(() => done(), done)
+  })
   const uiState = new Map<string, { value: unknown; updatedAt: number }>()
   const effectiveConfig: RuntimeConfigWire['effective'] = { harnessId: 'mock', modelId: DEV_MODEL_ID }
   const fireEngine = createFireEngine({
@@ -182,6 +234,8 @@ export function createWebUiServer(deps: WebUiDeps, opts: WebUiServerOptions): Fa
   })
 
   app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_req, body, done) => done(null, body))
+  app.addContentTypeParser('text/plain', { parseAs: 'buffer' }, (_req, body, done) => done(null, body))
+  app.addContentTypeParser('*', { parseAs: 'buffer' }, (_req, body, done) => done(null, body))
 
   app.get('/healthz', async () => ({ ok: true }))
 
@@ -203,8 +257,41 @@ export function createWebUiServer(deps: WebUiDeps, opts: WebUiServerOptions): Fa
 
   app.get('/me', async (req, reply) => {
     const user = authed(req)
-    if (!user) return unauthorized(reply)
-    return reply.code(200).header('set-cookie', sessionCookie(user)).send(meWire(user, opts.org ?? 'dev'))
+    if (!user) return unauthorized(reply, req)
+    const [whoami, authStatus] = await Promise.all([
+      relayJson(user, 'GET', '/v1/admin/whoami'),
+      relayJson(user, 'GET', `/v1/user-model-auth/status?principalId=${encodeURIComponent(user)}`),
+    ])
+    let permissions: string[] = []
+    if (whoami?.status === 200) {
+      try {
+        const parsed = JSON.parse(whoami.text) as { permissions?: unknown }
+        if (Array.isArray(parsed.permissions)) {
+          permissions = parsed.permissions.filter((p): p is string => typeof p === 'string')
+        }
+      } catch {}
+    }
+    let individualModelAuth = false
+    let modelAuthConnected = false
+    if (authStatus?.status === 200) {
+      try {
+        const parsed = JSON.parse(authStatus.text) as {
+          individualModelAuth?: boolean
+          connections?: Array<{ provider?: string }>
+        }
+        individualModelAuth = parsed.individualModelAuth === true
+        modelAuthConnected = (parsed.connections?.length ?? 0) > 0
+      } catch {}
+    }
+    return reply.code(200).header('set-cookie', sessionCookie(user)).send({
+      user,
+      org: opts.org ?? 'dev',
+      mode: auth.portalIdentitySecret ? 'portal' : 'dev',
+      impersonatedBy: identityImpersonator(req),
+      permissions: permissions.length ? permissions : ['admin'],
+      individualModelAuth,
+      modelAuthConnected,
+    } satisfies MeWire)
   })
 
   app.post('/api/turn', async (req, reply) => {
@@ -269,6 +356,7 @@ export function createWebUiServer(deps: WebUiDeps, opts: WebUiServerOptions): Fa
       'web',
       channelName,
     )
+    await deps.sessions.addParticipant(session.id, user)
     const { run } = await deps.runs.enqueue({
       sessionId: session.id,
       request: input,
@@ -713,15 +801,44 @@ export function createWebUiServer(deps: WebUiDeps, opts: WebUiServerOptions): Fa
     if (!user) return unauthorized(reply)
     const query = req.query as Record<string, string | undefined>
     const scope = query.scope ?? personalScope
-    const [crons, skills] = await Promise.all([
+    if (!relay) {
+      const [crons, skills] = await Promise.all([
+        deps.crons.list(),
+        deps.skills.visibleFor([personalScope, orgScope]),
+      ])
+      return reply.code(200).send({
+        files: [],
+        webhooks: [],
+        crons: crons.filter((c) => c.scopeId === scope).map((c) => cronWire(c, 'manage')),
+        deployments: [],
+        skills: skills
+          .filter((res): res is typeof res & { skill: NonNullable<typeof res.skill> } => res.skill !== null)
+          .filter((res) => res.skill.scopeId === scope)
+          .map((res) => ({ id: res.skill.id, name: res.skill.name, description: res.skill.description, status: res.skill.status })),
+        manageable: scope === personalScope || scope === orgScope,
+      })
+    }
+    const enc = encodeURIComponent
+    const [files, webhooks, deployments, crons, skills] = await Promise.all([
+      relayJson(user, 'GET', `/v1/files?viewer=${enc(user)}&scope=${enc(scope)}&limit=200`),
+      relayJson(user, 'GET', `/v1/webhooks?viewer=${enc(user)}`),
+      relayJson(user, 'GET', `/v1/deployments?principalId=${enc(user)}`),
       deps.crons.list(),
       deps.skills.visibleFor([personalScope, orgScope]),
     ])
+    const filesBody = files?.status === 200 ? safeParse<{ files?: unknown[] }>(files.text) : null
+    const webhookBody = webhooks?.status === 200 ? safeParse<{ webhooks?: Array<Record<string, unknown>> }>(webhooks.text) : null
+    const deploymentBody = deployments?.status === 200 ? safeParse<{ deployments?: unknown[] }>(deployments.text) : null
+    const redactWebhook = (w: Record<string, unknown>): Record<string, unknown> => {
+      const verification = w.verification
+      if (typeof verification !== 'object' || verification === null) return w
+      return { ...w, verification: { ...(verification as Record<string, unknown>), secret: undefined } }
+    }
     return reply.code(200).send({
-      files: [],
-      webhooks: [],
+      files: filesBody?.files ?? [],
+      webhooks: (webhookBody?.webhooks ?? []).map(redactWebhook),
       crons: crons.filter((c) => c.scopeId === scope).map((c) => cronWire(c, 'manage')),
-      deployments: [],
+      deployments: deploymentBody?.deployments ?? [],
       skills: skills
         .filter((res): res is typeof res & { skill: NonNullable<typeof res.skill> } => res.skill !== null)
         .filter((res) => res.skill.scopeId === scope)
@@ -755,13 +872,21 @@ export function createWebUiServer(deps: WebUiDeps, opts: WebUiServerOptions): Fa
     const user = authed(req)
     if (!user) return unauthorized(reply)
     const query = req.query as Record<string, string | undefined>
-    return reply.code(200).send(runtimeConfigWire(query.scopeId ?? personalScope, effectiveConfig))
+    const scopeId = query.scopeId ?? personalScope
+    const r = await relayJson(user, 'GET', `/v1/runtime-config?principalId=${enc(user)}&scopeId=${enc(scopeId)}`)
+    if (r) return replyRelay(reply, r)
+    return reply.code(200).send(runtimeConfigWire(scopeId, effectiveConfig))
   })
 
   app.put('/api/runtime-config', async (req, reply) => {
     const user = authed(req)
     if (!user) return unauthorized(reply)
     const body = (req.body ?? {}) as Record<string, unknown>
+    const scopeId = typeof body.scopeId === 'string' && body.scopeId ? body.scopeId : personalScope
+    if (relay) {
+      const payload = JSON.stringify({ ...body, principalId: user, scopeId })
+      return replyRelay(reply, await relayJson(user, 'PUT', '/v1/runtime-config', payload))
+    }
     if (typeof body.harnessId === 'string' && body.harnessId) effectiveConfig.harnessId = body.harnessId
     if (typeof body.modelId === 'string' && body.modelId) effectiveConfig.modelId = body.modelId
     if (typeof body.effortLevel === 'string') effectiveConfig.effortLevel = body.effortLevel
@@ -788,61 +913,481 @@ export function createWebUiServer(deps: WebUiDeps, opts: WebUiServerOptions): Fa
   app.get('/api/search', async (req, reply) => {
     const user = authed(req)
     if (!user) return unauthorized(reply)
-    return reply.code(200).send({ hits: [] })
+    const query = req.query as Record<string, string | undefined>
+    const q = query.q ?? ''
+    const limit = query.limit ? `&limit=${encodeURIComponent(query.limit)}` : ''
+    return replyRelay(
+      reply,
+      await relayJson(user, 'GET', `/v1/sessions/search?principalId=${encodeURIComponent(user)}&q=${encodeURIComponent(q)}${limit}`),
+    )
   })
 
   app.get('/api/webhooks', async (req, reply) => {
     const user = authed(req)
     if (!user) return unauthorized(reply)
-    return reply.code(200).send({ webhooks: [] })
+    return replyRelay(reply, await relayJson(user, 'GET', `/v1/webhooks?viewer=${encodeURIComponent(user)}`))
   })
+
+  app.post('/api/webhooks', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const action = typeof body.action === 'string' ? body.action.trim() : ''
+    if (!action) return reply.code(400).send({ error: 'action_required', message: "an action (the agent's instructions) is required" })
+    let verification: { scheme: string; secret?: string } = { scheme: 'hmac-sha256' }
+    if (body.verification !== undefined) {
+      if (!isObj(body.verification) || typeof body.verification.scheme !== 'string') {
+        return reply.code(400).send({
+          error: 'unsupported_verification',
+          message: 'verification requires one of the supported signature schemes',
+        })
+      }
+      verification = {
+        scheme: body.verification.scheme,
+        ...(typeof body.verification.secret === 'string' && body.verification.secret ? { secret: body.verification.secret } : {}),
+      }
+    }
+    if (!WEBHOOK_SCHEMES.includes(verification.scheme as (typeof WEBHOOK_SCHEMES)[number])) {
+      return reply.code(400).send({
+        error: 'unsupported_verification',
+        message: 'choose one of the supported signature verification schemes',
+      })
+    }
+    if (!verification.secret) verification = { ...verification, secret: randomBytes(32).toString('hex') }
+    let filters: Array<{ path: string; in: string[] }> | undefined
+    if (body.filters !== undefined) {
+      const ok =
+        Array.isArray(body.filters) &&
+        body.filters.every((filter) => {
+          if (!isObj(filter)) return false
+          return (
+            typeof filter.path === 'string' &&
+            filter.path.trim().length > 0 &&
+            Array.isArray(filter.in) &&
+            filter.in.length > 0 &&
+            filter.in.every((value) => typeof value === 'string' && value.trim().length > 0)
+          )
+        })
+      if (!ok) {
+        return reply.code(400).send({ error: 'invalid_filters', message: 'every filter requires a path and at least one value' })
+      }
+      filters = body.filters as Array<{ path: string; in: string[] }>
+    }
+    if (body.destination !== undefined) {
+      return reply.code(400).send({
+        error: 'invalid_destination',
+        message: 'choose webhook destinations with the agent so teammate and channel names can be resolved safely',
+      })
+    }
+    const payload = JSON.stringify({
+      ownerScopeId: `personal:${user}`,
+      owner: user,
+      createdBy: user,
+      action,
+      verification,
+      ...(filters ? { filters } : {}),
+    })
+    return replyRelay(reply, await relayJson(user, 'POST', '/v1/webhooks', payload))
+  })
+
+  const setWebhookEnabled = (enabled: boolean): import('fastify').RouteHandlerMethod => async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const id = (req.params as { id: string }).id
+    const listed = await relayJson(user, 'GET', `/v1/webhooks?viewer=${encodeURIComponent(user)}`)
+    const body = listed?.status === 200 ? safeParse<{ webhooks?: Array<{ id?: string }> }>(listed.text) : null
+    if (!body?.webhooks?.some((w) => w.id === id)) return notFound(reply)
+    return replyRelay(
+      reply,
+      await relayJson(user, 'POST', `/v1/webhooks/${encodeURIComponent(id)}/${enabled ? 'enable' : 'disable'}?principalId=${encodeURIComponent(user)}`),
+    )
+  }
+  app.post('/api/webhooks/:id/disable', setWebhookEnabled(false))
+  app.post('/api/webhooks/:id/enable', setWebhookEnabled(true))
 
   app.get('/api/files', async (req, reply) => {
     const user = authed(req)
     if (!user) return unauthorized(reply)
-    return reply.code(200).send({ owned: [], shared: [] })
+    const query = req.query as Record<string, string | undefined>
+    const parts = new URLSearchParams({ viewer: user })
+    if (query.limit) parts.set('limit', query.limit)
+    if (query.cursor) parts.set('cursor', query.cursor)
+    if (query.scope) parts.set('scope', query.scope)
+    const r = await relayJson(user, 'GET', `/v1/files?${parts.toString()}`)
+    if (!r || r.status !== 200) return replyRelay(reply, r)
+    const page = safeParse<{ files?: Array<Record<string, unknown>>; nextCursor?: string }>(r.text)
+    if (!page) return reply.code(502).send({ error: 'upstream_error' })
+    const rows: Array<Record<string, unknown>> = (page.files ?? []).map((f) => ({ ...f, openable: true, kind: 'file' }))
+    const owned = rows.filter((f) => f.ownerScopeId === `personal:${user}` || f.principalId === user)
+    const shared = rows.filter((f) => !owned.includes(f))
+    return reply.code(200).send({
+      owned,
+      shared,
+      ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+    })
   })
 
+  app.post('/api/blobs', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const query = req.query as Record<string, string | undefined>
+    const sha = query.sha ?? ''
+    if (!/^[0-9a-f]{64}$/.test(sha)) {
+      return reply.code(400).send({ error: 'bad_request', message: 'sha (hex sha-256) required' })
+    }
+    if (!relay) return reply.code(503).send({ error: 'unavailable', message: 'api relay not wired' })
+    const body = asBuffer(req.body)
+    const staged = await relay.raw(user, 'POST', '/v1/blobs', body, { 'x-content-sha256': sha })
+    return reply.code(staged.status).type('application/json').send(staged.text)
+  })
+
+  app.post('/api/files/upload', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const query = req.query as Record<string, string | undefined>
+    const sha = query.sha ?? ''
+    const name = query.name?.trim() || 'file'
+    if (!/^[0-9a-f]{64}$/.test(sha)) {
+      return reply.code(400).send({ error: 'bad_request', message: 'sha (hex sha-256) required' })
+    }
+    if (!relay) return reply.code(503).send({ error: 'unavailable', message: 'api relay not wired' })
+    const bytes = asBuffer(req.body)
+    const staged = await relay.raw(user, 'POST', '/v1/blobs', bytes, { 'x-content-sha256': sha })
+    if (staged.status < 200 || staged.status >= 300) {
+      return reply.code(staged.status).type('application/json').send(staged.text)
+    }
+    const stagedBody = safeParse<{ blobId?: string }>(staged.text)
+    if (!stagedBody?.blobId) return reply.code(502).send({ error: 'upstream_error' })
+    const mimetype = typeof req.headers['content-type'] === 'string' ? req.headers['content-type'] : 'application/octet-stream'
+    const payload = JSON.stringify({
+      principalId: user,
+      ...(query.scope ? { scopeId: query.scope } : {}),
+      name,
+      mimetype,
+      blobId: stagedBody.blobId,
+    })
+    return replyRelay(reply, await relayJson(user, 'POST', '/v1/files/upload', payload))
+  })
+
+  app.get('/api/files/by-name/content', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const query = req.query as Record<string, string | undefined>
+    const name = query.name?.trim()
+    if (!name) return reply.code(400).send({ error: 'bad_request', message: 'name required' })
+    if (!relay) return reply.code(503).send({ error: 'unavailable', message: 'api relay not wired' })
+    let cursor: string | undefined
+    let match: { id: string; createdAt: number } | undefined
+    for (let page = 0; page < 50; page++) {
+      const parts = new URLSearchParams({ viewer: user, limit: '200' })
+      if (cursor) parts.set('cursor', cursor)
+      const listed = await relay.json(user, 'GET', `/v1/files?${parts.toString()}`)
+      if (listed.status !== 200) return reply.code(listed.status).type('application/json').send(listed.text)
+      const body = safeParse<{ files?: Array<{ id?: string; name?: string; createdAt?: number }>; nextCursor?: string }>(listed.text)
+      if (!body) return reply.code(502).send({ error: 'upstream_error' })
+      for (const file of body.files ?? []) {
+        if (file.name !== name || typeof file.id !== 'string') continue
+        const createdAt = typeof file.createdAt === 'number' ? file.createdAt : 0
+        if (!match || createdAt > match.createdAt) match = { id: file.id, createdAt }
+      }
+      cursor = body.nextCursor
+      if (!cursor) break
+    }
+    if (!match) return notFound(reply)
+    return reply.code(302).header('location', `/api/files/${encodeURIComponent(match.id)}/content`).send()
+  })
+
+  const streamArtifact = async (req: FastifyRequest, reply: FastifyReply, playground: boolean): Promise<FastifyReply> => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    if (!relay) return reply.code(503).send({ error: 'unavailable', message: 'api relay not wired' })
+    const id = (req.params as { id: string }).id
+    const r = await relay.json(user, 'GET', `/v1/files/${encodeURIComponent(id)}/content?viewer=${encodeURIComponent(user)}`)
+    if (r.status !== 200) {
+      return reply.code(r.status === 404 ? 404 : 502).type('application/json').send({ error: r.status === 404 ? 'not_found' : 'upstream_error' })
+    }
+    const contentType = r.contentType.toLowerCase()
+    if (playground && !contentType.startsWith('text/html')) {
+      return reply.code(415).type('application/json').send({ error: 'not_a_playground' })
+    }
+    const artifactQuery = req.query as Record<string, string | undefined>
+    const asSource = playground && artifactQuery.source === '1'
+    reply.raw.writeHead(200, {
+      'content-type': asSource ? 'text/plain; charset=utf-8' : r.contentType,
+      ...(r.body.length ? { 'content-length': String(r.body.length) } : {}),
+      ...(playground ? {} : { 'content-disposition': 'inline' }),
+      'content-security-policy': playground ? PLAYGROUND_CSP : UNTRUSTED_CONTENT_SANDBOX_CSP,
+      'referrer-policy': 'no-referrer',
+      ...(playground ? { 'x-frame-options': 'SAMEORIGIN' } : {}),
+      'x-content-type-options': 'nosniff',
+    })
+    reply.raw.end(r.body)
+    return reply
+  }
+  app.get('/api/files/:id/content', async (req, reply) => streamArtifact(req, reply, false))
+  app.get('/api/playgrounds/:id', async (req, reply) => streamArtifact(req, reply, true))
+
+  const enc = encodeURIComponent
   app.get('/api/deployments', async (req, reply) => {
     const user = authed(req)
     if (!user) return unauthorized(reply)
-    return reply.code(200).send({ deployments: [] })
+    const r = await relayJson(user, 'GET', `/v1/deployments?principalId=${enc(user)}`)
+    if (!r || r.status !== 200) return replyRelay(reply, r)
+    const body = safeParse<{ deployments?: Array<Record<string, unknown>> }>(r.text)
+    if (!body) return reply.code(502).send({ error: 'bad_core_response' })
+    return reply.code(200).send({
+      deployments: (body.deployments ?? []).map((d) => ({
+        ...d,
+        webUrl: `/deployments/${enc(String(d.id))}/`,
+      })),
+    })
   })
+
+  app.get('/api/deployments/:id', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const id = (req.params as { id: string }).id
+    if (!id || id.includes('/')) return notFound(reply)
+    const r = await relayJson(user, 'GET', `/v1/deployments/${enc(id)}?principalId=${enc(user)}`)
+    if (!r || r.status !== 200) return replyRelay(reply, r)
+    const body = safeParse<{ deployment?: Record<string, unknown> }>(r.text)
+    if (!body?.deployment) return reply.code(502).send({ error: 'bad_core_response' })
+    return reply.code(200).send({
+      deployment: { ...body.deployment, webUrl: `/deployments/${enc(String(body.deployment.id))}/` },
+    })
+  })
+
+  app.get('/api/deployments/:id/owner-url', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const id = (req.params as { id: string }).id
+    if (!id || id.includes('/')) return notFound(reply)
+    return replyRelay(reply, await relayJson(user, 'GET', `/v1/deployments/${enc(id)}/owner-url?principalId=${enc(user)}`))
+  })
+
+  const mayManageDeployment = async (user: string, id: string): Promise<boolean> => {
+    const r = await relayJson(user, 'GET', `/v1/deployments?principalId=${enc(user)}`)
+    if (r?.status !== 200) return false
+    const body = safeParse<{ deployments?: Array<{ id?: string; name?: string; permission?: unknown }> }>(r.text)
+    const d = body?.deployments?.find((x) => x.id === id || x.name === id)
+    return d?.permission === 'write'
+  }
+
+  const manageDeployment = (lane: 'display-name' | 'name' | 'archive' | 'restore', pick: (body: Record<string, unknown>) => string | undefined): import('fastify').RouteHandlerMethod => async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const id = (req.params as { id: string }).id
+    if (!(await mayManageDeployment(user, id))) {
+      const r = await relayJson(user, 'GET', `/v1/deployments?principalId=${enc(user)}`)
+      if (!r || r.status !== 200) return replyRelay(reply, r)
+      const body = safeParse<{ deployments?: Array<{ id?: string; name?: string }> }>(r.text)
+      if (!body?.deployments?.some((x) => x.id === id || x.name === id)) return notFound(reply)
+      return reply.code(403).send({ error: 'forbidden', message: 'you do not manage this deployment' })
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const field = pick(body)
+    const payload = field !== undefined ? JSON.stringify({ [lane === 'display-name' ? 'displayName' : lane]: field }) : lane === 'restore' ? JSON.stringify({ principalId: user }) : undefined
+    return replyRelay(reply, await relayJson(user, 'POST', `/v1/deployments/${enc(id)}/${lane}`, payload))
+  }
+
+  app.post('/api/deployments/:id/display-name', manageDeployment('display-name', (b) => String(b.displayName ?? '')))
+  app.post('/api/deployments/:id/name', manageDeployment('name', (b) => String(b.name ?? '')))
+  app.post('/api/deployments/:id/archive', manageDeployment('archive', () => undefined))
+  app.post('/api/deployments/:id/restore', manageDeployment('restore', () => undefined))
 
   app.get('/api/connectors', async (req, reply) => {
     const user = authed(req)
     if (!user) return unauthorized(reply)
-    return reply.code(200).send({ providers: {} })
+    return replyRelay(reply, await relayJson(user, 'GET', `/v1/connectors/oauth/status?principalId=${enc(user)}`))
+  })
+
+  app.post('/api/connectors/:provider/start', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const provider = (req.params as { provider: string }).provider
+    const publicUrl = (deps.publicUrl ?? '').replace(/\/$/, '')
+    const params = new URLSearchParams({
+      principalId: user,
+      redirectUri: `${publicUrl}/v1/connectors/oauth/${enc(provider)}/callback`,
+      returnTo: '/keychain',
+    })
+    return replyRelay(reply, await relayJson(user, 'GET', `/v1/connectors/oauth/${enc(provider)}/start?${params.toString()}`))
+  })
+
+  app.post('/api/connectors/revoke', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const provider = typeof body.provider === 'string' ? body.provider : ''
+    const host = typeof body.host === 'string' ? body.host : ''
+    if (!provider && !host) return reply.code(400).send({ error: 'bad_request', message: 'provider or host required' })
+    return replyRelay(
+      reply,
+      await relayJson(user, 'POST', '/v1/connectors/oauth/revoke', JSON.stringify({ principalId: user, ...(provider ? { provider } : { host }) })),
+    )
   })
 
   app.get('/api/user-model-auth/status', async (req, reply) => {
     const user = authed(req)
     if (!user) return unauthorized(reply)
-    return reply.code(200).send({ individualModelAuth: false, connections: [] })
+    return replyRelay(reply, await relayJson(user, 'GET', `/v1/user-model-auth/status?principalId=${enc(user)}`))
+  })
+
+  app.post('/api/user-model-auth/api-key', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const body = (req.body ?? {}) as Record<string, unknown>
+    return replyRelay(
+      reply,
+      await relayJson(user, 'POST', '/v1/user-model-auth/api-key', JSON.stringify({ principalId: user, provider: body.provider, apiKey: body.apiKey })),
+    )
+  })
+
+  app.post('/api/user-model-auth/disconnect', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const body = (req.body ?? {}) as Record<string, unknown>
+    return replyRelay(
+      reply,
+      await relayJson(user, 'POST', '/v1/user-model-auth/disconnect', JSON.stringify({ principalId: user, provider: body.provider })),
+    )
+  })
+
+  app.post('/api/user-model-auth/chatgpt/start', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    return replyRelay(reply, await relayJson(user, 'POST', '/v1/user-model-auth/chatgpt/start', JSON.stringify({ principalId: user })))
+  })
+
+  app.post('/api/user-model-auth/chatgpt/poll', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const body = (req.body ?? {}) as Record<string, unknown>
+    return replyRelay(
+      reply,
+      await relayJson(user, 'POST', '/v1/user-model-auth/chatgpt/poll', JSON.stringify({ principalId: user, deviceAuthId: body.deviceAuthId, userCode: body.userCode })),
+    )
+  })
+
+  app.post('/api/user-model-auth/claude/start', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    return replyRelay(reply, await relayJson(user, 'POST', '/v1/user-model-auth/claude/start', JSON.stringify({ principalId: user })))
+  })
+
+  app.post('/api/user-model-auth/claude/complete', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const body = (req.body ?? {}) as Record<string, unknown>
+    return replyRelay(
+      reply,
+      await relayJson(user, 'POST', '/v1/user-model-auth/claude/complete', JSON.stringify({ principalId: user, code: body.code, verifier: body.verifier })),
+    )
+  })
+
+  app.get('/api/keychain/credentials', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    return replyRelay(reply, await relayJson(user, 'GET', '/v1/keychain/credentials'))
   })
 
   app.get('/api/keychain/overview', async (req, reply) => {
     const user = authed(req)
     if (!user) return unauthorized(reply)
-    return reply.code(200).send({ credentials: [], grants: [], drops: [] })
+    return replyRelay(reply, await relayJson(user, 'GET', '/v1/keychain/overview'))
+  })
+
+  app.post('/api/keychain/grants/:id/revoke', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const id = (req.params as { id: string }).id
+    return replyRelay(reply, await relayJson(user, 'POST', `/v1/keychain/grants/${enc(id)}/revoke`, '{}'))
+  })
+
+  app.post('/api/keychain/drops', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const draft = {
+      ...(typeof body.service === 'string' ? { service: body.service } : {}),
+      ...(typeof body.purpose === 'string' ? { purpose: body.purpose } : {}),
+      ...(typeof body.envKey === 'string' ? { envKey: body.envKey } : {}),
+    }
+    return replyRelay(reply, await relayJson(user, 'POST', '/v1/keychain/drops', JSON.stringify(draft)))
+  })
+
+  app.delete('/api/keychain/credentials/:id', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const id = (req.params as { id: string }).id
+    if (!id) return reply.code(400).send({ error: 'bad_request', message: 'credential id required' })
+    return replyRelay(reply, await relayJson(user, 'DELETE', `/v1/keychain/credentials/${enc(id)}`))
   })
 
   app.get('/api/memory', async (req, reply) => {
     const user = authed(req)
     if (!user) return unauthorized(reply)
-    return reply.code(200).send({ content: '', revision: '0' })
+    return replyRelay(reply, await relayJson(user, 'GET', `/v1/memory?principalId=${enc(user)}`))
   })
 
-  app.post('/api/memory', async (req, reply) => {
+  app.put('/api/memory', async (req, reply) => {
     const user = authed(req)
     if (!user) return unauthorized(reply)
-    return reply.code(501).send({ error: 'unavailable', message: 'memory editing wires up at the M3 convergence (17.0)' })
+    const body = (req.body ?? {}) as Record<string, unknown>
+    if (typeof body.content !== 'string') {
+      return reply.code(400).send({ error: 'bad_request', message: 'content must be a string' })
+    }
+    let revision = typeof body.revision === 'string' ? body.revision : ''
+    if (!revision) {
+      const head = await relayJson(user, 'GET', `/v1/memory?principalId=${enc(user)}`)
+      revision = head?.status === 200 ? (safeParse<{ revision?: unknown }>(head.text)?.revision ?? '') as string : ''
+      if (typeof revision !== 'string') revision = ''
+    }
+    return replyRelay(
+      reply,
+      await relayJson(user, 'PUT', '/v1/memory', JSON.stringify({ principalId: user, content: body.content, revision })),
+    )
   })
 
   app.get('/api/memory/history', async (req, reply) => {
     const user = authed(req)
     if (!user) return unauthorized(reply)
-    return reply.code(200).send({ revisions: [] })
+    return replyRelay(reply, await relayJson(user, 'GET', `/v1/memory/history?principalId=${enc(user)}`))
+  })
+
+  app.post('/api/memory/restore', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const revision = typeof body.revision === 'string' ? body.revision : ''
+    const expectedRevision = typeof body.expectedRevision === 'string' ? body.expectedRevision : ''
+    return replyRelay(
+      reply,
+      await relayJson(user, 'POST', '/v1/memory/restore', JSON.stringify({ principalId: user, revision, expectedRevision })),
+    )
+  })
+
+  app.post('/api/approvals/:requestId', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const requestId = (req.params as { requestId: string }).requestId
+    if (!requestId || requestId.includes('/')) return notFound(reply)
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const approved = body.approved === true
+    const scope = body.scope === 'once' || body.scope === 'session' || body.scope === 'always' ? body.scope : undefined
+    const runs = await deps.runs.list({ limit: 200 })
+    const withApproval = runs
+      .filter(
+        (r) =>
+          r.request.conversation.threadRef.startsWith(`web:${user}:`) &&
+          r.result?.pendingApprovals?.some((pa) => pa.requestId === requestId),
+      )
+      .sort((a, b) => b.createdAt - a.createdAt)[0]
+    if (!withApproval) return notFound(reply)
+    const approval: TurnApproval = { requestId, approved, ...(scope ? { scope } : {}) }
+    const input: TurnInput = { ...withApproval.request, approval }
+    const { run } = await deps.runs.enqueue({ sessionId: withApproval.sessionId, request: input })
+    return reply.code(202).send({ runId: run.id })
   })
 
   app.get('/api/directory/resolve', async (req, reply) => {
@@ -862,18 +1407,6 @@ export function createWebUiServer(deps: WebUiDeps, opts: WebUiServerOptions): Fa
     const user = authed(req)
     if (!user) return unauthorized(reply)
     return reply.code(200).send({})
-  })
-
-  app.all('/api/blobs', async (req, reply) => {
-    const user = authed(req)
-    if (!user) return unauthorized(reply)
-    return reply.code(501).send({ error: 'unavailable', message: 'file uploads are out of scope for M3' })
-  })
-
-  app.all('/api/playgrounds/:id', async (req, reply) => {
-    const user = authed(req)
-    if (!user) return unauthorized(reply)
-    return reply.code(501).send({ error: 'unavailable', message: 'playground is out of scope for M3' })
   })
 
   if (opts.distDir) {

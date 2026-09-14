@@ -112,6 +112,7 @@ v0.1.0 只覆盖 qm 最核心的 ~11%（15k/133k 行 TS）。本计划把 qm-nex
 - 2026-09-14 P3 开工前实测：qm routes 27 模块/~242 条路由（surface 43+、admin 58 为大头），API 车道估时上调（10.0 契约冻结 0.5d→1.5d，11.0 相应加压）；canonical main 同步确认为用户侧 `git merge --ff-only` 协议（reflog 全程 tiger.w Fast-forward 记录）
 - 2026-09-14 12.0 lane B 控制面落 `@qm/admin`+`@qm/auth` 两包（qm src/admin+src/auth 平移），api 框架升级为 capability 阶梯、`databaseUrl` 驱动 PG 双实现；secret-drop mint 因 qm 源文件被 source-access guard 拦截，按 parity-api-contract + drop-store 契约重建（偏差 #47a）；check:im 门禁自 tranche 5 起实际已红（parity 契约词表命中 grep），修复为"符号扫描排除 api 契约面 + 全核 SDK-import 扫描"（#47f）
 - 2026-09-14 12.0 收官：admin console SPA 进程内挂载（#48）+ `@qm/portal` SSO 签发端（#49）。关键判断：qm portal 是"独立前门 + 私网上游中继"，qm-next 单进程拓扑下中继半边无目标（同进程 API 车道已存在），只平移 `/auth/*` + admin 门；身份链为 session cookie → onRequest 门签 60s `x-portal-identity` → console verifyPortalIdentity，mint 用 qm chassis legacy `payload.hmac` 格式与既有 verifySignedPayload 双向兼容；admin-login jti 复用 replay-dedupe 存储实现跨重启单次消费
+- 2026-09-14 13.0 汇合：qm web-ui server 的"签名 coreFetch 中继"在单进程下等价转换为"逐用户 bearer + Fastify inject"（ApiService 暴露 app）——信任形状不变（可信面代替用户命名 principal），零网络跳。命中两个结构差异：SPA 的 `{owned,shared}` 文件形状 vs api 车道 `{files}`（web 侧变换，11.0 契约不动）；upload 任意 content-type 需要 catch-all buffer 解析器（Fastify 默认 text/plain→string 导致 hash 校验失败）。approvals 中继发现 qm 的 requestId 含命令文本（`session:command`），带 `/` 时 qm 同样 404——守卫保持一致；顺带修掉 tranche 1 的 postgres metrics record→patch 潜伏竞态（patch 前 flush）
 
 #### Surprises & Discoveries
 

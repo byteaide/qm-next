@@ -331,6 +331,12 @@ export class ApiService extends Service<ApiConfig> {
   /** Listen address; available once the plugin fiber is active. */
   address = { port: 0, host: '' }
 
+  /**
+   * The Fastify app; the web-ui convergence relays to the parity lanes
+   * through in-process injects against this instance (13.0).
+   */
+  app!: ReturnType<typeof createApiServer>
+
   /** Queued-turn store; shared by HTTP intake and IM-originated turns. */
   runs!: RunStore
 
@@ -742,6 +748,7 @@ export class ApiService extends Service<ApiConfig> {
       },
       { secrets: this.config.secrets },
     )
+    this.app = app
     await app.listen({ port: this.config.port ?? 0, host: this.config.host ?? '127.0.0.1' })
     const addr = app.server.address()
     if (typeof addr === 'object' && addr !== null) this.address = { port: addr.port, host: addr.address }
