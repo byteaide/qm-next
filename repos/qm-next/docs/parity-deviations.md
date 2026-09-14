@@ -405,3 +405,44 @@ Each entry names the qm source shape, the qm-next shape, and why.
     `/v1/auth/broker/claim` answers qm's 503 (replay store not durable);
     (i) the cron destination PUT maps qm's clear-to-undefined onto the
     qm-next `destination: null` patch.
+
+47. **12.0 control plane (lane B tranche 1) substitutions** — the `@qm/admin`
+    and `@qm/auth` packages land (grant store + service, scoped event sinks
+    with memory+PG twins, retention/attribution/users, invite email;
+    signed payloads, capability tokens, replay dedupe, source-auth, AWS
+    role broker, portal identity) and the api framework verifies the
+    `x-agent-capability` header. Resolves the unwired shapes deferred by
+    #45(a,i,j) and #46(g,h): `/v1/share` now validates the qm body and
+    shares files through the grant ledger behind a verified capability
+    (skill/deploy/cron targets still 404 until their stores converge at
+    13.0; recipient-name resolution 404s until the directory resolver
+    lands); blob transfers accept a bound blob-transfer capability
+    (direction + 32-hex id on reads) beside the bearer/anonymous lane;
+    `/v1/credentials/broker` proxies entitled aud-gated calls through the
+    keychain service-credential reader with host/method/path pinning and
+    usage/audit records (404 without a keychain); `/v1/auth/broker/claim`
+    claims nonces over the durable replay store (PG under DATABASE_URL,
+    qm's 503 when memory-only); secret-drop mint verifies the capability,
+    refuses `triggered` callers and mints single-use drops over the real
+    store. Remaining substitutions: (a) qm's `secret-drop.ts` source is
+    unreadable behind the source-access guard, so the mint route is
+    reconstructed from `docs/parity-api-contract.md` + the drop-store
+    contract — the drop URL carries no embedded capability token yet (qm's
+    `requiresToken` binding lands with the 13.0 web runtime); (b) a
+    verified capability authenticates the request as its `actorId` (qm
+    keeps capability and actor separate and adds portal identity on top —
+    portal identity is wired in `@qm/auth` but not yet enforced by the
+    gate); (c) aud routes now demand a capability token qm-verbatim
+    (401 `<aud> capability token required` without one) instead of lane
+    A's bearer-aud fallback; (d) `identity` and capability
+    scope-membership checks (qm `authorizesCapabilityScope`) stay
+    unwired, so revoked-scope 403s cannot fire yet; (e) admin metrics
+    reads the real turn-metrics sink and audit/errors/egress read the
+    sinks, but runs-based aggregates keep session-scope mapping null (no
+    `sessionsByThreadRefs` seam) and the anatomy/phase histograms land
+    with the observability convergence; (f) `check:im` was red since the
+    parity routes introduced qm's IM-named contract vocabulary — the gate
+    now scans every core package except the api parity surface for
+    platform symbols and adds an SDK-import scan (no provider SDK may be
+    imported outside `packages/im-*`) so the invariant it protects is
+    actually enforceable.

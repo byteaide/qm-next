@@ -10,6 +10,7 @@ import type { FastifyInstance } from 'fastify'
 import { createMemoryDirectoryStore } from '@qm/directory'
 import { createMemoryCronStore } from '@qm/triggers'
 import { createApiServer, mintSignedPayload, type ApiDeps, type ApiServerOptions } from '../src/index.ts'
+import { mintCapabilityToken } from '@qm/auth'
 import { registerRouteTable, type Route } from '../src/routes/framework.ts'
 import { directoryRoutes } from '../src/routes/directory-routes.ts'
 import { cronRoutes } from '../src/routes/cron-routes.ts'
@@ -57,8 +58,14 @@ test('framework auth: public passes, source requires a token, aud enforces the c
   assert.equal(src.statusCode, 200)
   assert.equal(src.json().actor, 'user-1')
   const wrongAud = await app.inject({ method: 'GET', url: '/aud', headers: auth(await token()) })
-  assert.equal(wrongAud.statusCode, 403)
-  const rightAud = await app.inject({ method: 'GET', url: '/aud', headers: auth(await token({ p: 'svc', aud: 'credential-broker' })) })
+  assert.equal(wrongAud.statusCode, 401)
+  assert.equal(wrongAud.json().message, 'credential-broker capability token required')
+  const capToken = await mintCapabilityToken(
+    { actorId: 'svc', scopeId: 'org:test', aud: 'credential-broker', exp: Date.now() + 60_000 },
+    SECRET,
+    'test',
+  )
+  const rightAud = await app.inject({ method: 'GET', url: '/aud', headers: { 'x-agent-capability': capToken } })
   assert.equal(rightAud.statusCode, 200)
   await app.close()
 })

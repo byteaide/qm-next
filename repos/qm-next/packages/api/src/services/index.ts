@@ -99,6 +99,7 @@ export {
 } from './blob-transfer.ts'
 export {
   createMemoryAdminService,
+  createPostgresSlackMap,
   AdminError,
   adminStatusFromGrants,
   type AdminGrant,
@@ -106,8 +107,13 @@ export {
   type AdminStatus,
   type SlackInstallationRecord,
 } from './admin-service.ts'
-export { createMemoryAuditLog, type AuditEvent, type AuditLog } from './audit-log.ts'
-export { createMemoryEgressAuditSink, type EgressAuditRecord, type EgressAuditSink } from './egress-audit-sink.ts'
+export { createMemoryAuditLog, createAuditLog, type AuditEvent, type AuditLog } from './audit-log.ts'
+export {
+  createMemoryEgressAuditSink,
+  createEgressAuditSink,
+  type EgressAuditRecord,
+  type EgressAuditSink,
+} from './egress-audit-sink.ts'
 export {
   createMemorySecretDropStore,
   SECRET_DROP_TTL_MS,

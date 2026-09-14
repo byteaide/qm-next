@@ -1,25 +1,57 @@
 /**
- * Smaller parity lanes: the credential broker (aud-gated, unwired → 404),
- * secret drops (capability-minted credential request links), emoji upload
- * (capability gate + browser-session 404), the egress audit sink ingest,
- * and the auth broker (single-use nonce claims need the durable replay
- * store → qm's 503; email allow-list → identity-unwired false).
+ * Smaller parity lanes (12.0 control-plane wired): the credential broker
+ * (aud-gated over the keychain service-credential reader), secret drops
+ * (capability-minted credential request links), emoji upload (capability
+ * gate + browser-session 404), the egress audit sink ingest, and the auth
+ * broker (single-use nonce claims over the durable replay store → qm's 503
+ * when not durable; email allow-list → identity-unwired false).
  */
+import { CREDENTIAL_BROKER_AUD, type ReplayDedupe } from '@qm/auth'
+import type { AuditLog, CredentialUsageSink } from '@qm/admin'
 import type { SecretDropStore } from '../services/secret-drop-store.ts'
 import type { EgressAuditSink } from '../services/egress-audit-sink.ts'
+import { brokerCredentialCall, realBrokerFetch, type BrokerFetch, type ServiceCredentialReader } from '../credential-broker.ts'
 import { badRequest, isObj, sendJson, type ApiRouteContext, type Route } from './framework.ts'
 
 // --- credentials broker ---
 
-export function credentialRoutes(): ReadonlyArray<Route> {
+export interface CredentialDeps {
+  orgScope: string
+  /** Service credential reader (the keychain); the route 404s without one. */
+  reader?: ServiceCredentialReader
+  fetchImpl?: BrokerFetch
+  usage?: CredentialUsageSink
+  auditLog?: AuditLog
+}
+
+export function credentialRoutes(deps: CredentialDeps): ReadonlyArray<Route> {
   return [
     {
       method: 'POST',
       path: '/v1/credentials/broker',
-      auth: { aud: 'credential-broker' },
+      auth: { aud: CREDENTIAL_BROKER_AUD },
       handle: async (ctx) => {
-        void ctx
-        return sendJson(ctx, 404, { error: 'not_found' })
+        if (!deps.reader) return sendJson(ctx, 404, { error: 'not_found' })
+        const capability = ctx.capability!
+        const result = await brokerCredentialCall({
+          claims: capability,
+          body: (isObj(ctx.body) ? ctx.body : {}) as Record<string, unknown>,
+          orgScopeId: deps.orgScope,
+          reader: deps.reader,
+          fetchImpl: deps.fetchImpl ?? realBrokerFetch,
+          ...(deps.usage ? { usage: deps.usage } : {}),
+          audit: (event) =>
+            deps.auditLog?.record({
+              at: Date.now(),
+              principalId: event.principalId,
+              action: event.action,
+              resource: event.resource,
+              scopeLabel: event.scopeLabel,
+              ...(event.status !== undefined ? { status: event.status } : {}),
+              ...(event.detail !== undefined ? { detail: event.detail } : {}),
+            }),
+        })
+        return sendJson(ctx, result.status, result.json)
       },
     },
   ]
@@ -29,15 +61,23 @@ export function credentialRoutes(): ReadonlyArray<Route> {
 
 export interface SecretDropDeps {
   drops: SecretDropStore
+  /** Public web base URL; without it `url` is the form path itself. */
+  publicUrl?: string
+  orgId?: string
 }
 
 const MAX_DROP_FIELDS = 8
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
 
-function parseDropFields(raw: unknown): Array<{ key: string; label?: string; secret: boolean }> | undefined | 'invalid' {
-  if (raw === undefined) return undefined
+interface DropFieldInput {
+  key: string
+  label?: string
+  secret?: boolean
+}
+
+function parseDropFields(raw: unknown): DropFieldInput[] | 'invalid' {
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_DROP_FIELDS) return 'invalid'
-  const out: Array<{ key: string; label?: string; secret: boolean }> = []
+  const out: DropFieldInput[] = []
   const seen = new Set<string>()
   for (const f of raw) {
     const key = (f as { key?: unknown })?.key
@@ -45,12 +85,12 @@ function parseDropFields(raw: unknown): Array<{ key: string; label?: string; sec
     seen.add(key)
     const labelRaw = (f as { label?: unknown })?.label
     const label = typeof labelRaw === 'string' && labelRaw.trim() ? labelRaw.trim().slice(0, 80) : undefined
-    out.push({ key, ...(label ? { label } : {}), secret: (f as { secret?: unknown }).secret === false ? false : true })
+    const secretRaw = (f as { secret?: unknown })?.secret
+    const secret = secretRaw === false ? false : true
+    out.push({ key, ...(label ? { label } : {}), ...(secret === false ? { secret } : {}) })
   }
   return out
 }
-
-void parseDropFields
 
 function formFieldsHtml(fields?: Array<{ key: string; label?: string; secret?: boolean }>): string {
   const resolved =
@@ -63,12 +103,54 @@ function formFieldsHtml(fields?: Array<{ key: string; label?: string; secret?: b
 }
 
 async function mintDrop(ctx: ApiRouteContext, deps: SecretDropDeps): Promise<unknown> {
-  void deps.drops
-  void ctx
-  return sendJson(ctx, 401, {
-    error: 'unauthorized',
-    message: 'secret-drop mint requires an agent capability token',
+  const capability = ctx.capability
+  if (!capability) {
+    return sendJson(ctx, 401, {
+      error: 'unauthorized',
+      message: 'secret-drop mint requires an agent capability token',
+    })
+  }
+  if (capability.triggered) {
+    return sendJson(ctx, 403, { error: 'forbidden', message: 'automated triggers cannot mint secret drops' })
+  }
+  const b = (isObj(ctx.body) ? ctx.body : {}) as {
+    title?: unknown
+    purpose?: unknown
+    fields?: unknown
+    grantMode?: unknown
+  }
+  const purpose = typeof b.purpose === 'string' && b.purpose.trim() ? b.purpose.trim().slice(0, 200) : undefined
+  if (!purpose) return badRequest(ctx, 'purpose required')
+  const service = typeof b.title === 'string' && b.title.trim() ? b.title.trim().slice(0, 120) : 'credential'
+  let fields: DropFieldInput[] | undefined
+  if (b.fields !== undefined) {
+    const parsed = parseDropFields(b.fields)
+    if (parsed === 'invalid') {
+      return badRequest(ctx, `fields must hold 1 to ${MAX_DROP_FIELDS} { key, label?, secret? } entries with unique env-style keys`)
+    }
+    fields = parsed
+  }
+  if (b.grantMode !== undefined && b.grantMode !== 'once' && b.grantMode !== 'standing') {
+    return badRequest(ctx, 'grantMode must be "once" or "standing"')
+  }
+  const { dropId } = await deps.drops.mint({
+    ownerId: capability.actorId,
+    ...(deps.orgId ? { orgId: deps.orgId } : {}),
+    service,
+    purpose,
+    requestedBy: capability.actorId,
+    ...(fields ? { fields } : {}),
+    ...(b.grantMode !== undefined ? { grantMode: b.grantMode } : {}),
+    ...(capability.threadRef ? { threadRef: capability.threadRef } : {}),
+    ...(capability.scopeId ? { audienceScopeId: capability.scopeId } : {}),
+    requiresToken: true,
   })
+  const formPath = `/v1/keychain/drops/${dropId}/form`
+  return {
+    dropId,
+    formPath,
+    url: deps.publicUrl ? `${deps.publicUrl.replace(/\/$/, '')}${formPath}` : formPath,
+  }
 }
 
 async function dropForm(ctx: ApiRouteContext, deps: SecretDropDeps): Promise<void> {
@@ -224,19 +306,60 @@ export function egressAuditRoutes(deps: { sink: EgressAuditSink }): ReadonlyArra
 
 // --- auth broker ---
 
-export function authBrokerRoutes(): ReadonlyArray<Route> {
+const CLAIM_NAMESPACE = 'authbroker:'
+const MAX_CLAIM_IDS = 64
+const MAX_CLAIM_ID_LENGTH = 200
+const MAX_CLAIM_HORIZON_MS = 24 * 60 * 60 * 1000
+
+export interface AuthBrokerDeps {
+  replayDedupe?: ReplayDedupe
+}
+
+export function authBrokerRoutes(deps: AuthBrokerDeps = {}): ReadonlyArray<Route> {
   return [
     {
       method: 'POST',
       path: '/v1/auth/broker/claim',
       auth: 'source',
       handle: async (ctx) => {
-        void ctx
-        return sendJson(ctx, 503, {
-          error: 'not_configured',
-          message:
-            'single-use claims need the Postgres-backed replay store; set DATABASE_URL so a restart cannot resurrect a spent sign-in link',
-        })
+        if (!deps.replayDedupe?.durable) {
+          return sendJson(ctx, 503, {
+            error: 'not_configured',
+            message:
+              'single-use claims need the Postgres-backed replay store; set DATABASE_URL so a restart cannot resurrect a spent sign-in link',
+          })
+        }
+        const b = isObj(ctx.body) ? ctx.body : {}
+        const ids: unknown[] = Array.isArray(b.ids) ? b.ids : []
+        if (
+          ids.length === 0 ||
+          ids.length > MAX_CLAIM_IDS ||
+          !ids.every((id) => typeof id === 'string' && id.length > 0 && id.length <= MAX_CLAIM_ID_LENGTH)
+        ) {
+          return sendJson(ctx, 400, {
+            error: 'bad_request',
+            message: `ids must hold 1 to ${MAX_CLAIM_IDS} non-empty strings of at most ${MAX_CLAIM_ID_LENGTH} characters`,
+          })
+        }
+        const now = Date.now()
+        const expiresAtMs = b.expiresAtMs
+        if (
+          typeof expiresAtMs !== 'number' ||
+          !Number.isFinite(expiresAtMs) ||
+          expiresAtMs <= now ||
+          expiresAtMs > now + MAX_CLAIM_HORIZON_MS
+        ) {
+          return sendJson(ctx, 400, {
+            error: 'bad_request',
+            message: 'expiresAtMs must be a future epoch-millisecond timestamp within 24 hours',
+          })
+        }
+        for (const id of ids as string[]) {
+          if (await deps.replayDedupe.claim(`${CLAIM_NAMESPACE}${id}`, expiresAtMs)) {
+            return sendJson(ctx, 200, { claimed: id })
+          }
+        }
+        return sendJson(ctx, 200, { claimed: null })
       },
     },
     {

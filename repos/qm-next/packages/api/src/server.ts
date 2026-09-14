@@ -36,7 +36,7 @@ import { registerRawRouteTable } from './routes/raw-framework.ts'
 import { adminRoutes, type AdminDeps } from './routes/admin-routes.ts'
 import { skillPackRoutes, type SkillPackDeps } from './routes/skill-pack-routes.ts'
 import { userModelAuthRoutes, type UserModelAuthDeps } from './routes/user-model-auth-routes.ts'
-import { authBrokerRoutes, credentialRoutes, egressAuditRoutes, emojiRoutes, secretDropRoutes, type SecretDropDeps } from './routes/parity-lanes-routes.ts'
+import { authBrokerRoutes, credentialRoutes, egressAuditRoutes, emojiRoutes, secretDropRoutes, type AuthBrokerDeps, type CredentialDeps, type SecretDropDeps } from './routes/parity-lanes-routes.ts'
 
 export interface ApiDeps {
   orchestrator: Orchestrator
@@ -101,10 +101,10 @@ export interface ApiDeps {
   emoji?: boolean
   /** Parity surface (11.0): egress audit sink ingest. */
   egressAudit?: { sink: NonNullable<AdminDeps['egressAudit']> }
-  /** Parity surface (11.0): credential broker gate (service creds 12.0). */
-  credentials?: boolean
-  /** Parity surface (11.0): auth broker claim/email-allowed gates. */
-  authBroker?: boolean
+  /** Credential broker (12.0): aud-gated service-credential calls. */
+  credentials?: CredentialDeps
+  /** Auth broker (12.0): durable single-use nonce claims + email gate. */
+  authBroker?: AuthBrokerDeps
 }
 
 export interface ApiServerOptions {
@@ -240,7 +240,7 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
     registerRawRouteTable(app, opts, webhookRawRoutes(deps.webhooks))
   }
   if (deps.blobs) {
-    registerRawRouteTable(app, opts, blobRoutes(deps.blobs))
+    registerRawRouteTable(app, opts, blobRoutes(deps.blobs, opts.secrets))
   }
   if (deps.admin) {
     registerRouteTable(app, opts, adminRoutes(deps.admin))
@@ -261,10 +261,10 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
     registerRouteTable(app, opts, egressAuditRoutes(deps.egressAudit))
   }
   if (deps.credentials) {
-    registerRouteTable(app, opts, credentialRoutes())
+    registerRouteTable(app, opts, credentialRoutes(deps.credentials))
   }
   if (deps.authBroker) {
-    registerRouteTable(app, opts, authBrokerRoutes())
+    registerRouteTable(app, opts, authBrokerRoutes(deps.authBroker))
   }
 
   app.get('/v1/runs/:id', async (request, reply) => {

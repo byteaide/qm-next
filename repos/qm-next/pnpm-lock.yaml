@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@aws-sdk/client-sts':
+        specifier: 3.1075.0
+        version: 3.1075.0
     devDependencies:
       '@qm/api':
         specifier: workspace:*
@@ -51,8 +55,30 @@ importers:
         specifier: ^5.6.0
         version: 5.9.3
 
+  packages/admin:
+    dependencies:
+      '@qm/store':
+        specifier: workspace:^
+        version: link:../store
+      '@qm/types':
+        specifier: workspace:^
+        version: link:../types
+      pg:
+        specifier: ^8.13.0
+        version: 8.23.0
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.23.1
+
   packages/api:
     dependencies:
+      '@qm/admin':
+        specifier: workspace:^
+        version: link:../admin
+      '@qm/auth':
+        specifier: workspace:^
+        version: link:../auth
       '@qm/cordis':
         specifier: workspace:^
         version: link:../../vendor/cordis
@@ -128,6 +154,25 @@ importers:
       '@qm/types':
         specifier: workspace:^
         version: link:../types
+      pg:
+        specifier: ^8.13.0
+        version: 8.23.0
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.23.1
+
+  packages/auth:
+    dependencies:
+      '@aws-sdk/client-sts':
+        specifier: ^3.1075.0
+        version: 3.1075.0
+      '@qm/store':
+        specifier: workspace:^
+        version: link:../store
+      jose:
+        specifier: ^6.2.3
+        version: 6.2.12
       pg:
         specifier: ^8.13.0
         version: 8.23.0
@@ -819,6 +864,10 @@ packages:
 
   '@aws-sdk/client-bedrock-runtime@3.1048.0':
     resolution: {integrity: sha512-u+NT61JZEkRFtpL0CAw1N1dwxnaLgwVXQl/zjJxTGgLyS/jTIdg2SdoEoCTHxgDyCnqa1HEi9QOoE9/pYRNpOQ==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/client-sts@3.1075.0':
+    resolution: {integrity: sha512-R3cIPHb+Y25nbnIJp1VVQCKA+ajZ06vprGFaRG/nu9ypfo5HRsZj+3We1H1nmIyqzgGMdkoMqMS2XujxuCJXaA==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/core@3.978.0':
@@ -3275,6 +3324,20 @@ snapshots:
       '@aws-sdk/middleware-eventstream': 3.972.29
       '@aws-sdk/middleware-websocket': 3.972.53
       '@aws-sdk/token-providers': 3.1048.0
+      '@aws-sdk/types': 3.974.5
+      '@smithy/core': 3.34.1
+      '@smithy/fetch-http-handler': 5.8.0
+      '@smithy/node-http-handler': 4.12.1
+      '@smithy/types': 4.18.0
+      tslib: 2.8.1
+
+  '@aws-sdk/client-sts@3.1075.0':
+    dependencies:
+      '@aws-crypto/sha256-browser': 5.2.0
+      '@aws-crypto/sha256-js': 5.2.0
+      '@aws-sdk/core': 3.978.0
+      '@aws-sdk/credential-provider-node': 3.972.83
+      '@aws-sdk/signature-v4-multi-region': 3.996.46
       '@aws-sdk/types': 3.974.5
       '@smithy/core': 3.34.1
       '@smithy/fetch-http-handler': 5.8.0

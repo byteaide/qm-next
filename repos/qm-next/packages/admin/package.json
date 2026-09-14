@@ -1,0 +1,20 @@
+{
+  "name": "@qm/admin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Admin control plane: org-admin grant store + service, turn-metrics/error-log/credential-usage/egress-audit/audit sinks (memory and Postgres), retention/attribution/users analytics, invite email — durable-by-default",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@qm/store": "workspace:^",
+    "@qm/types": "workspace:^",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0"
+  }
+}

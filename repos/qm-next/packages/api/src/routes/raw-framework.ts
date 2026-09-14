@@ -3,13 +3,14 @@
  * hijack the request in onRequest (before body parsing) so handlers see
  * the exact request bytes — the qm BaseCtx lane for /v1/blobs and
  * /v1/webhooks/incoming/:id. Auth reuses the bearer semantics of the
- * declarative table; source-signed payload verification lands with the
- * control plane (12.0).
+ * declarative table plus the x-agent-capability ladder (12.0 control
+ * plane); source-signed payload verification stays mapped onto bearers.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { Principal } from '@qm/types'
+import { verifyCapabilityToken, type CapabilityClaims } from '@qm/auth'
 import { authenticateBearerWithClaims, type AuthenticatedRequest } from '../auth.ts'
-import type { RouteAuth } from './framework.ts'
+import { CAPABILITY_HEADER, type RouteAuth } from './framework.ts'
 
 export interface RawRouteContext {
   req: FastifyRequest
@@ -19,7 +20,7 @@ export interface RawRouteContext {
   url: URL
   rawBody: Buffer
   actor: Principal | null
-  capability: null
+  capability: CapabilityClaims | null
 }
 
 export interface RawRoute {
@@ -73,8 +74,22 @@ function collectBody(req: FastifyRequest, limit: number): Promise<Buffer> {
 export function registerRawRouteTable(app: FastifyInstance, opts: { secrets: string[] }, table: ReadonlyArray<RawRoute>): void {
   for (const route of table) {
     const handler = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+      let capability: CapabilityClaims | null = null
+      const capHeader = req.headers[CAPABILITY_HEADER]
+      const capToken = Array.isArray(capHeader) ? capHeader[0] : capHeader
+      if (typeof capToken === 'string' && capToken) {
+        capability = await verifyCapabilityToken(capToken, opts.secrets)
+        if (!capability) {
+          reply.hijack()
+          return rawSendJson(
+            { req, reply, params: {}, query: {}, url: new URL('http://localhost'), rawBody: Buffer.alloc(0), actor: null, capability: null },
+            401,
+            { error: 'unauthorized', message: 'invalid or expired capability token' },
+          )
+        }
+      }
       let authed: AuthenticatedRequest | null = null
-      if (route.auth !== 'public') {
+      if (!capability && route.auth !== 'public') {
         authed = await authenticateBearerWithClaims(req.headers.authorization, opts.secrets)
         if (route.auth === 'source') {
           if (!authed) return reply.code(401).send({ error: 'unauthorized', message: 'missing or invalid bearer token' })
@@ -108,8 +123,8 @@ export function registerRawRouteTable(app: FastifyInstance, opts: { secrets: str
         query: (req.query ?? {}) as Record<string, string>,
         url: new URL(req.url, 'http://localhost'),
         rawBody,
-        actor: authed?.principal ?? null,
-        capability: null,
+        actor: capability ? { id: capability.actorId, type: 'internal' } : (authed?.principal ?? null),
+        capability,
       }
       await route.handle(ctx)
     }

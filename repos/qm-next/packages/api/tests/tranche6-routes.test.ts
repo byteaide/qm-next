@@ -155,7 +155,7 @@ test('files: staged upload, list, inline content, wrong-context 403, staged-miss
 
 test('grants: apply/revoke ladder, invalid bodies, share capability 403', async () => {
   const grants = createMemoryGrantLedger()
-  const app = createApiServer({ ...baseDeps(), grants: { grants } }, OPTS)
+  const app = createApiServer({ ...baseDeps(), grants: { grants, orgScope: 'org:default' } }, OPTS)
   const ada = auth(await token('person:ada'))
 
   const bad = await app.inject({ method: 'POST', url: '/v1/grants', headers: ada, payload: { ownerScopeId: 'personal:person:ada' } })
@@ -459,7 +459,7 @@ test('connectors: token register + status, revoke by host, unknown provider 404,
   assert.equal(start.json().message, 'unknown OAuth provider: notion')
 
   const consentMint = await app.inject({ method: 'POST', url: '/v1/connectors/oauth/consent/mint', headers: ada, payload: { provider: 'github' } })
-  assert.equal(consentMint.statusCode, 403, 'audience oauth-consent required rejects ordinary tokens')
+  assert.equal(consentMint.statusCode, 401, 'audience oauth-consent required rejects ordinary tokens')
 
   const redeem = await app.inject({ method: 'GET', url: '/v1/connectors/oauth/consent/redeem/abc', headers: ada })
   assert.equal(redeem.statusCode, 404)

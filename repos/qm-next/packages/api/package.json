@@ -10,6 +10,8 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@qm/admin": "workspace:^",
+    "@qm/auth": "workspace:^",
     "@qm/credentials": "workspace:^",
     "@qm/cordis": "workspace:^",
     "@qm/directory": "workspace:^",

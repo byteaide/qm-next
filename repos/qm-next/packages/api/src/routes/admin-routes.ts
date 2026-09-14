@@ -1,12 +1,15 @@
 /**
- * /v1/admin — the qm admin surface over lane-A stores. Guard ladder is
- * qm-verbatim: no admin service → 404; missing `?scope=` → 400; a caller
- * without an org-admin grant → 403 "admin grant required for this scope";
- * every handler is timed()-wrapped. Observability aggregates, identity,
- * model credentials, MCP servers, and the policy engine are not wired in
- * lane A and answer qm's unwired shapes (deviation #46).
+ * /v1/admin — the qm admin surface over the 12.0 control plane. Guard
+ * ladder is qm-verbatim: no admin service → 404; missing `?scope=` → 400;
+ * a caller without an org-admin grant → 403 "admin grant required for this
+ * scope"; every handler is timed()-wrapped. Observability reads the real
+ * sinks (turn metrics, error log, credential usage, egress audit, operator
+ * audit log); model credentials, MCP servers, slack-emoji, and the
+ * sandbox-routes surface still answer qm's unwired shapes until their
+ * subsystems converge (deviation #46).
  */
 import { parseScopeId } from '@qm/types'
+import { cacheHitRatio, isStablePrefixMiss, type CredentialUsageSink, type EgressAuditSink, type ErrorLog, type AuditLog, type MetricsSink, type TurnMetricSample } from '@qm/admin'
 import type { ScopeMemory } from '@qm/memory'
 import type { SessionStore, RunStore } from '@qm/types'
 import type { CronStore } from '@qm/triggers'
@@ -16,8 +19,6 @@ import {
   adminStatusFromGrants,
   type AdminService,
 } from '../services/admin-service.ts'
-import type { AuditLog } from '../services/audit-log.ts'
-import type { EgressAuditSink } from '../services/egress-audit-sink.ts'
 import type { DirectoryStore } from '@qm/directory'
 import type { EnvironmentRegistry } from '../services/environment-registry.ts'
 import type { SkillStore } from '@qm/skills'
@@ -42,6 +43,9 @@ export interface AdminDeps {
   environments?: EnvironmentRegistry
   egressAudit?: EgressAuditSink
   auditLog?: AuditLog
+  metrics?: MetricsSink
+  errors?: ErrorLog
+  credentialUsage?: CredentialUsageSink
 }
 
 interface Authz {
@@ -234,59 +238,153 @@ function latencySummary(values: number[]): { count: number; p50: number | null; 
   return { count: sorted.length, p50: pct(50), p95: pct(95), p99: pct(99) }
 }
 
+const METRICS_SCAN_LIMIT = 10000
+
 async function metrics(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const authz = await requireScopedAdmin(ctx, deps)
   if (!authz) return undefined
+  const orgWide = parseScopeId(authz.scope).kind === 'org'
+  const samples =
+    (await deps.metrics?.list({
+      limit: METRICS_SCAN_LIMIT,
+      ...(orgWide ? {} : { scopeId: authz.scope }),
+    })) ?? []
+  const relevant = samples.filter((s) => s.status !== 'capture')
+  const ttft = latencySummary(relevant.map((s) => s.ttftMs).filter((n): n is number => typeof n === 'number'))
+  const turnLatency = latencySummary(relevant.map((s) => s.totalMs))
+  const byDay = new Map<string, { ttfts: number[]; turns: number }>()
+  for (const s of relevant) {
+    const day = new Date(s.ts).toISOString().slice(0, 10)
+    const bucket = byDay.get(day) ?? { ttfts: [] as number[], turns: 0 }
+    bucket.turns += 1
+    if (typeof s.ttftMs === 'number') bucket.ttfts.push(s.ttftMs)
+    byDay.set(day, bucket)
+  }
+  const series = [...byDay.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([day, b]) => {
+      const t = latencySummary(b.ttfts)
+      return { day, turns: b.turns, ttftP50: t.p50, ttftP95: t.p95 }
+    })
+  const ratios = relevant.map((s) => cacheHitRatio(s)).filter((r): r is number => r !== null)
+  const missFlags = relevant.map((s) => isStablePrefixMiss(s)).filter((m): m is boolean => m !== null)
+  const misses = missFlags.filter((m) => m).length
+  const sum = (f: (s: TurnMetricSample) => number | undefined) =>
+    relevant.reduce((n, s) => n + (f(s) ?? 0), 0)
+  const cache = {
+    samples: ratios.length,
+    avgHitRatio: ratios.length ? ratios.reduce((a, b) => a + b, 0) / ratios.length : null,
+    missTurns: misses,
+    missRate: missFlags.length ? misses / missFlags.length : null,
+    cacheReadTotal: sum((s) => s.cacheRead),
+    cacheWriteTotal: sum((s) => s.cacheWrite),
+    uncachedInputTotal: sum((s) => s.uncachedInput),
+  }
+  const runs = (await deps.runs?.list({ limit: 500 })) ?? []
+  const done = runs.filter((r) => r.status === 'done').length
+  const failed = runs.filter((r) => r.status === 'failed').length
+  const finished = done + failed
   return {
     scopeId: authz.scope,
-    ttft: latencySummary([]),
-    turnLatency: latencySummary([]),
-    series: [],
-    throughput: { total: 0, done: 0, failed: 0, failureRate: 0 },
+    ttft,
+    turnLatency,
+    runLatency: latencySummary([]),
     queueWait: latencySummary([]),
+    throughput: { total: runs.length, done, failed, failureRate: finished ? failed / finished : 0 },
+    series,
+    cache,
   }
 }
 
 async function egress(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const authz = await requireScopedAdmin(ctx, deps)
   if (!authz) return undefined
-  const records = (await deps.egressAudit?.list({ scopeId: authz.scope })) ?? []
-  const hosts = new Map<string, number>()
-  const bySource = new Map<string, number>()
-  let denied = 0
-  for (const r of records) {
-    hosts.set(r.host, (hosts.get(r.host) ?? 0) + 1)
-    bySource.set(r.source, (bySource.get(r.source) ?? 0) + 1)
-    if (!r.allowed) denied++
-  }
-  return {
-    scopeId: authz.scope,
-    records: records.slice(-1000),
-    total: records.length,
-    denied,
-    hosts: Object.fromEntries([...hosts.entries()].sort((a, b) => b[1] - a[1])),
-    bySource: Object.fromEntries(bySource),
-  }
+  const brokerRows = ((await deps.credentialUsage?.list({ scopeId: authz.scope, limit: 1000 })) ?? []).map((s) => ({
+    ts: s.ts,
+    source: 'broker' as string,
+    host: s.host,
+    scopeLabel: s.scopeLabel,
+    principalId: s.principalId,
+    allowed: s.status !== 'denied',
+    status: s.status,
+    slug: s.slug,
+    ...(s.upstreamStatus !== undefined ? { upstreamStatus: s.upstreamStatus } : {}),
+  }))
+  const firewallRows = ((await deps.egressAudit?.list({ scopeId: authz.scope, limit: 1000 })) ?? []).map((e) => ({
+    ts: e.ts,
+    source: e.source,
+    host: e.host,
+    scopeLabel: e.scopeLabel,
+    allowed: e.allowed,
+    status: e.verdict ?? (e.allowed ? 'ok' : 'denied'),
+    ...(e.principalId !== undefined ? { principalId: e.principalId } : {}),
+    ...(e.port !== undefined ? { port: e.port } : {}),
+    ...(e.via !== undefined ? { via: e.via } : {}),
+    ...(e.peerIp !== undefined ? { peerIp: e.peerIp } : {}),
+  }))
+  const records = [...brokerRows, ...firewallRows].sort((a, b) => b.ts - a.ts).slice(0, 1000)
+  const denied = records.filter((r) => !r.allowed).length
+  const hosts = new Set(records.map((r) => r.host).filter(Boolean)).size
+  const bySource = { broker: brokerRows.length, firewall: firewallRows.length }
+  return { scopeId: authz.scope, records, total: records.length, denied, hosts, bySource }
 }
 
 async function listAdminRuns(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const authz = await requireScopedAdmin(ctx, deps)
   if (!authz) return undefined
-  void deps.runs
-  return { scopeId: authz.scope, active: 0, runs: [] }
+  const rawRuns = (await deps.runs?.list({ limit: 200 })) ?? []
+  const ACTIVE = new Set(['pending', 'running'])
+  const runs = rawRuns.map((r) => ({
+    id: r.id,
+    status: r.status,
+    sessionScope: null,
+    sessionType: null,
+    threadRef: r.sessionId,
+    attempts: r.attempts,
+    maxAttempts: r.maxAttempts,
+    workerId: r.workerId,
+    leaseExpiresAt: r.leaseExpiresAt,
+    createdAt: r.createdAt,
+    startedAt: r.startedAt,
+    finishedAt: r.finishedAt,
+  }))
+  const active = runs.filter((r) => ACTIVE.has(r.status)).length
+  return { scopeId: authz.scope, active, runs }
 }
 
 async function listAdminErrors(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const authz = await requireScopedAdmin(ctx, deps)
   if (!authz) return undefined
-  return { scopeId: authz.scope, errors: [] }
+  const orgWide = parseScopeId(authz.scope).kind === 'org'
+  const sessionId = ctx.query.sessionId || undefined
+  const query = {
+    ...(orgWide ? {} : { scopeId: authz.scope }),
+    ...(sessionId ? { sessionId } : {}),
+  }
+  if (ctx.query.count) {
+    const total = (await deps.errors?.count(query)) ?? 0
+    return { scopeId: authz.scope, total }
+  }
+  const errors = ((await deps.errors?.list(query)) ?? []).sort((a, b) => b.ts - a.ts).slice(0, 200)
+  return { scopeId: authz.scope, errors }
 }
 
 async function listAdminAudit(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const authz = await requireScopedAdmin(ctx, deps)
   if (!authz) return undefined
-  const events = (await deps.auditLog?.tail({ limit: 200 })) ?? []
-  return { scopeId: authz.scope, events }
+  const orgWide = parseScopeId(authz.scope).kind === 'org'
+  const events = (await deps.auditLog?.tail({ limit: 200, ...(orgWide ? {} : { scopeLabel: authz.scope }) })) ?? []
+  return {
+    scopeId: authz.scope,
+    events: events.map((e) => ({
+      ts: e.at,
+      principalId: e.principalId,
+      action: e.action,
+      scopeLabel: e.scopeLabel,
+      resource: e.resource,
+      ...(e.status ? { status: e.status } : {}),
+    })),
+  }
 }
 
 // --- sessions / slack-mirror ---

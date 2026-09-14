@@ -6,6 +6,28 @@
  * deployments swap each piece without touching the others.
  */
 import { Context, Service } from '@qm/cordis'
+import {
+  bootAdminGrantSeed,
+  createAdminGrantStore,
+  createAuditLog,
+  createCredentialUsageSink,
+  createErrorLog,
+  createEgressAuditSink,
+  createMemoryAdminGrantPersistence,
+  createMetricsSink,
+  createPostgresAdminGrantStore,
+  createPostgresAuditLog,
+  createPostgresCredentialUsageSink,
+  createPostgresEgressAuditSink,
+  createPostgresErrorLog,
+  createPostgresMetricsSink,
+  type AuditLog,
+  type CredentialUsageSink,
+  type ErrorLog,
+  type EgressAuditSink,
+  type MetricsSink,
+} from '@qm/admin'
+import { createMemoryReplayDedupe, createPostgresReplayDedupe, type ReplayDedupe } from '@qm/auth'
 import { createMemoryDirectoryStore } from '@qm/directory'
 import { createKeychain, deriveConnectorKey } from '@qm/credentials'
 import { createClaudeHarness } from '@qm/harness-claude'
@@ -25,14 +47,12 @@ import { createMemoryMap } from '@qm/store'
 import { reachDirectory } from '@qm/reach'
 import {
   createMemoryAdminService,
-  createMemoryAuditLog,
   createMemoryBlobTransfer,
   createMemoryChannelPolicyStore,
   createMemoryConnectorTokenStore,
   createMemoryDeploymentLayerStore,
   createMemoryDeploymentStore,
   createMemoryEnvironmentRegistry,
-  createMemoryEgressAuditSink,
   createMemoryFileStore,
   createMemoryGrantLedger,
   createMemoryProjectStore,
@@ -43,6 +63,7 @@ import {
   createMemorySurfaceCacheStore,
   createMemoryUserModelCredentialsStore,
   createMemoryWebhookStore,
+  createPostgresSlackMap,
   createSurfaceContextQueue,
 } from './services/index.ts'
 import type { CronScheduler, CronStore } from '@qm/triggers'
@@ -141,10 +162,14 @@ export interface ApiConfig {
   webhooks?: boolean
   /** Blobs surface (11.0): raw blob staging put/get. */
   blobs?: boolean
-  /** Admin surface (11.0): qm admin lanes over lane-A stores. */
+  /** Admin surface (11.0): qm admin lanes over the 12.0 control plane. */
   admin?: boolean
   /** Bootstrap org admins when the admin surface is on. */
   admins?: string[]
+  /** qm ADMIN_GRANTS grammar (`principal:role,…`) seeding durable grant stores. */
+  adminGrants?: string
+  /** Postgres connection string; durable-by-default swaps every memory store for its PG twin. */
+  databaseUrl?: string
   /** Skill-pack management (11.0). */
   skillPacks?: boolean
   /** Per-principal model credentials (11.0). */
@@ -223,6 +248,8 @@ export const Config = Schema.object({
   blobs: Schema.boolean().description('Blobs surface (11.0): raw blob staging'),
   admin: Schema.boolean().description('Admin surface (11.0): qm admin lanes'),
   admins: Schema.array(Schema.string()).description('Bootstrap org admins (principal ids)'),
+  adminGrants: Schema.string().description('qm ADMIN_GRANTS grammar (principal:role,...) seeding durable grant stores'),
+  databaseUrl: Schema.string().description('Postgres connection string; swaps memory stores for durable PG twins'),
   skillPacks: Schema.boolean().description('Skill-pack management (11.0)'),
   userModelAuth: Schema.boolean().description('Per-principal model credentials (11.0)'),
   secretDrops: Schema.boolean().description('Secret-drop links (11.0)'),
@@ -446,14 +473,56 @@ export class ApiService extends Service<ApiConfig> {
     const connectorTokens = this.config.connectors ? createMemoryConnectorTokenStore() : undefined
     const webhookStore = this.config.webhooks ? createMemoryWebhookStore() : undefined
     const orgId = (this.config.scopeId ?? 'org:default').replace(/^org:/, '')
-    const adminService = this.config.admin
-      ? createMemoryAdminService({ orgId, ...(this.config.admins?.length ? { seedAdmins: this.config.admins } : {}) })
+    const databaseUrl = this.config.databaseUrl
+    // Control-plane sinks (12.0): durable-by-default — Postgres twins when
+    // databaseUrl is set, in-memory rings otherwise.
+    let metrics: MetricsSink | undefined
+    let errors: ErrorLog | undefined
+    let credentialUsage: CredentialUsageSink | undefined
+    let egressAuditSink: EgressAuditSink | undefined
+    let adminAuditLog: AuditLog | undefined
+    let replayDedupe: ReplayDedupe | undefined
+    const adminGrantStore =
+      this.config.admin || this.config.authBroker || this.config.credentials
+        ? createAdminGrantStore(
+            databaseUrl ? createPostgresAdminGrantStore(databaseUrl) : createMemoryAdminGrantPersistence(),
+            {
+              seed: this.config.admins?.length
+                ? this.config.admins.map((principalId) => ({ principalId, scopeId: `org:${orgId}`, role: 'org_admin' as const }))
+                : bootAdminGrantSeed(this.config.adminGrants, orgId, Boolean(databaseUrl)),
+            },
+          )
+        : undefined
+    const adminService = adminGrantStore
+      ? createMemoryAdminService({
+          orgId,
+          grants: adminGrantStore,
+          ...(databaseUrl
+            ? { slackMap: createPostgresSlackMap((await import('@qm/store')).createPgPool(databaseUrl, [])) }
+            : {}),
+        })
       : undefined
+    if (this.config.admin) {
+      metrics = databaseUrl ? createPostgresMetricsSink(databaseUrl) : createMetricsSink()
+      errors = databaseUrl ? createPostgresErrorLog(databaseUrl) : createErrorLog()
+      credentialUsage = databaseUrl ? createPostgresCredentialUsageSink(databaseUrl) : createCredentialUsageSink()
+      egressAuditSink = databaseUrl ? createPostgresEgressAuditSink(databaseUrl) : createEgressAuditSink()
+      adminAuditLog = databaseUrl ? createPostgresAuditLog(databaseUrl) : createAuditLog()
+    }
+    if (this.config.egressAudit && !egressAuditSink) {
+      egressAuditSink = databaseUrl ? createPostgresEgressAuditSink(databaseUrl) : createEgressAuditSink()
+    }
+    if (this.config.credentials) {
+      credentialUsage =
+        credentialUsage ?? (databaseUrl ? createPostgresCredentialUsageSink(databaseUrl) : createCredentialUsageSink())
+      adminAuditLog = adminAuditLog ?? (databaseUrl ? createPostgresAuditLog(databaseUrl) : createAuditLog())
+    }
+    if (this.config.authBroker) {
+      replayDedupe = databaseUrl ? createPostgresReplayDedupe(databaseUrl) : createMemoryReplayDedupe()
+    }
     const skillPackStore = this.config.skillPacks ? createMemorySkillPackStore() : undefined
     const userModelCredentials = this.config.userModelAuth ? createMemoryUserModelCredentialsStore() : undefined
     const secretDropStore = this.config.secretDrops ? createMemorySecretDropStore() : undefined
-    const egressAuditSink = this.config.egressAudit ? createMemoryEgressAuditSink() : undefined
-    const adminAuditLog = this.config.admin ? createMemoryAuditLog() : undefined
     const app = createApiServer(
       {
         orchestrator,
@@ -491,7 +560,16 @@ export class ApiService extends Service<ApiConfig> {
         ...(projectStore ? { projects: { projects: projectStore } } : {}),
         ...(sessionStateBus ? { sessionState: { bus: sessionStateBus } } : {}),
         ...(fileStore ? { files: { files: fileStore, blobTransfer: blobTransfer! } } : {}),
-        ...(grantLedger ? { grants: { grants: grantLedger } } : {}),
+        ...(grantLedger
+          ? {
+              grants: {
+                grants: grantLedger,
+                orgScope: this.config.scopeId ?? 'org:default',
+                ...(fileStore ? { files: fileStore } : {}),
+                ...(directoryStore ? { directory: directoryStore } : {}),
+              },
+            }
+          : {}),
         ...(soulStore ? { soul: { soul: soulStore } } : {}),
         ...(runtimeConfigStore
           ? {
@@ -537,16 +615,28 @@ export class ApiService extends Service<ApiConfig> {
                 ...(environmentRegistry ? { environments: environmentRegistry } : {}),
                 ...(egressAuditSink ? { egressAudit: egressAuditSink } : {}),
                 ...(adminAuditLog ? { auditLog: adminAuditLog } : {}),
+                ...(metrics ? { metrics } : {}),
+                ...(errors ? { errors } : {}),
+                ...(credentialUsage ? { credentialUsage } : {}),
               },
             }
           : {}),
         ...(skillPackStore && adminService ? { skillPacks: { packs: skillPackStore, ...(skillStore ? { skills: skillStore } : {}), orgScope: this.config.scopeId ?? 'org:default', admins: adminService } } : {}),
         ...(userModelCredentials ? { userModelAuth: { credentials: userModelCredentials } } : {}),
-        ...(secretDropStore ? { secretDrops: { drops: secretDropStore } } : {}),
+        ...(secretDropStore ? { secretDrops: { drops: secretDropStore, ...(this.config.publicUrl ? { publicUrl: this.config.publicUrl } : {}), orgId } } : {}),
         ...(this.config.emoji ? { emoji: true } : {}),
         ...(egressAuditSink ? { egressAudit: { sink: egressAuditSink } } : {}),
-        ...(this.config.credentials ? { credentials: true } : {}),
-        ...(this.config.authBroker ? { authBroker: true } : {}),
+        ...(this.config.credentials
+          ? {
+              credentials: {
+                orgScope: this.config.scopeId ?? 'org:default',
+                ...(keychain ? { reader: keychain } : {}),
+                ...(credentialUsage ? { usage: credentialUsage } : {}),
+                ...(adminAuditLog ? { auditLog: adminAuditLog } : {}),
+              },
+            }
+          : {}),
+        ...(this.config.authBroker ? { authBroker: { ...(replayDedupe ? { replayDedupe } : {}) } } : {}),
         crons: {
           crons: () => this.cronsRuntime?.crons,
           scheduler: () => this.cronsRuntime?.scheduler,

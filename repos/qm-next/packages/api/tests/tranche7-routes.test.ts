@@ -391,7 +391,7 @@ test('secret-drops: mint capability 401, form/redeem ladder, single-use redempti
 
 test('emoji gate, egress-audit ingest + admin view, auth-broker gates', async () => {
   const sink = createMemoryEgressAuditSink()
-  const emojiApp = createApiServer({ ...baseDeps(), admin: adminDeps({ egressAudit: sink, auditLog: createMemoryAuditLog() }), emoji: true, egressAudit: { sink }, authBroker: true, grants: { grants: createMemoryGrantLedger() } }, OPTS)
+  const emojiApp = createApiServer({ ...baseDeps(), admin: adminDeps({ egressAudit: sink, auditLog: createMemoryAuditLog() }), emoji: true, egressAudit: { sink }, authBroker: {}, grants: { grants: createMemoryGrantLedger(), orgScope: ORG } }, OPTS)
   const ada = auth(await token('person:ada'))
 
   const emojiNoToken = await emojiApp.inject({ method: 'POST', url: '/v1/emoji', payload: { name: 'x', image: 'aGk=' } })
@@ -424,7 +424,8 @@ test('emoji gate, egress-audit ingest + admin view, auth-broker gates', async ()
   assert.equal(egressView.statusCode, 200)
   assert.equal(egressView.json().total, 2)
   assert.equal(egressView.json().denied, 1)
-  assert.ok(egressView.json().hosts['api.github.com'])
+  assert.equal(egressView.json().hosts, 2)
+  assert.deepEqual(egressView.json().bySource, { broker: 0, firewall: 2 })
 
   const claim = await emojiApp.inject({ method: 'POST', url: '/v1/auth/broker/claim', headers: ada, payload: { ids: ['n1'], expiresAtMs: Date.now() + 1000 } })
   assert.equal(claim.statusCode, 503)

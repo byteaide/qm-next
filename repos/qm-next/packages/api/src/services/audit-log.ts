@@ -1,34 +1,9 @@
 /**
- * Lane-A audit log: in-memory ring of qm AuditEvent rows. Feeds the admin
- * audit view and security flags; the Postgres audit sinks land with 12.0.
+ * The audit log lives in `@qm/admin` (the 12.0 sink home, qm
+ * `src/audit/audit-log.ts`); re-exported here for the api services surface.
  */
-export interface AuditEvent {
-  at: number
-  principalId?: string
-  action: string
-  resource: string
-  scopeLabel?: string
-  status?: string
-  detail?: string
-}
+import { createAuditLog } from '@qm/admin'
 
-export interface AuditLog {
-  record(event: AuditEvent): void
-  tail(opts?: { limit?: number }): Promise<AuditEvent[]>
-}
+export { createAuditLog, type AuditEvent, type AuditLog } from '@qm/admin'
 
-const MAX_EVENTS = 5000
-
-export function createMemoryAuditLog(): AuditLog {
-  const events: AuditEvent[] = []
-  return {
-    record(event) {
-      events.push({ ...event })
-      if (events.length > MAX_EVENTS) events.splice(0, events.length - MAX_EVENTS)
-    },
-    async tail(opts) {
-      const limit = opts?.limit ?? 200
-      return events.slice(-limit).map((e) => ({ ...e }))
-    },
-  }
-}
+export const createMemoryAuditLog = createAuditLog
