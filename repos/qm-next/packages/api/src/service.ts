@@ -13,6 +13,8 @@ import { createCodexHarness } from '@qm/harness-codex'
 import { createOpenCodeHarness } from '@qm/harness-opencode'
 import { createPiHarness } from '@qm/harness-pi'
 import { createModelGateway, setCustomProviders, validateCustomProviderSpec, type CustomProviderSpec } from '@qm/model'
+import { createMemoryScopeMemory } from '@qm/memory'
+import { createMemorySkillStore } from '@qm/skills'
 import type { RuntimeRouteConfig } from '@qm/orchestrator'
 import { createHarnessRouter, createMockHarness, createSandboxToolContext, OrchestratorService } from '@qm/orchestrator'
 import Schema from '@qm/schemastery'
@@ -84,6 +86,10 @@ export interface ApiConfig {
    * Lane A backs it with memory maps; production swaps Postgres maps in.
    */
   keychain?: boolean
+  /** Memory surface (11.0): scope memory behind the /v1/memory routes. */
+  memory?: boolean
+  /** Skills surface (11.0): skill registry behind the /v1/skills routes. */
+  skills?: boolean
 }
 
 export const Config = Schema.object({
@@ -118,6 +124,8 @@ export const Config = Schema.object({
   scopeId: Schema.string().default('org:default').description('Dev default scope for API turns'),
   directory: Schema.boolean().description('Directory sync surface (11.0): in-memory store behind the directory + reach routes'),
   keychain: Schema.boolean().description('Keychain surface (11.0): agent keychain behind the /v1/keychain routes'),
+  memory: Schema.boolean().description('Memory surface (11.0): scope memory behind the /v1/memory routes'),
+  skills: Schema.boolean().description('Skills surface (11.0): skill registry behind the /v1/skills routes'),
 })
 
 function devIdentity(): IdentityService {
@@ -308,6 +316,8 @@ export class ApiService extends Service<ApiConfig> {
           orgId: () => (this.config.scopeId ?? 'org:default').replace(/^org:/, ''),
         })
       : undefined
+    const memoryStore = this.config.memory ? createMemoryScopeMemory() : undefined
+    const skillStore = this.config.skills ? createMemorySkillStore() : undefined
     const app = createApiServer(
       {
         orchestrator,
@@ -323,6 +333,8 @@ export class ApiService extends Service<ApiConfig> {
         },
         ...(directoryStore ? { directory: { directory: directoryStore }, reach: { directory: directoryStore } } : {}),
         ...(keychain ? { keychain: { keychain: () => keychain, scopeFor: (actorId) => `personal:${actorId}` } } : {}),
+        ...(memoryStore ? { memory: { memory: memoryStore, scopeFor: () => this.config.scopeId ?? 'org:default' } } : {}),
+        ...(skillStore ? { skills: { skills: skillStore, scopeFor: () => this.config.scopeId ?? 'org:default' } } : {}),
         crons: {
           crons: () => this.cronsRuntime?.crons,
           scheduler: () => this.cronsRuntime?.scheduler,

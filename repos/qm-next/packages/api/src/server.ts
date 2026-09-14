@@ -14,6 +14,8 @@ import { cronRoutes, type CronRoutesDeps } from './routes/cron-routes.ts'
 import { reachRoutes, type ReachRoutesDeps } from './routes/reach-routes.ts'
 import { keychainRoutes, type KeychainRoutesDeps } from './routes/keychain-routes.ts'
 import { surfaceRoutes, type SurfaceRoutesDeps } from './routes/surface-routes.ts'
+import { memoryRoutes, type MemoryRoutesDeps } from './routes/memory-routes.ts'
+import { skillRoutes, type SkillRoutesDeps } from './routes/skill-routes.ts'
 
 export interface ApiDeps {
   orchestrator: Orchestrator
@@ -30,6 +32,10 @@ export interface ApiDeps {
   keychain?: KeychainRoutesDeps
   /** Parity surface (11.0): sessions/conversations routes over the session store. */
   surface?: SurfaceRoutesDeps
+  /** Parity surface (11.0): personal/agent memory routes when a ScopeMemory is wired. */
+  memory?: MemoryRoutesDeps
+  /** Parity surface (11.0): skill registry routes when a SkillStore is wired. */
+  skills?: SkillRoutesDeps
 }
 
 export interface ApiServerOptions {
@@ -109,6 +115,12 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
   }
   if (deps.surface) {
     registerRouteTable(app, opts, surfaceRoutes(deps.surface))
+  }
+  if (deps.memory) {
+    registerRouteTable(app, opts, memoryRoutes(deps.memory))
+  }
+  if (deps.skills) {
+    registerRouteTable(app, opts, skillRoutes(deps.skills))
   }
 
   app.get('/v1/runs/:id', async (request, reply) => {

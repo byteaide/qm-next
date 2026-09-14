@@ -306,3 +306,18 @@ Each entry names the qm source shape, the qm-next shape, and why.
     `POST /v1/session-cap` answers `503 not_configured` until capability
     minting lands (12.0), and the background views stay dep-gated 404 until
     the sandbox process-sessions lane; approvals answer qm's empty list.
+
+43. **Memory/skills routes ride the lane-A principal as the capability** —
+    qm gates the agent memory face on capability-token memory grants
+    (`capability.memory.{read,write,orgWrite}`); the lane-A signed bearer
+    carries only `{p}`, so the routes derive grants from the principal:
+    read/write = the personal scope, orgWrite unset → org-scope requests
+    403 exactly like an unprivileged qm capability, and the
+    "recall not enabled" 403 is unreachable until real tokens land (12.0).
+    Skill list/detail shapes drop packs (`source:"native"`, `pack` omitted,
+    `assetCount:0`, `files:[]`, `grantedCapabilities:[]`), `editable` is
+    `createdBy === viewer` (admin override with the 12.0 admin service),
+    and qm's `trigger_blocked` 403s need the trigger mode (13.0). DELETE is
+    a soft archive (restore republishes) matching qm; hard delete stays a
+    store-level operation. Audit events (`memory.self.*`, `memory.agent.*`,
+    skill audit) land with the 12.0 audit sinks.

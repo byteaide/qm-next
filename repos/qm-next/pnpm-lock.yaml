@@ -77,6 +77,9 @@ importers:
       '@qm/im-core':
         specifier: workspace:^
         version: link:../im-core
+      '@qm/memory':
+        specifier: workspace:^
+        version: link:../memory
       '@qm/model':
         specifier: workspace:^
         version: link:../model
@@ -92,6 +95,9 @@ importers:
       '@qm/schemastery':
         specifier: workspace:^
         version: link:../../vendor/schemastery
+      '@qm/skills':
+        specifier: workspace:^
+        version: link:../skills
       '@qm/store':
         specifier: workspace:^
         version: link:../store
