@@ -188,6 +188,34 @@ export interface ApiConfig {
   adminUi?: boolean
   /** Portal identity secret; without it the admin console trusts the dev `admin` cookie. */
   portalIdentitySecret?: string
+  /** Portal SSO (12.0): /auth/* ladder + the /admin/ui identity-issuing gate. */
+  portal?: boolean
+  /** Public base URL of the portal (redirects, cookie Secure flag). */
+  portalPublicUrl?: string
+  /** Portal session cookie sealing secret (32+ chars; a dev fallback is derived when unset). */
+  portalSessionSecret?: string
+  /** Portal session TTL seconds (default 28800 = 8h). */
+  portalSessionTtlS?: number
+  /** OIDC provider config (qm plugins/portal OIDC_* env as one object). */
+  portalOidc?: {
+    authEndpoint?: string
+    tokenEndpoint?: string
+    userinfoEndpoint?: string
+    clientId: string
+    clientSecret?: string
+    scopes?: string
+    issuer?: string
+    jwksUri?: string
+    expectedTeamId?: string
+  }
+  /** Portal principal rule: 'email' (default) or 'sub'. */
+  portalPrincipalClaim?: string
+  /** Portal allow-list: email domain gate (requires the email claim). */
+  portalAllowedEmailDomain?: string
+  /** Portal allow-list: explicit email addresses. */
+  portalAllowedEmails?: string[]
+  /** Local dev bypass: loopback requests get a session without OIDC (non-local publicUrl refuses). */
+  portalLocalAuthBypass?: boolean
   /** Public web base URL used for webhook inbound URLs. */
   publicUrl?: string
   /** Deploy apps domain for owner URLs (qm DEPLOY_APPS_DOMAIN). */
@@ -263,6 +291,15 @@ export const Config = Schema.object({
   authBroker: Schema.boolean().description('Auth broker gates (11.0)'),
   adminUi: Schema.boolean().description('Admin console (12.0): qm SPA shell + /api proxy under /admin/ui'),
   portalIdentitySecret: Schema.string().description('Portal identity secret; without it the admin console trusts the dev admin cookie'),
+  portal: Schema.boolean().description('Portal SSO (12.0): /auth/* ladder + the /admin/ui identity-issuing gate'),
+  portalPublicUrl: Schema.string().description('Public base URL of the portal (redirects, cookie Secure flag)'),
+  portalSessionSecret: Schema.string().description('Portal session cookie sealing secret (32+ chars)'),
+  portalSessionTtlS: Schema.number().description('Portal session TTL seconds (default 28800)'),
+  portalOidc: Schema.any().description('OIDC provider config (authEndpoint/tokenEndpoint/userinfoEndpoint/clientId/clientSecret/scopes/issuer/jwksUri/expectedTeamId)'),
+  portalPrincipalClaim: Schema.string().description("Portal principal rule: 'email' (default) or 'sub'"),
+  portalAllowedEmailDomain: Schema.string().description('Portal allow-list: email domain gate'),
+  portalAllowedEmails: Schema.array(Schema.string()).description('Portal allow-list: explicit email addresses'),
+  portalLocalAuthBypass: Schema.boolean().description('Local dev bypass: loopback requests get a session without OIDC'),
   publicUrl: Schema.string().description('Public web base URL for webhook inbound URLs'),
   deployAppsDomain: Schema.string().description('Deploy apps domain for deployment owner URLs'),
   surfaceConfig: Schema.any().description('Static surface-config values for GET /v1/surface-config'),
@@ -651,6 +688,46 @@ export class ApiService extends Service<ApiConfig> {
                 ...(this.config.portalIdentitySecret ? { portalIdentitySecret: this.config.portalIdentitySecret } : {}),
               },
             }
+          : {}),
+        ...(this.config.portal && adminService
+          ? (() => {
+              const publicUrl = (this.config.portalPublicUrl ?? `http://localhost:${this.config.port ?? 0}`).replace(/\/$/, '')
+              const sessionSecret = this.config.portalSessionSecret ?? `qm-next-dev-portal-session-secret::${orgId}`
+              const identitySecret = this.config.portalIdentitySecret ?? sessionSecret
+              return {
+                portal: {
+                  orgId,
+                  publicUrl,
+                  sessionSecret,
+                  identitySecret,
+                  ...(this.config.portalSessionTtlS ? { sessionTtlS: this.config.portalSessionTtlS } : {}),
+                  ...(this.config.deployAppsDomain ? { appsDomain: this.config.deployAppsDomain } : {}),
+                  adminStatusOf: async (principalId: string) => (await adminService.adminStatusOf(principalId)).isAdmin,
+                  ...(replayDedupe ? { replayDedupe } : {}),
+                  ...(this.config.portalOidc
+                    ? {
+                        oidc: {
+                          authEndpoint: 'https://slack.com/openid/connect/authorize',
+                          tokenEndpoint: 'https://slack.com/api/openid.connect.token',
+                          userinfoEndpoint: 'https://slack.com/api/openid.connect.userInfo',
+                          scopes: 'openid profile email',
+                          issuer: 'https://slack.com',
+                          jwksUri: 'https://slack.com/openid/connect/keys',
+                          clientSecret: '',
+                          redirectUri: `${publicUrl}/auth/callback`,
+                          ...this.config.portalOidc,
+                        },
+                      }
+                    : {}),
+                  principalRule: {
+                    claim: this.config.portalPrincipalClaim === 'sub' ? ('sub' as const) : ('email' as const),
+                    ...(this.config.portalAllowedEmailDomain ? { allowedEmailDomain: this.config.portalAllowedEmailDomain } : {}),
+                    ...(this.config.portalAllowedEmails?.length ? { allowedEmails: this.config.portalAllowedEmails } : {}),
+                  },
+                  ...(this.config.portalLocalAuthBypass ? { localAuthBypass: true } : {}),
+                },
+              }
+            })()
           : {}),
         crons: {
           crons: () => this.cronsRuntime?.crons,

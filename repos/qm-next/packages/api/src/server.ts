@@ -38,6 +38,7 @@ import { skillPackRoutes, type SkillPackDeps } from './routes/skill-pack-routes.
 import { userModelAuthRoutes, type UserModelAuthDeps } from './routes/user-model-auth-routes.ts'
 import { authBrokerRoutes, credentialRoutes, egressAuditRoutes, emojiRoutes, secretDropRoutes, type AuthBrokerDeps, type CredentialDeps, type SecretDropDeps } from './routes/parity-lanes-routes.ts'
 import { registerAdminUi, type AdminUiDeps } from './routes/admin-ui-routes.ts'
+import { registerPortal, type PortalDeps } from '@qm/portal'
 
 export interface ApiDeps {
   orchestrator: Orchestrator
@@ -108,6 +109,8 @@ export interface ApiDeps {
   authBroker?: AuthBrokerDeps
   /** Admin console (12.0): the qm SPA shell + in-process /api proxy. */
   adminUi?: AdminUiDeps
+  /** Portal SSO (12.0): /auth/* ladder + the /admin/ui identity-issuing gate. */
+  portal?: PortalDeps
 }
 
 export interface ApiServerOptions {
@@ -271,6 +274,9 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
   }
   if (deps.adminUi) {
     registerAdminUi(app, deps.adminUi)
+  }
+  if (deps.portal) {
+    registerPortal(app, deps.portal)
   }
 
   app.get('/v1/runs/:id', async (request, reply) => {

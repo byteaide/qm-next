@@ -463,3 +463,27 @@ Each entry names the qm source shape, the qm-next shape, and why.
     (c) the console is served by the api process itself instead of qm's
     standalone sidecar (same origin, no source-auth signing needed);
     `plugins/portal` SSO remains the last 12.0 tranche.
+
+49. **Portal SSO (12.0 tranche 3) substitutions** — the qm portal is a
+    standalone front door (port 8097) that relays to separate web-ui/admin
+    upstreams over the private network; qm-next runs one process, so the
+    new `@qm/portal` package ports the issuing side in-process: sealed
+    session/tmp cookies (domain-separated HMAC keys), the OIDC
+    authorization-code + PKCE client (jose JWKS verification, Slack ok:false
+    semantics, verified-email principal rules with domain/email allow-lists
+    and an invited-gate hook), the five-minute single-use admin-login links
+    (jti consumed through the durable replay-dedupe store) and an onRequest
+    gate that admits valid admin sessions onto `/admin/ui` by minting the
+    short-TTL `x-portal-identity` header the console verifies — the same
+    assertion qm's proxy forwarded over the wire. Substitutions: (a) the
+    surface-relay half of the qm portal (web-ui/admin/deployment proxies,
+    webhook/OIDC-broker/drop-form/consent passthroughs) has no target here —
+    those API lanes already exist in-process from earlier tranches, so only
+    `/auth/*`, logout and the admin gate are mounted; (b) impersonation
+    (`portal_impersonate` cookie + core impersonate route) is unported until
+    the admin surface grows an impersonate lane; (c) playground anonymous
+    sessions and the surface-config branding poll stay with the 13.0
+    web-runtime convergence; (d) production boot checks reduce to the
+    loop-guard (auth endpoint on the portal's own origin), the local-bypass
+    locality rule and session TTL sanity — the full qm production checklist
+    lands with deployment hardening.

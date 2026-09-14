@@ -51,6 +51,7 @@ export {
 } from './aws-role-broker.ts'
 export {
   PORTAL_IDENTITY_HEADER,
+  mintPortalIdentity,
   verifyPortalIdentity,
   type PortalIdentity,
 } from './portal-identity.ts'

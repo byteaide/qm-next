@@ -111,6 +111,7 @@ v0.1.0 只覆盖 qm 最核心的 ~11%（15k/133k 行 TS）。本计划把 qm-nex
 - 2026-09-13 P2 汇合：harness-router 配置化忠实移植 qm 阶梯（approved 缺省只认 fallback；requested 越权抛 NonRetryableTurnError）；run-signal 契约上移 `@qm/types`，startSignalPoll 移 `@qm/runs`，harness-pi 兼容 re-export；NonRetryableTurnError 上移 `@qm/types` 保 instanceof 单一身份（偏差 #29-36）
 - 2026-09-14 P3 开工前实测：qm routes 27 模块/~242 条路由（surface 43+、admin 58 为大头），API 车道估时上调（10.0 契约冻结 0.5d→1.5d，11.0 相应加压）；canonical main 同步确认为用户侧 `git merge --ff-only` 协议（reflog 全程 tiger.w Fast-forward 记录）
 - 2026-09-14 12.0 lane B 控制面落 `@qm/admin`+`@qm/auth` 两包（qm src/admin+src/auth 平移），api 框架升级为 capability 阶梯、`databaseUrl` 驱动 PG 双实现；secret-drop mint 因 qm 源文件被 source-access guard 拦截，按 parity-api-contract + drop-store 契约重建（偏差 #47a）；check:im 门禁自 tranche 5 起实际已红（parity 契约词表命中 grep），修复为"符号扫描排除 api 契约面 + 全核 SDK-import 扫描"（#47f）
+- 2026-09-14 12.0 收官：admin console SPA 进程内挂载（#48）+ `@qm/portal` SSO 签发端（#49）。关键判断：qm portal 是"独立前门 + 私网上游中继"，qm-next 单进程拓扑下中继半边无目标（同进程 API 车道已存在），只平移 `/auth/*` + admin 门；身份链为 session cookie → onRequest 门签 60s `x-portal-identity` → console verifyPortalIdentity，mint 用 qm chassis legacy `payload.hmac` 格式与既有 verifySignedPayload 双向兼容；admin-login jti 复用 replay-dedupe 存储实现跨重启单次消费
 
 #### Surprises & Discoveries
 

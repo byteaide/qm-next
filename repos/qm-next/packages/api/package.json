@@ -23,6 +23,7 @@
     "@qm/memory": "workspace:^",
     "@qm/model": "workspace:^",
     "@qm/orchestrator": "workspace:^",
+    "@qm/portal": "workspace:^",
     "@qm/reach": "workspace:^",
     "@qm/runs": "workspace:^",
     "@qm/sandbox": "workspace:^",
