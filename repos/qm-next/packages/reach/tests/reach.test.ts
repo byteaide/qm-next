@@ -125,3 +125,106 @@ test('reach refuses targets that specify more than one field', async () => {
   assert.equal(result.status, 400)
   assert.equal(result.error, 'bad_request')
 })
+
+test('a group needs someone besides the actor', async () => {
+  const dir = reachDirectory(await seededStore())
+  const solo = await resolveReachTarget(dir, PROVIDER, { participants: ['@ada lovelace'] }, 'u1')
+  assert.ok(!solo.ok)
+  assert.equal(solo.status, 400)
+  assert.equal(solo.error, 'bad_request')
+})
+
+function withOpenGroup(
+  dir: ReturnType<typeof reachDirectory>,
+  impl: (participants: readonly string[]) => Promise<{ spaceId: string } | { error: string } | null>,
+  registered?: { spaceId: string; participants: string[] }[],
+) {
+  return {
+    ...dir,
+    openGroup: (_provider: string, participants: readonly string[]) => impl(participants),
+    registerGroup: async (_provider: string, spaceId: string, participants: readonly string[]) => {
+      registered?.push({ spaceId, participants: [...participants] })
+    },
+  }
+}
+
+test('openGroup write-back opens, registers, and resolves the group', async () => {
+  const store = await seededStore()
+  const registered: { spaceId: string; participants: string[] }[] = []
+  const dir = withOpenGroup(
+    reachDirectory(store),
+    async (participants) => ({ spaceId: `oc_new_${participants.length}` }),
+    registered,
+  )
+  const opened = await resolveReachTarget(dir, PROVIDER, { participants: ['ada palmer'] }, 'u1', {
+    mayOpenGroup: true,
+  })
+  assert.ok(opened.ok)
+  assert.equal(opened.destination.type, PROVIDER)
+  assert.equal(opened.destination.target, 'oc_new_2')
+  assert.deepEqual(opened.group, { spaceId: 'oc_new_2' })
+  assert.equal(registered.length, 1)
+  assert.deepEqual(registered[0]!.participants, ['u1', 'u3'])
+
+  const writeBack = async (spaceId: string): Promise<void> => {
+    await store.apply({
+      provider: PROVIDER,
+      instanceId: 'test',
+      syncedAt: 2_000,
+      spaces: [{ spaceId, name: 'Ada & Ada Palmer', kind: 'group' }],
+      spaceMembers: [
+        { spaceId, providerUserId: 'u1' },
+        { spaceId, providerUserId: 'u3' },
+      ],
+      replace: ['spaceMembers'],
+    })
+  }
+  await writeBack('oc_new_2')
+  const known = await resolveReachTarget(reachDirectory(store), PROVIDER, { participants: ['ada palmer'] }, 'u1')
+  assert.ok(known.ok)
+  assert.equal(known.destination.target, 'oc_new_2')
+})
+
+test('openGroup failures map to the qm error ladder', async () => {
+  const store = await seededStore()
+
+  const notAllowed = await resolveReachTarget(reachDirectory(store), PROVIDER, { participants: ['ada palmer'] }, 'u1', {
+    mayOpenGroup: false,
+  })
+  assert.ok(!notAllowed.ok)
+  assert.equal(notAllowed.status, 404)
+  assert.equal(notAllowed.error, 'group_not_found')
+
+  const refused = await resolveReachTarget(
+    withOpenGroup(reachDirectory(store), async () => ({ error: 'provider said no' })),
+    PROVIDER,
+    { participants: ['ada palmer'] },
+    'u1',
+    { mayOpenGroup: true },
+  )
+  assert.ok(!refused.ok)
+  assert.equal(refused.status, 502)
+  assert.equal(refused.error, 'group_open_failed')
+  assert.match(refused.message, /provider said no/)
+
+  const failed = await resolveReachTarget(
+    withOpenGroup(reachDirectory(store), async () => null),
+    PROVIDER,
+    { participants: ['ada palmer'] },
+    'u1',
+    { mayOpenGroup: true },
+  )
+  assert.ok(!failed.ok)
+  assert.equal(failed.status, 502)
+
+  const unknownActor = await resolveReachTarget(
+    withOpenGroup(reachDirectory(store), async () => ({ spaceId: 'oc_x' })),
+    PROVIDER,
+    { participants: ['ada palmer'] },
+    'ghost',
+    { mayOpenGroup: true },
+  )
+  assert.ok(!unknownActor.ok)
+  assert.equal(unknownActor.status, 403)
+  assert.equal(unknownActor.error, 'identity_unverified')
+})

@@ -13,6 +13,10 @@ import {
   normDirectoryQuery,
   pickMatch,
   principalIdFor,
+  samePerson,
+  samePersonInDirectory,
+  samePersonMatcher,
+  type DirectoryPersonLookup,
   type DirectoryStore,
 } from '../src/index.ts'
 import { createMemoryDirectoryStore } from '../src/memory-directory-store.ts'
@@ -297,4 +301,36 @@ test('directory query helpers', () => {
   const prefix = pickMatch([items[0]!], 'ada', (i) => i.id, (i) => i.name)
   assert.ok(prefix.kind === 'one')
   assert.equal(principalIdFor('feishu', 'u1'), 'feishu:u1')
+})
+
+test('person identity matching', async () => {
+  assert.equal(samePerson('Ada@Example.com', 'ada@example.com'), true)
+  assert.equal(samePerson('u1', 'u1'), true)
+  assert.equal(samePerson('u1', 'u2'), false)
+  assert.equal(samePerson('', ''), false)
+
+  const lookup: DirectoryPersonLookup = {
+    listPeople: async () => [
+      {
+        provider: 'feishu',
+        providerUserId: 'u1',
+        principalId: 'feishu:u1',
+        email: 'ada@example.com',
+        type: 'internal' as PrincipalType,
+      },
+    ],
+  }
+  assert.equal(await samePersonInDirectory(lookup, 'feishu', 'feishu:u1', 'ada@example.com'), true)
+  assert.equal(await samePersonInDirectory(lookup, 'feishu', 'feishu:u1', 'feishu:u2'), false)
+
+  const matcher = await samePersonMatcher(lookup, 'feishu', 'feishu:u1')
+  assert.equal(await matcher('ada@example.com'), true)
+  assert.equal(await matcher('feishu:u9'), false)
+
+  const unknownActor = await samePersonMatcher(
+    { listPeople: async () => [] },
+    'feishu',
+    'feishu:ghost',
+  )
+  assert.equal(await unknownActor('feishu:ghost'), true)
 })
