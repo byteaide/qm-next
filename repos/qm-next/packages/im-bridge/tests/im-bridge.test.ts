@@ -24,8 +24,8 @@ import type { ImCapabilities, ImProvider, ImProviderStartContext, InboundInterac
 import { createImRegistry } from '@qm/im-core/runtime'
 import { createHarnessRouter, createMockHarness, OrchestratorService, type MockTurnStep } from '@qm/orchestrator'
 import { createMemoryRunStore, createMemorySessionStore } from '@qm/store'
-import type { IdentityService, ResolutionService } from '@qm/types'
-import { APPROVAL_VALUE_KIND, approvalRequestNotice, createImTurnBridge, DEFAULT_ACK_REACTIONS, parseApprovalValue, type ApprovalActionValue, type ApprovalCardRenderer, type ImTurnBridge, type ImTurnBridgeAck, type ImTurnBridgeAgentRequests, type ImTurnBridgeAmbient } from '../src/index.ts'
+import type { IdentityService, KeychainAsk, ResolutionService } from '@qm/types'
+import { APPROVAL_VALUE_KIND, approvalRequestNotice, createImTurnBridge, DEFAULT_ACK_REACTIONS, parseApprovalValue, type ApprovalActionValue, type ApprovalCardRenderer, type ImTurnBridge, type ImTurnBridgeAck, type ImTurnBridgeAgentRequests, type ImTurnBridgeAmbient, type ImTurnBridgeAskResolutions } from '../src/index.ts'
 
 function devResolution(): ResolutionService {
   return {
@@ -202,6 +202,8 @@ async function setup(
     turnDelayMs?: number
     /** Agent-request ingredients (tests inject the store + DM resolver). */
     agentRequests?: ImTurnBridgeAgentRequests
+    /** Keychain-ask sweep ingredients (tests inject the stub keychain). */
+    askResolutions?: ImTurnBridgeAskResolutions
   } = {},
 ): Promise<Harness> {
   const sessions = createMemorySessionStore()
@@ -249,6 +251,7 @@ async function setup(
       ...(ambient ? { ambient } : {}),
       ...(opts.ack ? { ack: opts.ack } : {}),
       ...(opts.agentRequests ? { agentRequests: opts.agentRequests } : {}),
+      ...(opts.askResolutions ? { askResolutions: opts.askResolutions } : {}),
     },
   )
   await bridge.start()
@@ -840,6 +843,78 @@ test('agent request: an unresolvable DM destination leaves the request pending w
     const runs = await t.runs.list()
     const record = await store.get(`${runs[0]!.id}:ar0`)
     assert.equal(record?.status, 'pending')
+  } finally {
+    await t.dispose()
+  }
+})
+
+const sweepAsk: KeychainAsk = {
+  id: 'ask-1',
+  credentialId: 'cred-1',
+  ownerId: 'feishu:ou_owner',
+  requesterId: 'feishu:ou_requester',
+  requesterScopeId: 'personal:feishu:ou_requester',
+  purpose: 'post to the release channel',
+  status: 'approved',
+  createdAt: 1,
+  expiresAt: 2,
+  grantId: 'grant-9',
+}
+
+test('keychain-ask sweep: a resolved ask runs as a personal turn in the requester DM', async () => {
+  const marked: string[] = []
+  const t = await setup({
+    script: [{ reply: 'release posted' }],
+    askResolutions: {
+      keychain: {
+        unnotifiedResolvedAsks: async () => (marked.includes(sweepAsk.id) ? [] : [sweepAsk]),
+        markAskNotified: async (id) => {
+          marked.push(id)
+        },
+        getGrant: async () => ({ mode: 'once', purpose: 'release posting' }),
+      },
+      sweepMs: 20,
+      resolveDm: async (provider, userId) => ({ destination: { type: provider, target: `oc_dm_${userId}` } }),
+    },
+  })
+  try {
+    assert.ok(await waitFor(() => marked.includes(sweepAsk.id)), 'the sweep fired and marked the ask')
+    assert.ok(await waitFor(() => t.sent.length >= 1), 'the personal reply delivered to the DM')
+    const runs = await t.runs.list()
+    const personal = runs.find((r) => r.request.actor.id === sweepAsk.requesterId)
+    assert.ok(personal, 'the turn ran as the requester')
+    assert.equal(personal.request.surface, 'keychain-ask')
+    assert.equal(personal.request.conversation.kind, 'dm')
+    assert.equal(personal.request.conversation.threadRef, 'feishu:dm:ou_requester')
+    assert.match(personal.request.text, /approved by its owner \(feishu:ou_owner\): one-time grant `grant-9`/)
+    assert.match(personal.request.text, /verbatim: "release posting"/)
+    const result = t.sent.find((op) => (op as SendOperation).destination.target === 'oc_dm_ou_requester') as SendOperation
+    assert.ok(result, 'the result landed in the requester DM')
+    assert.deepEqual(result.body, { markdown: 'release posted' })
+  } finally {
+    await t.dispose()
+  }
+})
+
+test('keychain-ask sweep: an unresolvable DM is marked notified with no run and no delivery', async () => {
+  const marked: string[] = []
+  const t = await setup({
+    askResolutions: {
+      keychain: {
+        unnotifiedResolvedAsks: async () => (marked.includes(sweepAsk.id) ? [] : [sweepAsk]),
+        markAskNotified: async (id) => {
+          marked.push(id)
+        },
+      },
+      sweepMs: 20,
+      resolveDm: async () => null,
+    },
+  })
+  try {
+    assert.ok(await waitFor(() => marked.includes(sweepAsk.id)), 'the ask was marked to avoid a pinning retry loop')
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    assert.equal((await t.runs.list()).length, 0)
+    assert.equal(t.sent.length, 0)
   } finally {
     await t.dispose()
   }

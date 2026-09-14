@@ -9,12 +9,29 @@ import type { OutgoingAttachment } from '@qm/types'
 import type { OutboundOperation } from './outbound.ts'
 import type { Destination } from '@qm/types'
 
-/** Where a queued delivery came from — audit and dedup context only. */
+/**
+ * Where a queued delivery came from — audit and dedup context. Trigger
+ * deliveries carry the full provenance block (qm `DeliveryProvenance`):
+ * the waking surface, the fire key, the scope/thread the fire ran in, and
+ * the source turn's session for drill-down.
+ */
 export interface DeliveryOrigin {
   /** Terminated run whose reply this delivery carries. */
   runId?: string
   /** Automation trigger key (cron id, webhook delivery id, …). */
   trigger?: string
+  /** Wake surface ("cron", "trigger", …). */
+  surface?: string
+  /** Fire idempotency key (`cron:{id}:{slot}`, `ask:{id}:{status}`, …). */
+  fireKey?: string
+  /** Scope the trigger fired in. */
+  sourceScopeId?: string
+  /** Thread the trigger turn ran in. */
+  sourceThreadRef?: string
+  /** Human title of the trigger ("weekly standup notes"). */
+  sourceTitle?: string
+  /** Session the trigger turn ran in. */
+  sourceSessionId?: string
 }
 
 export interface ImDelivery {
@@ -68,6 +85,12 @@ export interface ImDeliveryQueue {
   /** Mark a delivery failed; it becomes claimable again after the retry delay. */
   fail(id: string, error: string, options?: ImDeliveryFailOptions): Promise<void>
   get(id: string): Promise<ImDelivery | null>
+  /**
+   * Most recent deliveries, newest first (admin observability). Optional:
+   * the memory queue implements it; durable backends may defer until the
+   * admin surface needs them.
+   */
+  list?(options?: { limit?: number }): Promise<ImDelivery[]>
   /** Wakeup signal fired on every non-idempotent-duplicate enqueue. */
   onEnqueued(listener: () => void): () => void
 }

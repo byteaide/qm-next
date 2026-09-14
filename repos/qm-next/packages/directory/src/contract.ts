@@ -132,3 +132,24 @@ export async function isVisible(
   if (space.kind === 'channel' && !space.isPrivate && !space.isExternal) return true
   return store.spaceMember(provider, space.spaceId, actorProviderUserId)
 }
+
+/**
+ * The provider-native DM space between the bot and one user, resolved from
+ * the synced roster (qm's `principalDestination` equivalent — provider
+ * adapters deliver to concrete spaces, not virtual principal targets).
+ * Null when no DM space with that membership has synced.
+ */
+export async function resolveProviderDm(
+  store: Pick<DirectoryStore, 'listSpaces' | 'spaceMember'>,
+  provider: string,
+  targetUserId: string,
+): Promise<{ destination: { type: string; target: string }; spaceId: string } | null> {
+  const spaces = await store.listSpaces(provider)
+  for (const space of spaces) {
+    if (space.kind !== 'dm') continue
+    if (await store.spaceMember(provider, space.spaceId, targetUserId)) {
+      return { destination: { type: provider, target: space.spaceId }, spaceId: space.spaceId }
+    }
+  }
+  return null
+}

@@ -31,10 +31,12 @@
 import {
   APPROVAL_VALUE_KIND,
   createAmbientService,
+  createAskExpirySweep,
   createMemoryApprovalStore,
   extractAgentRequests,
   parseAgentRequestValue,
   parseApprovalValue,
+  askResolutionInput,
   type AmbientCursorStore,
   type AmbientJudge,
   type AmbientJudgmentStore,
@@ -45,6 +47,8 @@ import {
   type ApprovalActionValue,
   type ApprovalCardRenderer,
   type ApprovalStore,
+  type AskResolutionGrant,
+  type AskSweepKeychain,
   type ChannelPolicyStore,
 } from '@qm/approvals'
 import type {
@@ -61,6 +65,7 @@ import { createDeliveryLoop, createMemoryDeliveryQueue } from '@qm/im-core/runti
 import type {
   Conversation,
   Destination,
+  KeychainAsk,
   PendingApproval,
   Principal,
   PrincipalType,
@@ -151,6 +156,18 @@ export interface ImTurnBridgeAgentRequests {
   targetLabel?(targetUserId: string): string
 }
 
+/**
+ * Keychain-ask resolution ingredients (14.0 tranche 4): the sweep polls
+ * the keychain for resolved-but-unnotified asks and runs each outcome as
+ * a personal turn in the requester's DM (qm's keychain-ask flow).
+ */
+export interface ImTurnBridgeAskResolutions {
+  keychain: AskSweepKeychain & { getGrant?(id: string): Promise<AskResolutionGrant | null> }
+  /** Sweep cadence in ms (qm's wiring interval; default 30s). */
+  sweepMs?: number
+  resolveDm?(provider: string, userId: string): Promise<{ destination: Destination } | null>
+}
+
 export interface ImTurnBridgeOptions {
   /** Principal type assigned to IM actors (directory mapping is M3). */
   actorType?: PrincipalType
@@ -172,6 +189,8 @@ export interface ImTurnBridgeOptions {
   ack?: ImTurnBridgeAck
   /** Agent-request directives; absent means the grammar stays inert. */
   agentRequests?: ImTurnBridgeAgentRequests
+  /** Keychain-ask resolution sweep; absent means asks are never announced. */
+  askResolutions?: ImTurnBridgeAskResolutions
   loop?: ImTurnBridgeLoopOptions
 }
 
@@ -626,14 +645,76 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
   const loop = createDeliveryLoop({ queue, registry: deps.im, ...(options.loop ?? {}) })
   deps.runs.onTerminal(deliver)
 
+  /**
+   * qm's keychain-ask flow: each resolved ask becomes a personal turn in
+   * the requester's DM carrying the outcome and the resume instruction.
+   * With no resolvable DM the ask is marked notified with a warning —
+   * re-firing forever would pin the sweep (qm delivered fallback text to
+   * the recorded conversation; qm-next asks carry none).
+   */
+  async function fireAskResolution(ask: KeychainAsk): Promise<void> {
+    const askResolutions = options.askResolutions
+    if (!askResolutions) return
+    const sep = ask.requesterId.indexOf(':')
+    const provider = sep > 0 ? ask.requesterId.slice(0, sep) : undefined
+    const uid = sep > 0 ? ask.requesterId.slice(sep + 1) : undefined
+    const resolved =
+      provider && uid && askResolutions.resolveDm
+        ? await askResolutions.resolveDm(provider, uid).catch(() => null)
+        : null
+    const dm = resolved ?? (ask.requesterDestination ? { destination: ask.requesterDestination } : null)
+    if (!dm || !provider || !uid) {
+      logger.warn(`im-bridge: ask ${ask.id} ${ask.status} but no DM destination for ${ask.requesterId}; marked notified`)
+      return
+    }
+    const grant =
+      ask.status === 'approved' && ask.grantId
+        ? ((await askResolutions.keychain.getGrant?.(ask.grantId)) ?? undefined)
+        : undefined
+    const actor: Principal = { id: ask.requesterId, type: options.actorType ?? 'internal' }
+    const conversation: Conversation = {
+      kind: 'dm',
+      threadRef: ask.requesterThreadRef ?? `${provider}:dm:${uid}`,
+      audience: [actor],
+    }
+    await enqueueTurn(
+      {
+        surface: 'keychain-ask',
+        actor,
+        conversation,
+        origin: { kind: 'automation' },
+        text: askResolutionInput(ask, grant),
+      },
+      { destination: dm.destination, conversation },
+    )
+  }
+
+  const askSweep = options.askResolutions
+    ? createAskExpirySweep({ keychain: options.askResolutions.keychain, fire: fireAskResolution })
+    : undefined
+  let askSweepTimer: NodeJS.Timeout | undefined
+
   return {
     queue,
     approvals: approvalStore,
     sink,
-    start: () => loop.start(),
+    start: () => {
+      if (askSweep) {
+        const ms = options.askResolutions?.sweepMs ?? 30_000
+        askSweepTimer = setInterval(() => {
+          void askSweep(Date.now()).catch((err) => logger.error('im-bridge: ask sweep failed:', err))
+        }, ms)
+        askSweepTimer.unref()
+      }
+      return loop.start()
+    },
     stop: () => {
       for (const timer of ackTimers.values()) clearTimeout(timer)
       ackTimers.clear()
+      if (askSweepTimer) {
+        clearInterval(askSweepTimer)
+        askSweepTimer = undefined
+      }
       return loop.stop()
     },
     routeFor: (runId) => routes.get(runId),

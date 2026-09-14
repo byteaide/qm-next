@@ -7,8 +7,8 @@
  */
 import { randomUUID } from 'node:crypto'
 import type { DirectoryStore } from '@qm/directory'
-import type { ImDeliveryQueue, ImLogger } from '@qm/im-core'
-import type { Principal } from '@qm/types'
+import type { DeliveryOrigin, ImDeliveryQueue, ImLogger } from '@qm/im-core'
+import type { Destination, Principal } from '@qm/types'
 import {
   CRON_SURFACE,
   TRIGGER_SURFACE,
@@ -25,8 +25,9 @@ import {
   type TriggerSubmission,
 } from './contract.ts'
 import { createFireEngine, destinationVisibleToOwner, renderCronFireInput, type FireEngine } from './fire.ts'
+import { consentSkipNote, recipientConsentSatisfied } from './consent.ts'
 import { isCalendarSchedule } from './schedule.ts'
-import { errMessage, truncate } from './util.ts'
+import { errMessage, hashId, truncate } from './util.ts'
 
 const TICK_LEASE_KEY = 'cron:scheduler:tick'
 export const DEFAULT_TICK_INTERVAL_MS = 30_000
@@ -36,6 +37,8 @@ export interface CronSchedulerDeps extends TriggerEngineDeps {
   crons: CronStore
   deliveries?: ImDeliveryQueue
   directory?: DirectoryStore
+  /** Owner DM resolution for consent skip notices (delegates to fire.ts). */
+  resolveDm?: (provider: string, userId: string) => Promise<Destination | null>
   lease?: LeaderLease
   identity?: { isInternal(principal: Principal): boolean }
   replyAs?: 'markdown' | 'text'
@@ -91,13 +94,46 @@ export function createCronScheduler(deps: CronSchedulerDeps): CronScheduler {
       await deps.crons.recordFire(cron.id, { fireKey, firedAt: at, status: 'refused', note: 'no delivery queue configured' })
       return
     }
+    if (cron.recipientConsent && !recipientConsentSatisfied(cron, cron.recipientConsent.recipientId)) {
+      const note = consentSkipNote(cron.recipientConsent)
+      await deps.crons.recordFire(cron.id, { fireKey, firedAt: at, status: 'refused', note })
+      await ownerConsentSkipNotice(cron, fireKey, note)
+      return
+    }
     await deps.deliveries.enqueue({
       provider: cron.destination.type,
       op: { op: 'send', destination: cron.destination, body: deps.replyAs === 'text' ? { text: cron.message! } : { markdown: cron.message! } },
       idempotencyKey: `cron-fire:${fireKey}`,
-      origin: { trigger: cron.id },
+      origin: messageProvenance(cron, fireKey),
     })
     await deps.crons.recordFire(cron.id, { fireKey, firedAt: at, status: 'ok' })
+  }
+
+  /** Direct-relay fires stamp provenance without a run to attribute. */
+  function messageProvenance(cron: CronRecord, fireKey: string): DeliveryOrigin {
+    return {
+      trigger: cron.id,
+      surface: CRON_SURFACE,
+      fireKey,
+      sourceScopeId: cron.scopeId,
+      sourceThreadRef: `${CRON_SURFACE}:${hashId([fireKey], 12)}`,
+      ...(cron.title ? { sourceTitle: cron.title } : {}),
+    }
+  }
+
+  /** Owner skip notice for direct-relay fires (no run, so outside fire.ts). */
+  async function ownerConsentSkipNotice(cron: CronRecord, fireKey: string, note: string): Promise<void> {
+    if (!deps.resolveDm) return
+    const sep = cron.ownerId.indexOf(':')
+    if (sep <= 0) return
+    const dm = await deps.resolveDm(cron.ownerId.slice(0, sep), cron.ownerId.slice(sep + 1)).catch(() => null)
+    if (!dm || !deps.deliveries) return
+    await deps.deliveries.enqueue({
+      provider: dm.type,
+      op: { op: 'send', destination: dm, body: { text: `Scheduled delivery skipped: ${note}` } },
+      idempotencyKey: `${fireKey}:consent-skip`,
+      origin: messageProvenance(cron, fireKey),
+    })
   }
 
   async function fire(cron: DueCron, at: number): Promise<void> {
@@ -131,6 +167,7 @@ export function createCronScheduler(deps: CronSchedulerDeps): CronScheduler {
         scopeId: cron.scopeId,
         ...(cron.destination ? { destination: cron.destination } : {}),
         ...(cron.title ? { title: cron.title } : {}),
+        ...(cron.recipientConsent ? { recipientConsent: cron.recipientConsent } : {}),
         cronId: cron.id,
         firedAt: at,
         scheduledAt: cron.scheduledAt,
@@ -197,6 +234,7 @@ export function createCronScheduler(deps: CronSchedulerDeps): CronScheduler {
         scopeId: cron.scopeId,
         ...(cron.destination ? { destination: cron.destination } : {}),
         ...(cron.title ? { title: cron.title } : {}),
+        ...(cron.recipientConsent ? { recipientConsent: cron.recipientConsent } : {}),
         cronId,
         firedAt: now(),
         onTerminal: (entry) => deps.crons.recordFire(cronId, entry),

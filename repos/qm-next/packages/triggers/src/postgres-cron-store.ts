@@ -7,7 +7,7 @@
  * in `cron_fire_log` keyed `(cron_id, fire_key)` with first-entry merge.
  */
 import type { CronFireLogEntry, CronPatch, CronRecord, CronStore, CreateCronInput, DueCron } from './contract.ts'
-import type { Destination, PrincipalType, ScopeId } from '@qm/types'
+import type { Destination, PrincipalType, RecipientConsent, ScopeId } from '@qm/types'
 import { createPgPool, type PgPool } from '@qm/store'
 import { advanceNextFireAt, isCalendarSchedule, normalizeSchedule, recoverNextFireAt } from './schedule.ts'
 import { hashId } from './util.ts'
@@ -19,7 +19,10 @@ export const CRONS_SCHEMA_STATEMENTS = [
       schedule JSONB NOT NULL, destination TEXT,
       enabled BOOLEAN NOT NULL DEFAULT TRUE, archived BOOLEAN NOT NULL DEFAULT FALSE,
       created_at BIGINT NOT NULL, next_fire_at BIGINT, last_fired_at BIGINT, last_attempt_at BIGINT,
+      recipient_consent JSONB,
       seq BIGSERIAL)`,
+  // Upgrades for stores created before recipient consent (14.0).
+  `ALTER TABLE crons ADD COLUMN IF NOT EXISTS recipient_consent JSONB`,
   `CREATE INDEX IF NOT EXISTS idx_crons_enabled ON crons(enabled, archived)`,
   `CREATE TABLE IF NOT EXISTS cron_fire_log(
       cron_id TEXT NOT NULL, fire_key TEXT NOT NULL, fired_at BIGINT NOT NULL, json JSONB NOT NULL,
@@ -29,6 +32,7 @@ export const CRONS_SCHEMA_STATEMENTS = [
 ]
 
 function row(r: Record<string, unknown>): CronRecord {
+  const consent = r.recipient_consent
   return {
     id: r.id as string,
     scopeId: r.scope_id as ScopeId,
@@ -40,6 +44,9 @@ function row(r: Record<string, unknown>): CronRecord {
     ...(r.action != null ? { action: r.action as string } : {}),
     ...(r.message != null ? { message: r.message as string } : {}),
     ...(r.destination != null ? { destination: JSON.parse(String(r.destination)) as Destination } : {}),
+    ...(consent != null
+      ? { recipientConsent: (typeof consent === 'object' ? consent : JSON.parse(String(consent))) as RecipientConsent }
+      : {}),
     enabled: r.enabled === true,
     archived: r.archived === true,
     createdAt: Number(r.created_at),
@@ -70,6 +77,7 @@ function buildRecord(input: CreateCronInput, id: string, now: number): CronRecor
     ...(input.action !== undefined ? { action: input.action } : {}),
     ...(input.message !== undefined ? { message: input.message } : {}),
     ...(input.destination ? { destination: input.destination } : {}),
+    ...(input.recipientConsent ? { recipientConsent: input.recipientConsent } : {}),
     enabled: true,
     archived: false,
     createdAt: now,
@@ -100,8 +108,8 @@ export function createPostgresCronStore(connectionString: string, statements: st
         draft.title,
       ])
       const inserted = await q(
-        `INSERT INTO crons(id, scope_id, owner_id, owner_type, created_by, title, action, message, schedule, destination, enabled, archived, created_at, next_fire_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,TRUE,FALSE,$11,$12)
+        `INSERT INTO crons(id, scope_id, owner_id, owner_type, created_by, title, action, message, schedule, destination, enabled, archived, created_at, next_fire_at, recipient_consent)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,TRUE,FALSE,$11,$12,$13)
          ON CONFLICT (id) DO NOTHING RETURNING *`,
         [
           id,
@@ -116,6 +124,7 @@ export function createPostgresCronStore(connectionString: string, statements: st
           draft.destination ? JSON.stringify(draft.destination) : null,
           now,
           draft.nextFireAt ?? null,
+          draft.recipientConsent ? JSON.stringify(draft.recipientConsent) : null,
         ],
       )
       if (inserted[0]) return row(inserted[0])
@@ -156,7 +165,7 @@ export function createPostgresCronStore(connectionString: string, statements: st
       if (patch.archived === true) next.enabled = false
       const updated = await q(
         `UPDATE crons SET title = $2, action = $3, message = $4, schedule = $5, destination = $6,
-           enabled = $7, archived = $8, next_fire_at = $9
+           enabled = $7, archived = $8, next_fire_at = $9, recipient_consent = $10
          WHERE id = $1 RETURNING *`,
         [
           id,
@@ -168,7 +177,15 @@ export function createPostgresCronStore(connectionString: string, statements: st
           next.enabled,
           next.archived,
           next.nextFireAt ?? null,
+          next.recipientConsent ? JSON.stringify(next.recipientConsent) : null,
         ],
+      )
+      return updated[0] ? row(updated[0]) : null
+    },
+    async setRecipientConsent(id, consent) {
+      const updated = await q(
+        `UPDATE crons SET recipient_consent = $2 WHERE id = $1 RETURNING *`,
+        [id, consent ? JSON.stringify(consent) : null],
       )
       return updated[0] ? row(updated[0]) : null
     },

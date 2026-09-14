@@ -12,11 +12,13 @@
  * with a DirectoryStore configured, delivery is gated on the owner's
  * visibility of the destination space.
  *
- * OUT of M3: consent/keychain/edit-notice flows, provenance UI, and the
- * pg-boss style job queue (tick scheduling suffices at this scale).
+ * OUT of M3 (landed later): recipient consent, edit notices, keychain-ask
+ * resolution sweeps, and delivery provenance arrive with the IM-domain
+ * backfill (14.0); the pg-boss style job queue (tick scheduling suffices
+ * at this scale) and webhook consent stay out.
  * Changes go back through the main session, never inside a parallel lane.
  */
-import type { Destination, PrincipalType, RunStore, ScopeId, SessionStore, TurnStatus } from '@qm/types'
+import type { Destination, PrincipalType, RecipientConsent, RunStore, ScopeId, SessionStore, TurnStatus } from '@qm/types'
 import type { ResolutionService } from '@qm/types'
 
 /** Surface stamped on cron-originated turns. */
@@ -60,6 +62,12 @@ export interface CronRecord {
   nextFireAt?: number
   lastFiredAt?: number
   lastAttemptAt?: number
+  /**
+   * Recipient consent for standing crons that deliver into another
+   * person's DM (stamped pending at create, accepted via the consent
+   * route). Deliveries stay gated until it is accepted.
+   */
+  recipientConsent?: RecipientConsent
 }
 
 export interface CreateCronInput {
@@ -72,6 +80,7 @@ export interface CreateCronInput {
   message?: string
   destination?: Destination
   title?: string
+  recipientConsent?: RecipientConsent
 }
 
 export interface CronPatch {
@@ -116,6 +125,8 @@ export interface CronStore {
   get(id: string): Promise<CronRecord | null>
   list(): Promise<CronRecord[]>
   update(id: string, patch: CronPatch): Promise<CronRecord | null>
+  /** Record a consent decision (`undefined` clears a stale stamp). */
+  setRecipientConsent(id: string, consent: RecipientConsent | undefined): Promise<CronRecord | null>
   delete(id: string): Promise<void>
   setEnabled(id: string, enabled: boolean): Promise<void>
   /** Enabled, non-archived crons whose recovered slot is at or before `now`. */

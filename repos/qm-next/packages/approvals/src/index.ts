@@ -20,6 +20,14 @@ export {
 } from './ambient-judge-model.ts'
 export { createMemoryAckEmojiPickStore } from './ack-emoji-pick.ts'
 export {
+  askFallbackText,
+  askResolutionInput,
+  createAskExpirySweep,
+  type AskExpirySweepDeps,
+  type AskResolutionGrant,
+  type AskSweepKeychain,
+} from './ask-notice.ts'
+export {
   AGENT_REQUEST_INSTRUCTION,
   createMemoryAgentRequestStore,
   extractAgentRequests,

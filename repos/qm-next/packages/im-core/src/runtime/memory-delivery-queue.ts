@@ -91,6 +91,10 @@ export function createMemoryDeliveryQueue(): MemoryDeliveryQueue {
     async get(id) {
       return state.deliveries.get(id) ?? null
     },
+    async list(options) {
+      const all = [...state.deliveries.values()].sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
+      return options?.limit !== undefined ? all.slice(0, options.limit) : all
+    },
     onEnqueued(listener) {
       state.listeners.add(listener)
       return () => {

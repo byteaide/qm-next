@@ -7,6 +7,7 @@
  */
 import { ApiService } from '@qm/api'
 import { Service, type Context } from '@qm/cordis'
+import { resolveProviderDm } from '@qm/directory'
 import type { ImDeliveryQueue } from '@qm/im-core'
 import Schema from '@qm/schemastery'
 import { ImTurnBridgeService } from '@qm/im-bridge'
@@ -57,18 +58,27 @@ export class TriggersService extends Service<TriggersConfig> {
     if (!deliveries) throw new Error('triggers requires the im-bridge delivery queue — load @qm/im-bridge first')
     this.crons = createMemoryCronStore()
     const replyAs = this.config.replyAs ?? 'markdown'
+    const directory = api.directory
+    const resolveDm = directory
+      ? async (provider: string, userId: string) =>
+          (await resolveProviderDm(directory, provider, userId))?.destination ?? null
+      : undefined
     const deps = {
       sessions: api.sessions,
       runs: api.runs,
       resolution: api.resolution,
       deliveries,
       replyAs,
+      ...(resolveDm ? { resolveDm } : {}),
+      ...(directory ? { directory } : {}),
     }
     this.scheduler = createCronScheduler({ ...deps, crons: this.crons })
     this.triggers = createTriggerSink(deps)
     // Parity surface (11.0): expose the registry + scheduler to the API's
-    // cron routes; cleared on dispose so late requests 404 cleanly.
-    api.cronsRuntime = { crons: this.crons, scheduler: this.scheduler }
+    // cron routes; cleared on dispose so late requests 404 cleanly. The
+    // delivery queue rides along for consent/edit notices and the admin
+    // provenance view (14.0).
+    api.cronsRuntime = { crons: this.crons, scheduler: this.scheduler, deliveries }
     this.scheduler.start(this.config.intervalMs)
     return async () => {
       api.cronsRuntime = undefined

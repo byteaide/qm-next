@@ -39,6 +39,8 @@ import {
 } from '@qm/approvals'
 import { createMemoryDirectoryStore } from '@qm/directory'
 import { createKeychain, deriveConnectorKey } from '@qm/credentials'
+import type { ImDeliveryQueue } from '@qm/im-core'
+import type { Keychain } from '@qm/types'
 import { createClaudeHarness } from '@qm/harness-claude'
 import { createCodexHarness } from '@qm/harness-codex'
 import { createOpenCodeHarness } from '@qm/harness-opencode'
@@ -376,9 +378,11 @@ export class ApiService extends Service<ApiConfig> {
   /**
    * Cron runtime (store + scheduler) injected by the triggers plugin after
    * it boots; the parity cron routes read it lazily per request, so late
-   * injection is fine. Routes 404 while absent.
+   * injection is fine. Routes 404 while absent. `deliveries` is the
+   * bridge's delivery queue — consent/edit notices and the admin shadow
+   * view ride it.
    */
-  cronsRuntime?: { crons: CronStore; scheduler?: CronScheduler } | undefined
+  cronsRuntime?: { crons: CronStore; scheduler?: CronScheduler; deliveries?: ImDeliveryQueue } | undefined
 
   /**
    * Ambient ingredients (14.0): the default harness's judge port for the
@@ -398,6 +402,11 @@ export class ApiService extends Service<ApiConfig> {
   directory?: DirectoryStore
   /** Durable agent-request registry (14.0): the bridge records reply directives here. */
   agentRequests?: AgentRequestStore
+  /**
+   * Keychain instance (14.0): the im-bridge ask-resolution sweep polls it
+   * for resolved-but-unnotified asks; routes keep their lazy accessor.
+   */
+  keychain?: Keychain
 
   constructor(ctx: Context, public config: ApiConfig) {
     super(ctx, 'api')
@@ -619,6 +628,7 @@ export class ApiService extends Service<ApiConfig> {
     }
     if (channelPolicyStore) this.channelPolicy = channelPolicyStore
     if (directoryStore) this.directory = directoryStore
+    if (keychain) this.keychain = keychain
     if (this.config.agentRequests) {
       this.agentRequests = databaseUrl
         ? createPostgresAgentRequestStore(databaseUrl, orgId)
@@ -715,6 +725,7 @@ export class ApiService extends Service<ApiConfig> {
                 ...(skillStore ? { skills: skillStore } : {}),
                 ...(skillPackStore ? { skillPacks: skillPackStore } : {}),
                 crons: () => this.cronsRuntime?.crons,
+                deliveries: () => this.cronsRuntime?.deliveries,
                 ...(directoryStore ? { directory: directoryStore } : {}),
                 ...(environmentRegistry ? { environments: environmentRegistry } : {}),
                 ...(egressAuditSink ? { egressAudit: egressAuditSink } : {}),
@@ -795,6 +806,8 @@ export class ApiService extends Service<ApiConfig> {
         crons: {
           crons: () => this.cronsRuntime?.crons,
           scheduler: () => this.cronsRuntime?.scheduler,
+          ...(directoryStore ? { directory: directoryStore } : {}),
+          deliveries: () => this.cronsRuntime?.deliveries,
           ...(directoryStore
             ? {
                 reach: reachDirectory(directoryStore),

@@ -2,17 +2,23 @@
  * Cron routes (parity contract "crons", 7 routes + the id match route) over
  * the @qm/triggers CronStore. Lane A scope: the source-mode surface is
  * complete (create with resolved destination, list/get/patch/delete,
- * disable, manual run, fire log); capability-mode-only fields (runAs,
- * destinationKey, unattendedGrants, personal scope, consent) arrive with
- * the IM-domain backfill (14.0) and are refused with qm's error codes.
+ * disable, manual run, fire log). Capability-mode-only fields (runAs,
+ * destinationKey, unattendedGrants, personal scope) are refused with qm's
+ * error codes. Recipient consent (14.0): standing crons delivering into
+ * another person's DM stamp a pending decision, notify the recipient, and
+ * hold deliveries until they accept (`POST /v1/triggers/:id/consent`);
+ * non-owner edits notify the owner (qm's edit-notice flow).
  * Error mapping per contract: 400 create/update/destination failures,
  * 403 forbidden/identity_unverified/not_a_member, otherwise 404.
  */
-import type { CronRecord, CronSchedule, CronStore } from '@qm/triggers'
+import type { CronPatch, CronRecord, CronSchedule, CronStore } from '@qm/triggers'
 import type { CronScheduler } from '@qm/triggers'
+import { consentRequiredRecipient, decideRecipientConsent, notifyOwnerOfCronEdit, sendConsentNotice } from '@qm/triggers'
 import type { Destination, ScopeId } from '@qm/types'
-import type { ReachDirectory } from '@qm/reach'
-import { resolveReachTarget } from '@qm/reach'
+import type { DirectoryStore } from '@qm/directory'
+import { resolveProviderDm } from '@qm/directory'
+import type { ImDeliveryQueue } from '@qm/im-core'
+import { resolveReachTarget, type ReachDirectory } from '@qm/reach'
 import type { ApiRouteContext, Route } from './framework.ts'
 import { badRequest, isObj, notFound, sendJson } from './framework.ts'
 
@@ -28,6 +34,10 @@ export interface CronRoutesDeps {
   provider?: string
   /** Default fire scope for capability-mode creates (org scope). */
   scopeFor?: () => ScopeId
+  /** Roster for display names and owner/recipient DM resolution. */
+  directory?: DirectoryStore
+  /** Notice delivery sink; the triggers plugin shares the bridge queue. */
+  deliveries?: () => Pick<ImDeliveryQueue, 'enqueue'> | undefined
 }
 
 interface CronView extends Omit<CronRecord, 'schedule'> {
@@ -86,6 +96,65 @@ function refused(ctx: ApiRouteContext, err: unknown): void {
   sendJson(ctx, 400, { error: 'bad_request', message })
 }
 
+/** qm standing rule: calendar or interval schedules wait for consent. */
+function isStandingSchedule(schedule: CronSchedule): boolean {
+  return schedule.cron !== undefined || schedule.everyMs !== undefined
+}
+
+function principalUid(principalId: string): { provider: string; uid: string } | null {
+  const sep = principalId.indexOf(':')
+  if (sep <= 0) return null
+  return { provider: principalId.slice(0, sep), uid: principalId.slice(sep + 1) }
+}
+
+async function directoryMemberOf(
+  deps: CronRoutesDeps,
+  principalId: string,
+): Promise<{ displayName?: string } | null> {
+  const parts = principalUid(principalId)
+  if (!deps.directory || !parts) return null
+  const person = await deps.directory.getPerson(parts.provider, parts.uid).catch(() => null)
+  return person ? { ...(person.displayName ? { displayName: person.displayName } : {}) } : null
+}
+
+async function ownerDmDestination(deps: CronRoutesDeps, principalId: string): Promise<Destination | null> {
+  const parts = principalUid(principalId)
+  if (!deps.directory || !parts) return null
+  const dm = await resolveProviderDm(deps.directory, parts.provider, parts.uid).catch(() => null)
+  return dm?.destination ?? null
+}
+
+/** Recipient consent notice over the shared delivery queue; silent when unresolvable. */
+async function deliverConsentNotice(deps: CronRoutesDeps, args: {
+  triggerId: string
+  recipientId: string
+  ownerId: string
+  title?: string
+}): Promise<void> {
+  const deliveries = deps.deliveries?.()
+  const parts = principalUid(args.recipientId)
+  if (!deliveries || !deps.directory || !parts) return
+  const dm = await resolveProviderDm(deps.directory, parts.provider, parts.uid).catch(() => null)
+  if (!dm) return
+  const ownerName = (await directoryMemberOf(deps, args.ownerId))?.displayName
+  await sendConsentNotice(
+    (input) =>
+      deliveries.enqueue({
+        provider: dm.destination.type,
+        op: { op: 'send', destination: input.destination, body: { text: input.text } },
+        idempotencyKey: input.idempotencyKey,
+      }),
+    {
+      triggerId: args.triggerId,
+      recipientId: args.recipientId,
+      ownerId: args.ownerId,
+      ...(ownerName ? { ownerName } : {}),
+      what: args.title ? `a scheduled message ("${args.title}")` : 'a recurring scheduled message',
+      destination: dm.destination,
+    },
+  )
+}
+
 async function createCron(ctx: ApiRouteContext, deps: CronRoutesDeps): Promise<void> {
   const crons = deps.crons?.()
   if (!crons) return notFound(ctx)
@@ -109,6 +178,12 @@ async function createCron(ctx: ApiRouteContext, deps: CronRoutesDeps): Promise<v
     return sendJson(ctx, 403, { error: 'identity_unverified', message: 'cron ownership requires an authenticated principal' })
   }
   const scopeId = (ctx.actor ? deps.scopeFor?.() : undefined) ?? (typeof body.scopeId === 'string' ? body.scopeId : 'org:default')
+  const standing = isStandingSchedule(schedule)
+  const consentRecipient = consentRequiredRecipient({
+    owner: ownerId,
+    standing,
+    ...(destination ? { destination } : {}),
+  })
   let record: CronRecord
   try {
     record = await crons.create({
@@ -120,9 +195,13 @@ async function createCron(ctx: ApiRouteContext, deps: CronRoutesDeps): Promise<v
       ...(message ? { message } : {}),
       ...(destination ? { destination } : {}),
       ...(title ? { title } : {}),
+      ...(consentRecipient ? { recipientConsent: { recipientId: consentRecipient, status: 'pending' as const } } : {}),
     })
   } catch (err) {
     return refused(ctx, err)
+  }
+  if (consentRecipient) {
+    await deliverConsentNotice(deps, { triggerId: record.id, recipientId: consentRecipient, ownerId, ...(title ? { title } : {}) })
   }
   return sendJson(ctx, 200, {
     cron: view(record),
@@ -219,13 +298,15 @@ async function cronById(ctx: ApiRouteContext, deps: CronRoutesDeps): Promise<voi
       if (!Object.keys(patch).length) {
         return badRequest(ctx, 'nothing to change', 'CRON_PATCH_NOTHING_TO_CHANGE')
       }
+      let next: CronRecord | null
       try {
-        const next = await crons.update(record.id, patch)
+        next = await crons.update(record.id, patch)
         if (!next) return notFound(ctx)
-        return sendJson(ctx, 200, { cron: view(next) })
       } catch (err) {
         return refused(ctx, err)
       }
+      await notifyOwnerOfEdit(deps, ctx, record, next, patch)
+      return sendJson(ctx, 200, { cron: view(next) })
     }
     default:
       return notFound(ctx)
@@ -242,18 +323,70 @@ export function cronRoutes(deps: CronRoutesDeps): ReadonlyArray<Route> {
     { method: 'GET', path: '/v1/crons/:id', auth: 'source', handle: (ctx) => cronById(ctx, deps) },
     { method: 'PATCH', path: '/v1/crons/:id', auth: 'source', handle: (ctx) => cronById(ctx, deps) },
     { method: 'DELETE', path: '/v1/crons/:id', auth: 'source', handle: (ctx) => cronById(ctx, deps) },
-    // Consent route: the consent store arrives with the IM-domain backfill
-    // (14.0); without one there is never a pending consent (qm: 400).
-    {
-      method: 'POST',
-      path: '/v1/triggers/:id/consent',
-      auth: 'either',
-      handle: async (ctx) => {
-        if (!ctx.actor) {
-          return sendJson(ctx, 403, { error: 'forbidden', message: 'consent decisions require an agent capability token' })
-        }
-        return badRequest(ctx, 'no consent pending for this trigger')
-      },
-    },
+    { method: 'POST', path: '/v1/triggers/:id/consent', auth: 'either', handle: (ctx) => triggerConsent(ctx, deps) },
   ]
+}
+
+/** Owner notice on a third-party edit (qm edit-notice flow, provider-native DM). */
+async function notifyOwnerOfEdit(
+  deps: CronRoutesDeps,
+  ctx: ApiRouteContext,
+  before: CronRecord,
+  after: CronRecord,
+  patch: CronPatch,
+): Promise<void> {
+  const editorId = ctx.actor?.id
+  const deliveries = deps.deliveries?.()
+  if (!editorId || editorId === before.ownerId || !deliveries) return
+  const changes: string[] = []
+  if (patch.title !== undefined) changes.push('title')
+  if (patch.action !== undefined || patch.message !== undefined) changes.push('task')
+  if (patch.schedule !== undefined) changes.push('schedule')
+  if (patch.enabled !== undefined) changes.push(`enabled=${String(patch.enabled)}`)
+  if (patch.archived !== undefined) changes.push(`archived=${String(patch.archived)}`)
+  if (changes.length === 0) return
+  await notifyOwnerOfCronEdit(
+    {
+      enqueueDelivery: (input) =>
+        deliveries.enqueue({
+          provider: input.destination.type,
+          op: { op: 'send', destination: input.destination, body: { text: input.text } },
+          idempotencyKey: input.idempotencyKey,
+        }),
+      directoryMember: (principalId) => directoryMemberOf(deps, principalId),
+      ownerDestination: (ownerPrincipalId) => ownerDmDestination(deps, ownerPrincipalId),
+    },
+    {
+      cron: { id: after.id, owner: after.ownerId, ...(after.title ? { title: after.title } : {}) },
+      editorId,
+      changeSummary: changes,
+      editFingerprint: JSON.stringify(patch),
+      ...(patch.schedule !== undefined ? { detail: { schedule: after.schedule } } : {}),
+    },
+  )
+}
+
+/** qm's consent decision flow: accept/decline by the stamped recipient. */
+async function triggerConsent(ctx: ApiRouteContext, deps: CronRoutesDeps): Promise<void> {
+  if (!ctx.actor) {
+    return sendJson(ctx, 403, { error: 'forbidden', message: 'consent decisions require an agent capability token' })
+  }
+  const decision = isObj(ctx.body) ? ctx.body.decision : undefined
+  if (decision !== 'accept' && decision !== 'decline') {
+    return badRequest(ctx, 'decision must be "accept" or "decline"')
+  }
+  const crons = deps.crons?.()
+  if (!crons) return notFound(ctx)
+  const id = ctx.params.id
+  if (!id) return notFound(ctx)
+  const record = await crons.get(id)
+  if (!record) return notFound(ctx)
+  const decided = decideRecipientConsent(record.recipientConsent, ctx.actor.id, decision, Date.now())
+  if (!decided.ok) {
+    return decided.reason === 'no_consent'
+      ? badRequest(ctx, 'this trigger has no recipient consent to decide on')
+      : sendJson(ctx, 403, { error: 'forbidden', message: 'only the delivery recipient can accept or decline this' })
+  }
+  await crons.setRecipientConsent(id, decided.consent)
+  return sendJson(ctx, 200, { ok: true, consent: decided.consent })
 }

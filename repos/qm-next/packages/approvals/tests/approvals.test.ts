@@ -8,13 +8,16 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { InboundMessageEvent } from '@qm/im-core'
-import type { Destination, Principal, TurnInput } from '@qm/types'
+import type { Destination, KeychainAsk, Principal, TurnInput } from '@qm/types'
 import {
   AGENT_REQUEST_INSTRUCTION,
   AGENT_REQUEST_VALUE_KIND,
   AMBIENT_JUDGE_SYSTEM,
   APPROVAL_VALUE_KIND,
+  askFallbackText,
+  askResolutionInput,
   createAmbientService,
+  createAskExpirySweep,
   createKeywordAmbientJudge,
   createMemoryAgentRequestStore,
   createMemoryApprovalStore,
@@ -582,4 +585,107 @@ test('agent-request store: target-only decision state machine', async () => {
   assert.equal(reRecord.status, 'approved', 're-recording never resurrects a decided request')
   const pendingList = await store.listPending()
   assert.equal(pendingList.length, 0)
+})
+
+test('ask resolution input: approved, declined, and expired phrasing', () => {
+  const base = {
+    id: 'ask-1',
+    credentialId: 'cred-1',
+    ownerId: 'feishu:u_owner',
+    requesterId: 'feishu:u_requester',
+    requesterScopeId: 'personal:feishu:u_requester' as const,
+    purpose: 'post to the release channel',
+    createdAt: 1,
+    expiresAt: 2,
+  }
+  const approved = { ...base, status: 'approved' as const, grantId: 'grant-9' }
+  const once = askResolutionInput(approved, { mode: 'once', purpose: 'release posting' })
+  assert.match(once, /approved by its owner \(feishu:u_owner\): one-time grant `grant-9`/)
+  assert.match(once, /the owner's consent, verbatim: "release posting"/)
+  assert.match(once, /the grant is single-use/)
+  assert.match(once, /v1\/keychain\/use/)
+  const standing = askResolutionInput(approved, { mode: 'standing', purpose: 'release posting' })
+  assert.match(standing, /standing grant `grant-9`/)
+  assert.doesNotMatch(standing, /single-use/)
+  const fallbackGrant = askResolutionInput(approved)
+  assert.match(fallbackGrant, /verbatim: "post to the release channel"/)
+
+  const declined = askResolutionInput({ ...base, status: 'declined' as const, note: 'ask me first' })
+  assert.match(declined, /was declined by its owner \(feishu:u_owner\) — "ask me first"/)
+  assert.match(declined, /run the service's own login here themselves/)
+
+  const expired = askResolutionInput({ ...base, status: 'expired' as const })
+  assert.match(expired, /expired without an answer/)
+  assert.match(expired, /re-send the ask/)
+
+  assert.match(
+    askFallbackText(approved),
+    /ask `ask-1` \(purpose: "post to the release channel"\) was approved — the grant is active/,
+  )
+  assert.match(askFallbackText({ ...base, status: 'declined' as const, note: 'ask me first' }), /was declined \("ask me first"\)/)
+  assert.match(askFallbackText({ ...base, status: 'expired' as const }), /expired without an answer/)
+})
+
+test('ask expiry sweep fires each resolved ask once and marks it notified', async () => {
+  const sweepAsk = (id: string, status: 'approved' | 'declined' | 'expired'): KeychainAsk => ({
+    id,
+    credentialId: 'cred-1',
+    ownerId: 'feishu:u_owner',
+    requesterId: 'feishu:u_requester',
+    requesterScopeId: 'personal:feishu:u_requester',
+    purpose: 'post to the release channel',
+    status,
+    createdAt: 1,
+    expiresAt: 2,
+  })
+  const asks = [sweepAsk('ask-a', 'approved'), sweepAsk('ask-b', 'expired')]
+  const marked: string[] = []
+  const fired: string[] = []
+  const sweep = createAskExpirySweep({
+    keychain: {
+      unnotifiedResolvedAsks: async () => asks.filter((a) => !marked.includes(a.id)),
+      markAskNotified: async (id) => {
+        marked.push(id)
+      },
+    },
+    fire: async (ask) => {
+      fired.push(ask.id)
+    },
+  })
+  await sweep(1000)
+  await sweep(2000)
+  assert.deepEqual(fired.sort(), ['ask-a', 'ask-b'])
+  assert.deepEqual(marked.sort(), ['ask-a', 'ask-b'])
+})
+
+test('ask expiry sweep retries a throwing fire on the next tick', async () => {
+  const ask: KeychainAsk = {
+    id: 'ask-x',
+    credentialId: 'cred-1',
+    ownerId: 'feishu:u_owner',
+    requesterId: 'feishu:u_requester',
+    requesterScopeId: 'personal:feishu:u_requester',
+    purpose: 'post to the release channel',
+    status: 'declined',
+    createdAt: 1,
+    expiresAt: 2,
+  }
+  const marked: string[] = []
+  let fail = true
+  const sweep = createAskExpirySweep({
+    keychain: {
+      unnotifiedResolvedAsks: async () => (marked.includes(ask.id) ? [] : [ask]),
+      markAskNotified: async (id) => {
+        marked.push(id)
+      },
+    },
+    fire: async () => {
+      if (fail) throw new Error('dm unavailable')
+    },
+  })
+  await sweep(1000)
+  assert.deepEqual(marked, [])
+  fail = false
+  await sweep(2000)
+  assert.deepEqual(marked, ['ask-x'])
 })

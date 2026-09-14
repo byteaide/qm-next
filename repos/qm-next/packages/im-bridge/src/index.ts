@@ -20,6 +20,7 @@ export type {
   ImTurnBridgeAck,
   ImTurnBridgeAgentRequests,
   ImTurnBridgeAmbient,
+  ImTurnBridgeAskResolutions,
   ImTurnBridgeDeps,
   ImTurnBridgeLoopOptions,
   ImTurnBridgeOptions,

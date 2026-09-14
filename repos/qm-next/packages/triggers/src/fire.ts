@@ -8,8 +8,9 @@
  */
 import { isVisible, type DirectoryStore } from '@qm/directory'
 import type { DeliveryOrigin, ImDeliveryQueue, ImLogger } from '@qm/im-core'
-import type { Conversation, Destination, Principal, PrincipalType, ResolutionService, Run, RunStore, ScopeId, SessionStore, TurnInput } from '@qm/types'
+import type { Conversation, Destination, Principal, PrincipalType, RecipientConsent, ResolutionService, Run, RunStore, ScopeId, SessionStore, TurnInput } from '@qm/types'
 import type { CronFireLogEntry, TriggerSubmission } from './contract.ts'
+import { consentSkipNote, recipientConsentSatisfied } from './consent.ts'
 import { hashId, truncate } from './util.ts'
 
 export const FIRE_REPLY_MAX_CHARS = 2000
@@ -21,6 +22,11 @@ export interface FireEngineDeps {
   resolution: ResolutionService
   deliveries?: ImDeliveryQueue
   directory?: DirectoryStore
+  /**
+   * Resolves a principal's bot-DM for owner skip notices ("delivery held
+   * for consent"); provider-native destinations need the roster.
+   */
+  resolveDm?: (provider: string, userId: string) => Promise<Destination | null>
   replyAs?: 'markdown' | 'text'
   logger?: ImLogger
 }
@@ -36,6 +42,8 @@ export interface SubmitSpec {
   title?: string
   /** Cron record id, carried onto delivery origin for audit. */
   cronId?: string
+  /** Pending/declined recipient consent gates the destination delivery. */
+  recipientConsent?: RecipientConsent
   firedAt: number
   scheduledAt?: number
   /** Called once when the enqueued run reaches a terminal state. */
@@ -117,9 +125,37 @@ export function createFireEngine(deps: FireEngineDeps): FireEngine {
   const logger: ImLogger = deps.logger ?? console
   const routes = new Map<string, SubmitSpec>()
 
+  /** qm's owner skip notice: the owner hears why a delivery was held. */
+  async function ownerSkipNotice(spec: SubmitSpec, note: string): Promise<void> {
+    if (!deps.deliveries || !deps.resolveDm) return
+    const sep = spec.ownerId.indexOf(':')
+    if (sep <= 0) return
+    const dm = await deps.resolveDm(spec.ownerId.slice(0, sep), spec.ownerId.slice(sep + 1)).catch(() => null)
+    if (!dm) return
+    await deps.deliveries.enqueue({
+      provider: dm.type,
+      op: { op: 'send', destination: dm, body: { text: `Scheduled delivery skipped: ${note}` } },
+      idempotencyKey: `${spec.fireKey}:consent-skip`,
+      origin: deliveryProvenance(spec),
+    })
+  }
+
+  /** Trigger provenance stamped on every fire delivery (qm parity). */
+  function deliveryProvenance(spec: SubmitSpec, run?: Run): DeliveryOrigin {
+    return {
+      ...(run ? { runId: run.id } : {}),
+      trigger: spec.cronId ?? spec.fireKey,
+      surface: spec.surface,
+      fireKey: spec.fireKey,
+      ...(spec.scopeId ? { sourceScopeId: spec.scopeId } : {}),
+      sourceThreadRef: fireThreadRef(spec),
+      ...(spec.title ? { sourceTitle: spec.title } : {}),
+      ...(run?.result?.sessionId ? { sourceSessionId: run.result.sessionId } : {}),
+    }
+  }
+
   async function deliver(run: Run, spec: SubmitSpec, reply: string): Promise<void> {
     if (!deps.deliveries || !spec.destination) return
-    const origin: DeliveryOrigin = { runId: run.id, ...(spec.cronId ? { trigger: spec.cronId } : { trigger: spec.fireKey }) }
     await deps.deliveries.enqueue({
       provider: spec.destination.type,
       op: {
@@ -128,7 +164,7 @@ export function createFireEngine(deps: FireEngineDeps): FireEngine {
         body: deps.replyAs === 'text' ? { text: reply } : { markdown: reply },
       },
       idempotencyKey: `cron-fire:${spec.fireKey}`,
-      origin,
+      origin: deliveryProvenance(spec, run),
     })
   }
 
@@ -138,7 +174,7 @@ export function createFireEngine(deps: FireEngineDeps): FireEngine {
     routes.delete(run.id)
     void (async () => {
       const result = run.result
-      const status = result?.status ?? (run.status === 'failed' ? 'failed' : undefined)
+      let status = result?.status ?? (run.status === 'failed' ? 'failed' : undefined)
       const pendingApprovals = result?.pendingApprovals ?? []
       const suppressDelivery = status === 'pending_approval' || pendingApprovals.length > 0
       let reply: string | undefined
@@ -158,6 +194,15 @@ export function createFireEngine(deps: FireEngineDeps): FireEngine {
         if (!visible) {
           reply = undefined
           note = 'destination is no longer visible to the cron owner — delivery skipped'
+        }
+      }
+      if (reply !== undefined && spec.destination && spec.recipientConsent) {
+        const satisfied = recipientConsentSatisfied(spec, spec.recipientConsent.recipientId)
+        if (!satisfied) {
+          reply = undefined
+          note = consentSkipNote(spec.recipientConsent)
+          status = 'refused'
+          await ownerSkipNotice(spec, note)
         }
       }
       const entry: CronFireLogEntry = {

@@ -568,8 +568,44 @@ Each entry names the qm source shape, the qm-next shape, and why.
     thread (`provider:dm:<id>`) with qm's handoff instruction, and the
     result delivers back into the origin thread via the recorded route —
     qm additionally updates per-message status texts and labels, which
-    the non-streaming bridge expresses as plain deliveries; (e) only the
+    the non-streaming bridge expresses as plain deliveries;     (e) only the
     target user may decide (store-enforced), duplicates dedupe, and
     re-recording never resurrects a decided request; (f) the registry is
     memory in `@qm/approvals` and Postgres (`agent_requests`) via the
     api's durable-by-default flag.
+
+54. **Consent, edit notices, ask sweeps, and provenance adaptations
+    (14.0 tranche 4)** — qm delivers notices to virtual principal
+    destinations and runs ask resolutions through `runTrigger`; qm-next
+    providers only deliver to concrete spaces, so: (a) recipient consent
+    ports verbatim as pure helpers (`consentRequiredRecipient`,
+    `recipientConsentSatisfied`, `decideRecipientConsent`) in
+    `@qm/triggers`, the stamp rides `CronRecord.recipientConsent`
+    (memory + Postgres `recipient_consent` JSONB with an additive ALTER
+    for existing tables), and the fire engine (turn and direct-relay
+    paths) refuses the fire, records the qm skip note, and sends the
+    owner a skip notice to their resolved DM instead of qm's principal
+    destination; (b) consent/edit/ask notices resolve the recipient's
+    bot-DM through the directory (`resolveProviderDm`) — silently skipped
+    (warn for asks) when no DM has synced, since a pending consent still
+    holds deliveries safely; (c) the consent decision route implements
+    qm's error ladder (capability 403, decision 400, unknown 404,
+    no_consent 400, not_recipient 403); webhook consent is deferred with
+    the webhooks consent backfill, and destination retargeting (no
+    qm-next route) never re-stamps; (d) qm notifies cron edits only for
+    `scopeShared` crons — qm-next has no shared mode yet, so any
+    non-owner edit notifies the owner via qm's composer with an
+    sha-256 fingerprint dedupe key, and the ref stays plain text (no
+    admin-URL link yet); (e) ask resolution is a bridge sweep
+    (`askResolutions`, default 30s) over qm's `createAskExpirySweep`
+    shape: each resolved ask becomes a personal turn in the requester's
+    DM carrying qm's resolution input (approved one-time/standing with
+    the keychain-use command, declined, expired) — an unresolvable DM is
+    marked notified with a warning instead of pinning the sweep, and qm's
+    `fireAskResolution` fallback text + drop-resolution flow are not
+    ported (no recorded requester destination and the secret-drop flow
+    differs); (f) delivery provenance extends `DeliveryOrigin`
+    (`surface/fireKey/sourceScopeId/sourceThreadRef/sourceTitle/
+    sourceSessionId`) stamped by the fire engine and consumed by
+    `/v1/admin/deliveries/shadow`, which lists live trigger-provenanced
+    deliveries rather than qm's shadow dry-runs (no shadow mode exists).

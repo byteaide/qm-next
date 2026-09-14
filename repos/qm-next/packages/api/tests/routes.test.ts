@@ -220,8 +220,9 @@ test('crons: create/list/get/patch/runs/disable/delete over the memory store', a
   await app.close()
 })
 
-test('crons: consent route reports no pending consent until the consent store lands', async () => {
-  const app = probe(cronRoutes({ crons: () => createMemoryCronStore() }))
+test('crons: the consent route answers per decision-state (unknown id 404, no stamp 400)', async () => {
+  const store = createMemoryCronStore()
+  const app = probe(cronRoutes({ crons: () => store }))
   const anon = await app.inject({ method: 'POST', url: '/v1/triggers/x/consent', payload: { decision: 'accept' } })
   assert.equal(anon.statusCode, 403)
   const agent = await app.inject({
@@ -230,6 +231,22 @@ test('crons: consent route reports no pending consent until the consent store la
     headers: auth(await token()),
     payload: { decision: 'accept' },
   })
-  assert.equal(agent.statusCode, 400)
+  assert.equal(agent.statusCode, 404, 'unknown trigger ids 404 like qm')
+
+  const created = await store.create({
+    scopeId: 'org:default',
+    ownerId: 'feishu:u_owner',
+    createdBy: 'feishu:u_owner',
+    schedule: { everyMs: 60_000 },
+    action: 'digest',
+  })
+  const noConsent = await app.inject({
+    method: 'POST',
+    url: `/v1/triggers/${created.id}/consent`,
+    headers: auth(await token()),
+    payload: { decision: 'accept' },
+  })
+  assert.equal(noConsent.statusCode, 400)
+  assert.match(noConsent.json().message, /no recipient consent/)
   await app.close()
 })

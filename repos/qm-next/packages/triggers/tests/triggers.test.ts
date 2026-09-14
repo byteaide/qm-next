@@ -10,19 +10,22 @@ import { test } from 'node:test'
 import { createMemoryDirectoryStore } from '@qm/directory'
 import type { DirectorySyncPush, ImDelivery, SendOperation } from '@qm/im-core'
 import { createMemoryDeliveryQueue } from '@qm/im-core/runtime'
-import type { Run, TurnInput, TurnResult } from '@qm/types'
+import type { Destination, RecipientConsent, Run, TurnInput, TurnResult } from '@qm/types'
 import { createMemoryRunStore, createMemorySessionStore } from '@qm/store'
 import type { CronStore, CreateCronInput, LeaderLease } from '../src/index.ts'
 import {
   advanceNextFireAt,
+  consentRequiredRecipient,
   createCronScheduler,
   createMemoryCronStore,
   createMemoryLeaderLease,
   createPostgresCronStore,
   createTriggerSink,
   cronFireKey,
+  decideRecipientConsent,
   normalizeSchedule,
   recoverNextFireAt,
+  recipientConsentSatisfied,
   renderCronFireInput,
   validateUserSchedule,
 } from '../src/index.ts'
@@ -57,6 +60,7 @@ function messageInput(overrides: Partial<CreateCronInput> = {}): CreateCronInput
     schedule: input.schedule,
     message: 'standup in five',
     ...(input.destination ? { destination: input.destination } : {}),
+    ...(input.recipientConsent ? { recipientConsent: input.recipientConsent } : {}),
   }
 }
 
@@ -241,6 +245,22 @@ async function cronStoreCases(t: import('node:test').TestContext, make: () => Pr
       await h.close()
     }
   })
+
+  await t.test('recipient consent round-trips and clears', async () => {
+    const h = await make()
+    try {
+      const consent: RecipientConsent = { recipientId: 'feishu:u_other', status: 'pending' }
+      const created = await h.store.create(createInput({ recipientConsent: consent }))
+      assert.deepEqual((await h.store.get(created.id))?.recipientConsent, consent)
+      const accepted = await h.store.setRecipientConsent(created.id, { ...consent, status: 'accepted', decidedAt: T0 })
+      assert.equal(accepted?.recipientConsent?.status, 'accepted')
+      assert.equal(accepted?.recipientConsent?.decidedAt, T0)
+      const cleared = await h.store.setRecipientConsent(created.id, undefined)
+      assert.equal(cleared?.recipientConsent, undefined)
+    } finally {
+      await h.close()
+    }
+  })
 }
 
 test('memory cron store parity cases', async (t) => {
@@ -328,6 +348,7 @@ function schedulerWorld(
     identity?: { isInternal(p: { id: string; type: string }): boolean }
     maxFiresPerTick?: number
     directory?: Awaited<ReturnType<typeof createMemoryDirectoryStore>>
+    resolveDm?: (provider: string, userId: string) => Promise<Destination | null>
   } = {},
 ): SchedulerWorld {
   let clock = T0
@@ -346,6 +367,7 @@ function schedulerWorld(
     ...(opts.identity ? { identity: opts.identity } : {}),
     ...(opts.maxFiresPerTick !== undefined ? { maxFiresPerTick: opts.maxFiresPerTick } : {}),
     ...(opts.directory ? { directory: opts.directory } : {}),
+    ...(opts.resolveDm ? { resolveDm: opts.resolveDm } : {}),
     now: () => clock,
   })
   return {
@@ -710,4 +732,148 @@ test('postgres claimSlot serializes concurrent claims', async (t) => {
   } finally {
     await store.close?.()
   }
+})
+
+test('consent helpers: stamping target, decisions, and satisfaction', () => {
+  const destination: Destination = { type: 'principal', target: 'feishu:u_other' }
+  assert.equal(consentRequiredRecipient({ owner: 'feishu:u_owner', standing: true, destination }), 'feishu:u_other')
+  assert.equal(
+    consentRequiredRecipient({ owner: 'feishu:u_other', standing: true, destination }),
+    undefined,
+  )
+  assert.equal(
+    consentRequiredRecipient({ owner: 'feishu:u_owner', standing: true, destination: { type: 'feishu', target: 'oc_x' } }),
+    undefined,
+  )
+  assert.equal(consentRequiredRecipient({ owner: 'feishu:u_owner', standing: false, destination }), undefined)
+
+  const pending: RecipientConsent = { recipientId: 'feishu:u_other', status: 'pending' }
+  assert.deepEqual(decideRecipientConsent(undefined, 'feishu:u_other', 'accept', T0), { ok: false, reason: 'no_consent' })
+  assert.deepEqual(decideRecipientConsent(pending, 'feishu:u_owner', 'accept', T0), { ok: false, reason: 'not_recipient' })
+  const accepted = decideRecipientConsent(pending, 'feishu:u_other', 'accept', T0)
+  assert.deepEqual(accepted, { ok: true, consent: { ...pending, status: 'accepted', decidedAt: T0 } })
+  assert.deepEqual(decideRecipientConsent(pending, 'feishu:u_other', 'decline', T0), {
+    ok: true,
+    consent: { ...pending, status: 'declined', decidedAt: T0 },
+  })
+
+  assert.equal(recipientConsentSatisfied({}, undefined), true)
+  assert.equal(recipientConsentSatisfied({ recipientConsent: { ...pending, status: 'accepted' } }, undefined), true)
+  assert.equal(recipientConsentSatisfied({ recipientConsent: pending }, undefined), false)
+  assert.equal(
+    recipientConsentSatisfied({ recipientConsent: { ...pending, status: 'accepted' } }, 'feishu:u_other'),
+    true,
+  )
+  assert.equal(
+    recipientConsentSatisfied({ recipientConsent: { ...pending, status: 'accepted' } }, 'feishu:u_owner'),
+    false,
+  )
+})
+
+test('pending consent holds the delivery, refuses the fire, and notices the owner', async () => {
+  const world = schedulerWorld({
+    resolveDm: async (provider, userId) => ({ type: provider, target: `dm_${userId}` }),
+  })
+  const created = await world.crons.create(
+    createInput({
+      schedule: { everyMs: 1_000, firstFireAt: T0 + 1_000 },
+      destination: { type: 'feishu', target: 'oc_replies' },
+      recipientConsent: { recipientId: 'feishu:u_other', status: 'pending' },
+    }),
+  )
+  await world.tick(T0 + 1_000)
+  const runs = await world.runList()
+  assert.equal(runs.length, 1)
+  await world.complete(runs[0]!, { status: 'ok', reply: 'all done', sessionId: 'sess-1' })
+
+  const queued = await world.queue.list!()
+  assert.equal(queued.some((d) => d.idempotencyKey === `cron-fire:${cronFireKey(created.id, T0 + 1_000)}`), false)
+  const skip = queued.find((d) => d.idempotencyKey === `${cronFireKey(created.id, T0 + 1_000)}:consent-skip`)
+  assert.ok(skip)
+  assert.deepEqual((skip.op as SendOperation).destination, { type: 'feishu', target: 'dm_u_owner' })
+  assert.match(JSON.stringify((skip.op as SendOperation).body), /Scheduled delivery skipped/)
+  const entry = (await world.crons.getFires(created.id)).runs[0]!
+  assert.equal(entry.status, 'refused')
+  assert.match(entry.note ?? '', /awaiting the recipient's consent/)
+  assert.equal(entry.reply, undefined)
+
+  await world.crons.setRecipientConsent(created.id, {
+    recipientId: 'feishu:u_other',
+    status: 'accepted',
+    decidedAt: T0 + 2_000,
+  })
+  await world.tick(T0 + 2_000)
+  const next = (await world.runList()).find((r) => r.id !== runs[0]!.id)
+  assert.ok(next)
+  await world.complete(next, { status: 'ok', reply: 'delivered now' })
+  const after = await world.queue.list!()
+  assert.equal(
+    after.some((d) => d.idempotencyKey === `cron-fire:${cronFireKey(created.id, T0 + 2_000)}`),
+    true,
+  )
+})
+
+test('declined consent keeps holding deliveries with the declined note', async () => {
+  const world = schedulerWorld({
+    resolveDm: async (provider, userId) => ({ type: provider, target: `dm_${userId}` }),
+  })
+  const created = await world.crons.create(
+    createInput({
+      schedule: { everyMs: 1_000, firstFireAt: T0 + 1_000 },
+      destination: { type: 'feishu', target: 'oc_replies' },
+      recipientConsent: { recipientId: 'feishu:u_other', status: 'declined', decidedAt: T0 },
+    }),
+  )
+  await world.tick(T0 + 1_000)
+  const runs = await world.runList()
+  await world.complete(runs[0]!, { status: 'ok', reply: 'all done' })
+  const queued = await world.queue.list!()
+  assert.equal(queued.some((d) => d.idempotencyKey.startsWith('cron-fire:')), false)
+  const entry = (await world.crons.getFires(created.id)).runs[0]!
+  assert.match(entry.note ?? '', /recipient turned this delivery off/)
+})
+
+test('message fires with pending consent are refused and notice the owner', async () => {
+  const world = schedulerWorld({
+    resolveDm: async (provider, userId) => ({ type: provider, target: `dm_${userId}` }),
+  })
+  const created = await world.crons.create(
+    messageInput({
+      schedule: { everyMs: 1_000, firstFireAt: T0 + 1_000 },
+      destination: { type: 'feishu', target: 'oc_team' },
+      recipientConsent: { recipientId: 'feishu:u_other', status: 'pending' },
+    }),
+  )
+  await world.tick(T0 + 1_000)
+  const queued = await world.queue.list!()
+  assert.equal(queued.some((d) => d.idempotencyKey.startsWith('cron-fire:')), false)
+  const entry = (await world.crons.getFires(created.id)).runs[0]!
+  assert.equal(entry.status, 'refused')
+  assert.match(entry.note ?? '', /awaiting the recipient's consent/)
+  assert.equal(queued.filter((d) => d.idempotencyKey.endsWith(':consent-skip')).length, 1)
+})
+
+test('turn-fire deliveries carry trigger provenance', async () => {
+  const world = schedulerWorld()
+  const created = await world.crons.create(
+    createInput({
+      title: 'standup notes',
+      schedule: { everyMs: 1_000, firstFireAt: T0 + 1_000 },
+      destination: { type: 'feishu', target: 'oc_replies' },
+    }),
+  )
+  await world.tick(T0 + 1_000)
+  const runs = await world.runList()
+  await world.complete(runs[0]!, { status: 'ok', reply: 'all done', sessionId: 'sess-1' })
+  const deliveries = await world.deliverables()
+  assert.equal(deliveries.length, 1)
+  const origin = deliveries[0]!.origin!
+  assert.equal(origin.runId, runs[0]!.id)
+  assert.equal(origin.trigger, created.id)
+  assert.equal(origin.surface, 'cron')
+  assert.equal(origin.fireKey, cronFireKey(created.id, T0 + 1_000))
+  assert.equal(origin.sourceScopeId, SCOPE)
+  assert.match(origin.sourceThreadRef ?? '', /^cron:/)
+  assert.equal(origin.sourceTitle, 'standup notes')
+  assert.equal(origin.sourceSessionId, 'sess-1')
 })

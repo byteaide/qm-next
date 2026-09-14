@@ -62,6 +62,7 @@ export function createMemoryCronStore(): CronStore {
         ...(input.action !== undefined ? { action: input.action } : {}),
         ...(input.message !== undefined ? { message: input.message } : {}),
         ...(input.destination ? { destination: input.destination } : {}),
+        ...(input.recipientConsent ? { recipientConsent: input.recipientConsent } : {}),
         enabled: true,
         archived: false,
         createdAt: now,
@@ -104,6 +105,12 @@ export function createMemoryCronStore(): CronStore {
     async delete(id) {
       crons.delete(id)
       fires.delete(id)
+    },
+    async setRecipientConsent(id, consent) {
+      return transform(id, (cron) => {
+        const { recipientConsent: _dropped, ...rest } = cron
+        return { ...rest, ...(consent ? { recipientConsent: consent } : {}) }
+      })
     },
     async setEnabled(id, enabled) {
       transform(id, (cron) => ({ ...cron, enabled, ...(enabled ? { archived: false } : {}) }))

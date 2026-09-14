@@ -39,6 +39,7 @@ export interface AdminDeps {
   skills?: SkillStore
   skillPacks?: import('../services/skill-pack-store.ts').SkillPackStore
   crons?: () => CronStore | undefined
+  deliveries?: () => import('@qm/im-core').ImDeliveryQueue | undefined
   directory?: DirectoryStore
   environments?: EnvironmentRegistry
   egressAudit?: EgressAuditSink
@@ -425,7 +426,25 @@ async function getAdminSessionLlm(ctx: ApiRouteContext, deps: AdminDeps): Promis
 async function listAdminShadowDeliveries(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const authz = await requireScopedAdmin(ctx, deps)
   if (!authz) return undefined
-  return { scopeId: authz.scope, shadow: [] }
+  // Trigger-provenanced deliveries (cron fires, consent/edit notices):
+  // qm's shadow view consumed dry-run fires; qm-next has no shadow mode,
+  // so the admin sees the live provenance instead.
+  const queue = deps.deliveries?.()
+  const rows = (await queue?.list?.({ limit: 200 })) ?? []
+  const orgWide = authz.scope.startsWith('org:')
+  const shadow = rows
+    .filter((d) => d.origin?.fireKey !== undefined)
+    .filter((d) => orgWide || d.origin?.sourceScopeId === authz.scope)
+    .map((d) => ({
+      deliveryId: d.id,
+      provider: d.provider,
+      ...(d.op.op === 'send' ? { destination: d.op.destination } : {}),
+      createdAt: d.createdAt,
+      idempotencyKey: d.idempotencyKey,
+      origin: d.origin ?? null,
+      deliveredAt: d.deliveredAt,
+    }))
+  return { scopeId: authz.scope, shadow }
 }
 
 async function listSlackMirrorContainers(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {

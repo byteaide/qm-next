@@ -21,6 +21,7 @@ import {
   createModelAmbientJudge,
   type ChannelPolicyStore,
 } from '@qm/approvals'
+import { resolveProviderDm } from '@qm/directory'
 import type { ImDeliveryQueue } from '@qm/im-core'
 import { ImRegistryService } from '@qm/im-core/runtime'
 import Schema from '@qm/schemastery'
@@ -57,6 +58,10 @@ export interface ImBridgeConfig {
   ackEmojiCandidates?: string[]
   /** Agent-request directives (default off; needs the api registry, DMs from the directory). */
   agentRequests?: boolean
+  /** Keychain-ask resolution notices (default off; needs the api keychain). */
+  askResolutions?: boolean
+  /** Ask sweep cadence in ms. */
+  askSweepMs?: number
 }
 
 export const Config = Schema.object({
@@ -75,6 +80,8 @@ export const Config = Schema.object({
   ackDelayMs: Schema.number().default(2_000).description('Delay before the ack reaction fires'),
   ackEmojiCandidates: Schema.array(Schema.string()).description('Candidate emoji override; qm defaults when absent'),
   agentRequests: Schema.boolean().default(false).description('Agent-request reply directives ([[ask-agent]]) with DM approval'),
+  askResolutions: Schema.boolean().default(false).description('Keychain-ask resolution notices as personal DM turns'),
+  askSweepMs: Schema.number().default(30_000).description('Ask-resolution sweep cadence in ms'),
 })
 
 export class ImTurnBridgeService extends Service<ImBridgeConfig> {
@@ -145,6 +152,7 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
     const registry = new ImRegistryService(this.ctx, {
       onEvent: (events) => (this.bridge ? this.bridge.sink(events) : Promise.resolve()),
     })
+    const directory = api.directory
     let ack: ImTurnBridgeOptions['ack'] | undefined
     if (this.config.ackReactions !== false) {
       ack = {
@@ -161,28 +169,44 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
       }
     }
     let agentRequests: ImTurnBridgeOptions['agentRequests'] | undefined
+    const resolveDmFromDirectory = directory
+      ? async (provider: string, targetUserId: string) => await resolveProviderDm(directory, provider, targetUserId)
+      : undefined
     if (this.config.agentRequests) {
       const store = api.agentRequests ?? createMemoryAgentRequestStore()
-      const directory = api.directory
       agentRequests = {
         store,
-        ...(directory
+        ...(resolveDmFromDirectory
           ? {
               resolveDm: async (provider, targetUserId) => {
-                const spaces = await directory.listSpaces(provider)
-                for (const space of spaces) {
-                  if (space.kind !== 'dm') continue
-                  if (await directory.spaceMember(provider, space.spaceId, targetUserId)) {
-                    return { destination: { type: provider, target: space.spaceId } }
-                  }
-                }
-                return null
+                const dm = await resolveDmFromDirectory(provider, targetUserId)
+                return dm ? { destination: dm.destination } : null
               },
             }
           : {}),
       }
-      if (!directory) {
+      if (!resolveDmFromDirectory) {
         this.ctx.logger.warn('im-bridge: agentRequests enabled but the api exposes no directory — DM approval cannot resolve')
+      }
+    }
+    let askResolutions: ImTurnBridgeOptions['askResolutions'] | undefined
+    if (this.config.askResolutions) {
+      const keychain = api.keychain
+      if (!keychain) {
+        this.ctx.logger.warn('im-bridge: askResolutions enabled but the api exposes no keychain — asks are never announced')
+      } else {
+        askResolutions = {
+          keychain,
+          ...(this.config.askSweepMs !== undefined ? { sweepMs: this.config.askSweepMs } : {}),
+          ...(resolveDmFromDirectory
+            ? {
+                resolveDm: async (provider, userId) => {
+                  const dm = await resolveDmFromDirectory(provider, userId)
+                  return dm ? { destination: dm.destination } : null
+                },
+              }
+            : {}),
+        }
       }
     }
     this.bridge = createImTurnBridge(
@@ -198,6 +222,7 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
         ...(ambient ? { ambient } : {}),
         ...(ack ? { ack } : {}),
         ...(agentRequests ? { agentRequests } : {}),
+        ...(askResolutions ? { askResolutions } : {}),
         loop,
       },
     )
