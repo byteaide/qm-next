@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { Run, RunStore, ScopeId, SessionStore, TurnInput } from '@qm/types'
-import { createMemoryRunStore, createMemorySessionStore, RUN_SCHEMA_STATEMENTS, SESSION_SCHEMA_STATEMENTS } from '../src/index.ts'
+import { createMemoryRunStore, createMemorySessionStore, createPgPool, createPostgresMap, RUN_SCHEMA_STATEMENTS, SESSION_SCHEMA_STATEMENTS } from '../src/index.ts'
 import { createPostgresRunStore } from '../src/postgres-run-store.ts'
 import { createPostgresSessionStore } from '../src/postgres-session-store.ts'
 import { Pool } from 'pg'
@@ -304,5 +304,31 @@ test(
       await cleanup.query('TRUNCATE sessions, session_entries, participants, session_leases')
       return { store, close: async () => undefined }
     })
+  },
+)
+
+test(
+  'postgres map: table-name guard and cross-instance coherence',
+  { skip: pgUrl ? false : 'QM_NEXT_PG_URL not set' },
+  async (t) => {
+    assert.ok(pgUrl)
+    assert.throws(() => createPostgresMap(createPgPool(pgUrl!, []), 'sessions; drop'), /invalid table name/)
+    const table = `map_probe_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
+    const pool = createPgPool(pgUrl!, [])
+    const first = createPostgresMap<Record<string, unknown>>(pool, table)
+    const cleanup = new Pool({ connectionString: pgUrl })
+    t.after(async () => {
+      await pool.close()
+      await cleanup.query(`DROP TABLE IF EXISTS ${table}`)
+      await cleanup.query(`DELETE FROM durable_map_versions WHERE tbl = '${table}'`)
+      await cleanup.end()
+    })
+    await first.put('k1', { v: 1 })
+    const second = createPostgresMap<Record<string, unknown>>(pool, table)
+    assert.deepEqual(await second.get('k1'), { v: 1 }, 'a sibling instance sees the write (qm no-per-process-cache shape)')
+    await second.put('k1', { v: 2 })
+    assert.deepEqual(await first.get('k1'), { v: 2 }, 'the first instance does not serve a stale read')
+    await first.delete('k1')
+    assert.equal(await second.get('k1'), null, 'the removal is visible across instances')
   },
 )

@@ -43,11 +43,21 @@ docker run --rm -d -P --name "$NAME" \
   -e "POSTGRES_USER=$USER_" -e "POSTGRES_PASSWORD=$PASSWORD" -e "POSTGRES_DB=$DB" \
   "$IMAGE" >/dev/null
 
-wait_ready() {
-  local waited=0
+# pg_isready can succeed against the initdb throwaway server before the real
+# postmaster restarts (first-boot init restarts once). A suite file that probes
+# during that window sees connection refused and silently skips its PG cases.
+# Require a real query to succeed twice, a second apart, before handing the
+# URL to the suite.
+wait_settled() {
+  local waited=0 hits=0
   while [ "$waited" -lt "$READY_TIMEOUT_SECONDS" ]; do
-    if docker exec "$NAME" pg_isready -U "$USER_" -d "$DB" >/dev/null 2>&1; then
-      return 0
+    if docker exec "$NAME" psql -U "$USER_" -d "$DB" -c 'SELECT 1' >/dev/null 2>&1; then
+      hits=$((hits + 1))
+      if [ "$hits" -ge 2 ]; then
+        return 0
+      fi
+    else
+      hits=0
     fi
     sleep 1
     waited=$((waited + 1))
@@ -55,9 +65,9 @@ wait_ready() {
   return 1
 }
 
-if ! wait_ready; then
+if ! wait_settled; then
   docker logs "$NAME" 2>&1 | tail -20 || true
-  die "postgres not ready within ${READY_TIMEOUT_SECONDS}s"
+  die "postgres not settled within ${READY_TIMEOUT_SECONDS}s"
 fi
 
 port_line=$(docker port "$NAME" 5432/tcp | grep '^0.0.0.0:' || true)

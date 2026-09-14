@@ -207,3 +207,16 @@ test('postgres replay dedupe is durable and single-claim', async (t) => {
   assert.equal(await dedupe.claim(id, Date.now() + 60_000), true)
   assert.equal(await dedupe.claim(id, Date.now() + 60_000), false)
 })
+
+test('postgres replay dedupe: an expired entry stops blocking after a prune', async (t) => {
+  if (!(await probePg())) return t.skip('QM_NEXT_PG_URL unreachable')
+  const id = `pg-expired-${Date.now()}-${Math.floor(Math.random() * 1e6)}`
+  const first = createPostgresReplayDedupe(pgUrl!)
+  assert.equal(await first.claim(id, Date.now() - 1), true, 'the expired claim itself succeeds')
+  const second = createPostgresReplayDedupe(pgUrl!)
+  assert.equal(
+    await second.claim(id, Date.now() + 60_000),
+    true,
+    'a fresh instance prunes the lapsed entry on first claim (qm restart shape)',
+  )
+})

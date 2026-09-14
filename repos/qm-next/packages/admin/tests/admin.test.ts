@@ -287,9 +287,27 @@ test('postgres sinks round-trip rows', async (t) => {
     })
     const tail = await audit.tail({ limit: 10, action: 'pg.once' })
     assert.equal(tail.length, 1)
+    const secondAudit = createPostgresAuditLog(pgUrl!)
+    await secondAudit.recordOnce?.(`pg-once-${suffix}`, {
+      at: Date.now(),
+      principalId: 'u9',
+      action: 'pg.once',
+      resource: 'r',
+      scopeLabel: ORG_SCOPE,
+    })
+    assert.equal(
+      (await secondAudit.tail({ limit: 10, action: 'pg.once' })).length,
+      1,
+      'recordOnce stays idempotent across sink instances (qm durability shape)',
+    )
     const grants = createAdminGrantStore(createPostgresAdminGrantStore(pgUrl!))
     await grants.add({ principalId: `pg-admin-${suffix}`, scopeId: ORG_SCOPE, role: 'org_admin', grantedBy: 'system', createdAt: 1 })
     assert.ok((await grants.list()).some((g) => g.principalId === `pg-admin-${suffix}`))
+    const reread = createAdminGrantStore(createPostgresAdminGrantStore(pgUrl!))
+    assert.ok(
+      (await reread.list()).some((g) => g.principalId === `pg-admin-${suffix}`),
+      'a separate store instance reads the promotion back (qm restart shape)',
+    )
     await grants.revoke(`pg-admin-${suffix}`, ORG_SCOPE, 'org_admin')
     assert.equal((await grants.list()).some((g) => g.principalId === `pg-admin-${suffix}`), false)
   })
