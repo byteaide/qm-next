@@ -23,6 +23,16 @@ import { surfaceCacheRoutes, type SurfaceCacheRoutesDeps } from './routes/surfac
 import { environmentRoutes, type EnvironmentRoutesDeps } from './routes/environment-routes.ts'
 import { projectRoutes, type ProjectRoutesDeps } from './routes/project-routes.ts'
 import { sessionStateRoutes, type SessionStateRoutesDeps } from './routes/session-state-routes.ts'
+import { fileRoutes, type FileDeps } from './routes/file-routes.ts'
+import { grantRoutes, type GrantDeps } from './routes/grant-routes.ts'
+import { soulRoutes, type SoulDeps } from './routes/soul-routes.ts'
+import { surfaceConfigRoutes, type ConfigDeps } from './routes/surface-config-routes.ts'
+import { deploymentRoutes, type DeploymentDeps } from './routes/deployment-routes.ts'
+import { deploymentLayerRoutes, type DeploymentLayerDeps } from './routes/deployment-layer-routes.ts'
+import { connectorRoutes, connectorMatchRoutes, type ConnectorDeps } from './routes/connector-routes.ts'
+import { webhookRoutes, webhookRawRoutes, type WebhookDeps } from './routes/webhook-routes.ts'
+import { blobRoutes, type BlobDeps } from './routes/blob-routes.ts'
+import { registerRawRouteTable } from './routes/raw-framework.ts'
 
 export interface ApiDeps {
   orchestrator: Orchestrator
@@ -57,6 +67,24 @@ export interface ApiDeps {
   projects?: ProjectRoutesDeps
   /** Parity surface (11.0): the session-state SSE stream over the run bus. */
   sessionState?: SessionStateRoutesDeps
+  /** Parity surface (11.0): file list/content/upload over the file store. */
+  files?: FileDeps
+  /** Parity surface (11.0): grant apply/revoke plus the capability-gated share gate. */
+  grants?: GrantDeps
+  /** Parity surface (11.0): soul read/compose and personal-scope writes. */
+  soul?: SoulDeps
+  /** Parity surface (11.0): surface-config, runtime-config, channel-header-pin. */
+  config?: ConfigDeps
+  /** Parity surface (11.0): deployment management lane (proxy lane lands 13.0). */
+  deployments?: DeploymentDeps
+  /** Parity surface (11.0): the deployment CLI's tools/skills bundle lane. */
+  deploymentLayer?: DeploymentLayerDeps
+  /** Parity surface (11.0): connector OAuth/token surface over the token store. */
+  connectors?: ConnectorDeps
+  /** Parity surface (11.0): webhook CRUD and the raw incoming delivery lane. */
+  webhooks?: WebhookDeps
+  /** Parity surface (11.0): raw blob staging put/get. */
+  blobs?: BlobDeps
 }
 
 export interface ApiServerOptions {
@@ -163,6 +191,36 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
   }
   if (deps.sessionState) {
     registerRouteTable(app, opts, sessionStateRoutes(deps.sessionState))
+  }
+  if (deps.files) {
+    registerRouteTable(app, opts, fileRoutes(deps.files))
+  }
+  if (deps.grants) {
+    registerRouteTable(app, opts, grantRoutes(deps.grants))
+  }
+  if (deps.soul) {
+    registerRouteTable(app, opts, soulRoutes(deps.soul))
+  }
+  if (deps.config) {
+    registerRouteTable(app, opts, surfaceConfigRoutes(deps.config))
+  }
+  if (deps.deployments) {
+    registerRouteTable(app, opts, deploymentRoutes(deps.deployments))
+  }
+  if (deps.deploymentLayer) {
+    registerRouteTable(app, opts, deploymentLayerRoutes(deps.deploymentLayer))
+  }
+  if (deps.connectors) {
+    registerRouteTable(app, opts, connectorRoutes(deps.connectors))
+    registerRouteTable(app, opts, [connectorMatchRoutes(deps.connectors).api])
+    registerRawRouteTable(app, opts, [connectorMatchRoutes(deps.connectors).raw])
+  }
+  if (deps.webhooks) {
+    registerRouteTable(app, opts, webhookRoutes(deps.webhooks))
+    registerRawRouteTable(app, opts, webhookRawRoutes(deps.webhooks))
+  }
+  if (deps.blobs) {
+    registerRawRouteTable(app, opts, blobRoutes(deps.blobs))
   }
 
   app.get('/v1/runs/:id', async (request, reply) => {

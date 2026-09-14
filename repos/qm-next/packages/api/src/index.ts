@@ -19,17 +19,49 @@ export { surfaceCacheRoutes, toEvent, type SurfaceCacheRoutesDeps } from './rout
 export { environmentRoutes, type EnvironmentRoutesDeps } from './routes/environment-routes.ts'
 export { projectRoutes, projectView, type ProjectRoutesDeps } from './routes/project-routes.ts'
 export { sessionStateRoutes, streamSessionStates, type SessionStateRoutesDeps } from './routes/session-state-routes.ts'
+export { fileRoutes, type FileDeps } from './routes/file-routes.ts'
+export { grantRoutes, type GrantDeps } from './routes/grant-routes.ts'
+export { soulRoutes, type SoulDeps } from './routes/soul-routes.ts'
+export { surfaceConfigRoutes, type ConfigDeps } from './routes/surface-config-routes.ts'
+export { deploymentRoutes, type DeploymentDeps } from './routes/deployment-routes.ts'
+export { deploymentLayerRoutes, type DeploymentLayerDeps } from './routes/deployment-layer-routes.ts'
+export { connectorRoutes, connectorMatchRoutes, type ConnectorDeps } from './routes/connector-routes.ts'
+export { webhookRoutes, webhookRawRoutes, type WebhookDeps } from './routes/webhook-routes.ts'
+export { blobRoutes, type BlobDeps } from './routes/blob-routes.ts'
+export { registerRawRouteTable, rawSendJson, rawSendText, type RawRoute, type RawRouteContext } from './routes/raw-framework.ts'
 export {
   createMemoryChannelPolicyStore,
   createMemoryEnvironmentRegistry,
   createMemoryProjectStore,
   createMemorySurfaceCacheStore,
   createSurfaceContextQueue,
+  createMemoryGrantLedger,
+  createMemoryFileStore,
+  createMemorySoulStore,
+  createMemoryRuntimeConfigStore,
+  createMemoryDeploymentStore,
+  createMemoryDeploymentLayerStore,
+  createMemoryConnectorTokenStore,
+  createMemoryWebhookStore,
+  createMemoryBlobTransfer,
+  deploymentView,
   parseBotLedger,
+  THINKING_LEVELS,
+  WEBHOOK_SCHEMES,
+  MAX_BLOB_BYTES,
   type ChannelPolicyStore,
   type IngestEvent,
   type Project,
   type ProjectMutation,
   type ProjectStore,
   type SurfaceContextQueue,
+  type GrantLedger,
+  type FileStoreService,
+  type SoulStore,
+  type RuntimeConfigStore,
+  type DeploymentStore,
+  type DeploymentLayerStore,
+  type ConnectorTokenStore,
+  type WebhookStore,
+  type BlobTransferService,
 } from './services/index.ts'

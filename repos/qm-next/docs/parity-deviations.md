@@ -340,3 +340,35 @@ Each entry names the qm source shape, the qm-next shape, and why.
     sinks; (g) environments list only the viewer's own registries, the
     attach scope is the caller's personal scope, and the capability-missing
     403 maps to an unauthenticated request (deviation #43 equivalence).
+
+45. **Files/grants/share/soul/config/deployments/connectors/webhooks/blobs
+    lane-A service substitutions** — (a) sharing (`/v1/share`,
+    `/v1/deployments/:id/share`) requires an agent capability token —
+    source-signed callers included — so it answers the qm 403 for everyone
+    until the 12.0 control plane mints tokens (recipient resolution,
+    candidates, and grant plumbing land then); (b) the deployment proxy
+    lane (`/d/<slug>/**`, the admin proxy, and the git http-backend routes)
+    is not registered — it needs the deploy runtime and gate (13.0);
+    `/v1/deployments/:id/fetch` answers `502 upstream_unreachable` and
+    logs answer `{logs:null}` (no live runtime); `git-url` keeps the qm
+    capability 403 and `owner-url` the unwired-`DEPLOY_APPS_DOMAIN` 503;
+    (c) `/v1/connectors` wires the token store but no OAuth provider
+    registry or consent links: the catalog is `{catalog: []}` (providers
+    are deployment config), provider-keyed routes answer qm's
+    unknown-provider 404s, `consent/mint` + `consent/redeem` 404 when
+    unwired, and the callback rejects unknown states with
+    `oauth_callback_failed`; the `{aud:"oauth-consent"}` route shape is
+    enforced by the framework; (d) runtime-config/surface-config read a
+    static lane-A model catalog (qm's pi registry, trimmed to the
+    webui+base selectable entries) with all provider keys assumed
+    available; (e) soul shared-scope writes need `managesScope` (real
+    directory check, 13.0) so only personal scopes are writable; (f) file
+    visibility is owner-or-grant with the grant ledger standing in for
+    qm's ACL; (g) the in-memory file/webhook/blob/deployment/layer/
+    connector/soul/runtime-config stores are per-process (Postgres swaps
+    in behind the same interfaces); (h) webhook deliveries verify all four
+    qm signature schemes but reach an agent only with the 13.0 IM bridge —
+    accepted deliveries answer 202; (i) blob transfers accept bearer-or-
+    anonymous callers (source-signature and blob-transfer-capability
+    verification land with the 12.0 control plane; declared sha-256 is
+    still enforced); (j) audits for this tranche land with the 12.0 sinks.

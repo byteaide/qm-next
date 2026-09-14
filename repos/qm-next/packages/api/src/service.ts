@@ -24,10 +24,19 @@ import { createMemoryRunEventBus, createMemoryRunStore, createMemorySessionStore
 import { createMemoryMap } from '@qm/store'
 import { reachDirectory } from '@qm/reach'
 import {
+  createMemoryBlobTransfer,
   createMemoryChannelPolicyStore,
+  createMemoryConnectorTokenStore,
+  createMemoryDeploymentLayerStore,
+  createMemoryDeploymentStore,
   createMemoryEnvironmentRegistry,
+  createMemoryFileStore,
+  createMemoryGrantLedger,
   createMemoryProjectStore,
+  createMemoryRuntimeConfigStore,
+  createMemorySoulStore,
   createMemorySurfaceCacheStore,
+  createMemoryWebhookStore,
   createSurfaceContextQueue,
 } from './services/index.ts'
 import type { CronScheduler, CronStore } from '@qm/triggers'
@@ -108,6 +117,36 @@ export interface ApiConfig {
   projects?: boolean
   /** Session-state surface (11.0): SSE stream over the session-state bus. */
   sessionState?: boolean
+  /** Files surface (11.0): file list/content/upload over the blob transfer. */
+  files?: boolean
+  /** Grants surface (11.0): grant ledger behind /v1/grants (+ the share gate). */
+  grants?: boolean
+  /** Soul surface (11.0): per-scope soul behind /v1/soul. */
+  soul?: boolean
+  /** Config surface (11.0): surface-config/runtime-config/channel-header-pin. */
+  config?: boolean
+  /** Deployments surface (11.0): management lane behind /v1/deployments. */
+  deployments?: boolean
+  /** Deployment-layer surface (11.0): the CLI tools/skills bundle lane. */
+  deploymentLayer?: boolean
+  /** Connectors surface (11.0): connector token/OAuth surface. */
+  connectors?: boolean
+  /** Webhooks surface (11.0): webhook CRUD + raw incoming deliveries. */
+  webhooks?: boolean
+  /** Blobs surface (11.0): raw blob staging put/get. */
+  blobs?: boolean
+  /** Public web base URL used for webhook inbound URLs. */
+  publicUrl?: string
+  /** Deploy apps domain for owner URLs (qm DEPLOY_APPS_DOMAIN). */
+  deployAppsDomain?: string
+  /** Static surface-config values served by GET /v1/surface-config. */
+  surfaceConfig?: {
+    webuiModels?: string[]
+    baseModel?: string
+    harnessId?: string
+    externalSlackParticipants?: string[]
+    branding?: { accent?: string; mark?: string; selfLabel?: string }
+  }
 }
 
 export const Config = Schema.object({
@@ -149,6 +188,18 @@ export const Config = Schema.object({
   environments: Schema.boolean().description('Environments surface (11.0): agent environment registry'),
   projects: Schema.boolean().description('Projects surface (11.0): web project store'),
   sessionState: Schema.boolean().description('Session-state surface (11.0): SSE event stream'),
+  files: Schema.boolean().description('Files surface (11.0): file list/content/upload'),
+  grants: Schema.boolean().description('Grants surface (11.0): grant ledger + share gate'),
+  soul: Schema.boolean().description('Soul surface (11.0): per-scope soul'),
+  config: Schema.boolean().description('Config surface (11.0): surface-config/runtime-config/channel-header-pin'),
+  deployments: Schema.boolean().description('Deployments surface (11.0): management lane'),
+  deploymentLayer: Schema.boolean().description('Deployment-layer surface (11.0): CLI bundle lane'),
+  connectors: Schema.boolean().description('Connectors surface (11.0): connector tokens + OAuth gates'),
+  webhooks: Schema.boolean().description('Webhooks surface (11.0): webhook CRUD + raw incoming'),
+  blobs: Schema.boolean().description('Blobs surface (11.0): raw blob staging'),
+  publicUrl: Schema.string().description('Public web base URL for webhook inbound URLs'),
+  deployAppsDomain: Schema.string().description('Deploy apps domain for deployment owner URLs'),
+  surfaceConfig: Schema.any().description('Static surface-config values for GET /v1/surface-config'),
 })
 
 function devIdentity(): IdentityService {
@@ -350,6 +401,17 @@ export class ApiService extends Service<ApiConfig> {
       ? createMemoryProjectStore({ orgId: (this.config.scopeId ?? 'org:default').replace(/^org:/, '') })
       : undefined
     const sessionStateBus = this.config.sessionState ? createMemorySessionStateBus() : undefined
+    const grantLedger = this.config.grants || this.config.files || this.config.deployments ? createMemoryGrantLedger() : undefined
+    const blobTransfer = this.config.blobs || this.config.files ? createMemoryBlobTransfer() : undefined
+    const fileStore = this.config.files ? createMemoryFileStore({ blobTransfer: blobTransfer!, grants: grantLedger! }) : undefined
+    const soulStore = this.config.soul
+      ? createMemorySoulStore((this.config.scopeId ?? 'org:default').replace(/^org:/, ''))
+      : undefined
+    const runtimeConfigStore = this.config.config ? createMemoryRuntimeConfigStore() : undefined
+    const deploymentStore = this.config.deployments ? createMemoryDeploymentStore({ grants: grantLedger! }) : undefined
+    const deploymentLayerStore = this.config.deploymentLayer ? createMemoryDeploymentLayerStore() : undefined
+    const connectorTokens = this.config.connectors ? createMemoryConnectorTokenStore() : undefined
+    const webhookStore = this.config.webhooks ? createMemoryWebhookStore() : undefined
     const app = createApiServer(
       {
         orchestrator,
@@ -386,6 +448,36 @@ export class ApiService extends Service<ApiConfig> {
         ...(environmentRegistry ? { environments: { environments: environmentRegistry } } : {}),
         ...(projectStore ? { projects: { projects: projectStore } } : {}),
         ...(sessionStateBus ? { sessionState: { bus: sessionStateBus } } : {}),
+        ...(fileStore ? { files: { files: fileStore, blobTransfer: blobTransfer! } } : {}),
+        ...(grantLedger ? { grants: { grants: grantLedger } } : {}),
+        ...(soulStore ? { soul: { soul: soulStore } } : {}),
+        ...(runtimeConfigStore
+          ? {
+              config: {
+                config: runtimeConfigStore,
+                ...(this.config.surfaceConfig ? { surfaceConfig: this.config.surfaceConfig } : {}),
+              },
+            }
+          : {}),
+        ...(deploymentStore
+          ? {
+              deployments: {
+                deployments: deploymentStore,
+                ...(this.config.deployAppsDomain ? { deployAppsDomain: this.config.deployAppsDomain } : {}),
+              },
+            }
+          : {}),
+        ...(deploymentLayerStore ? { deploymentLayer: { deploymentLayer: deploymentLayerStore } } : {}),
+        ...(connectorTokens ? { connectors: { tokens: connectorTokens } } : {}),
+        ...(webhookStore
+          ? {
+              webhooks: {
+                webhooks: webhookStore,
+                ...(this.config.publicUrl ? { publicUrl: this.config.publicUrl } : {}),
+              },
+            }
+          : {}),
+        ...(blobTransfer ? { blobs: { blobTransfer } } : {}),
         crons: {
           crons: () => this.cronsRuntime?.crons,
           scheduler: () => this.cronsRuntime?.scheduler,
