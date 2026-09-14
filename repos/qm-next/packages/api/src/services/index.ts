@@ -122,9 +122,13 @@ export {
 } from './secret-drop-store.ts'
 export {
   createMemorySkillPackStore,
-  SkillPackFetchError,
+  createPostgresSkillPackStore,
+  type ImportRecord,
+  type PackConfig,
   type SkillPack,
   type SkillPackStore,
+  type SyncMode,
+  type TrustTier,
 } from './skill-pack-store.ts'
 export {
   createMemoryUserModelCredentialsStore,

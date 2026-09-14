@@ -285,7 +285,7 @@ test('skill-packs: admin gate, register records the fetch-error import, catalog 
   const pack = created.json().pack
   assert.equal(pack.trustTier, 'internal')
   assert.equal(pack.syncMode, 'pinned')
-  assert.equal(pack.lastImport.status, 'error', 'lane A has no git fetcher — the import row records the error')
+  assert.equal(pack.lastImport, undefined, 'register does not auto-fetch; the catalog route is the fetch entry')
 
   const list = await app.inject({ method: 'GET', url: '/v1/admin/skill-packs', headers: ada })
   assert.equal(list.json().packs[0].importedCount, 0)
