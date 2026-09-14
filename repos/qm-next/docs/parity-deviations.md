@@ -446,3 +446,20 @@ Each entry names the qm source shape, the qm-next shape, and why.
     platform symbols and adds an SDK-import scan (no provider SDK may be
     imported outside `packages/im-*`) so the invariant it protects is
     actually enforceable.
+
+48. **Admin console (12.0 tranche 2) substitutions** — the qm plugins/admin
+    SPA (576KB single-file shell) is ported byte-level to
+    `packages/api/admin-ui/` and served under `/admin/ui` with qm's
+    CSP-hash/etag/gzip discipline; the `/api/*` proxy dispatches
+    in-process onto `/v1/admin/*` (Fastify inject) with the
+    `x-admin-actor` header and qm's READS/WRITES route ladder.
+    Substitutions: (a) identity — the portal identity header verifies via
+    `@qm/auth` once `portalIdentitySecret` is configured; without a secret
+    the unsigned `admin` cookie is trusted for local development (qm's
+    ALLOW_UNSIGNED_TEST_IDENTITY lane generalized — production must set
+    the secret); (b) branding injection and the streaming blob-staged file
+    upload path are not ported yet — they land with the portal/web-runtime
+    convergence (13.0), the UI's scope-config branding PUT still proxies;
+    (c) the console is served by the api process itself instead of qm's
+    standalone sidecar (same origin, no source-auth signing needed);
+    `plugins/portal` SSO remains the last 12.0 tranche.

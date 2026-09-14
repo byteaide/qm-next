@@ -37,6 +37,7 @@ import { adminRoutes, type AdminDeps } from './routes/admin-routes.ts'
 import { skillPackRoutes, type SkillPackDeps } from './routes/skill-pack-routes.ts'
 import { userModelAuthRoutes, type UserModelAuthDeps } from './routes/user-model-auth-routes.ts'
 import { authBrokerRoutes, credentialRoutes, egressAuditRoutes, emojiRoutes, secretDropRoutes, type AuthBrokerDeps, type CredentialDeps, type SecretDropDeps } from './routes/parity-lanes-routes.ts'
+import { registerAdminUi, type AdminUiDeps } from './routes/admin-ui-routes.ts'
 
 export interface ApiDeps {
   orchestrator: Orchestrator
@@ -105,6 +106,8 @@ export interface ApiDeps {
   credentials?: CredentialDeps
   /** Auth broker (12.0): durable single-use nonce claims + email gate. */
   authBroker?: AuthBrokerDeps
+  /** Admin console (12.0): the qm SPA shell + in-process /api proxy. */
+  adminUi?: AdminUiDeps
 }
 
 export interface ApiServerOptions {
@@ -265,6 +268,9 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
   }
   if (deps.authBroker) {
     registerRouteTable(app, opts, authBrokerRoutes(deps.authBroker))
+  }
+  if (deps.adminUi) {
+    registerAdminUi(app, deps.adminUi)
   }
 
   app.get('/v1/runs/:id', async (request, reply) => {

@@ -184,6 +184,10 @@ export interface ApiConfig {
   credentials?: boolean
   /** Auth broker claim/email-allowed gates (11.0). */
   authBroker?: boolean
+  /** Admin console (12.0): qm SPA shell + /api proxy under /admin/ui. */
+  adminUi?: boolean
+  /** Portal identity secret; without it the admin console trusts the dev `admin` cookie. */
+  portalIdentitySecret?: string
   /** Public web base URL used for webhook inbound URLs. */
   publicUrl?: string
   /** Deploy apps domain for owner URLs (qm DEPLOY_APPS_DOMAIN). */
@@ -257,6 +261,8 @@ export const Config = Schema.object({
   egressAudit: Schema.boolean().description('Egress audit sink ingest (11.0)'),
   credentials: Schema.boolean().description('Credential broker gate (11.0)'),
   authBroker: Schema.boolean().description('Auth broker gates (11.0)'),
+  adminUi: Schema.boolean().description('Admin console (12.0): qm SPA shell + /api proxy under /admin/ui'),
+  portalIdentitySecret: Schema.string().description('Portal identity secret; without it the admin console trusts the dev admin cookie'),
   publicUrl: Schema.string().description('Public web base URL for webhook inbound URLs'),
   deployAppsDomain: Schema.string().description('Deploy apps domain for deployment owner URLs'),
   surfaceConfig: Schema.any().description('Static surface-config values for GET /v1/surface-config'),
@@ -637,6 +643,15 @@ export class ApiService extends Service<ApiConfig> {
             }
           : {}),
         ...(this.config.authBroker ? { authBroker: { ...(replayDedupe ? { replayDedupe } : {}) } } : {}),
+        ...(this.config.adminUi && adminService
+          ? {
+              adminUi: {
+                orgId,
+                adminStatus: (principalId: string) => adminService.adminStatusOf(principalId),
+                ...(this.config.portalIdentitySecret ? { portalIdentitySecret: this.config.portalIdentitySecret } : {}),
+              },
+            }
+          : {}),
         crons: {
           crons: () => this.cronsRuntime?.crons,
           scheduler: () => this.cronsRuntime?.scheduler,
