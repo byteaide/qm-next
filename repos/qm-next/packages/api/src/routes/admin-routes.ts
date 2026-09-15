@@ -11,6 +11,7 @@
 import { parseScopeId } from '@qm/types'
 import { cacheHitRatio, isStablePrefixMiss, type CredentialUsageSink, type EgressAuditSink, type ErrorLog, type AuditLog, type MetricsSink, type TurnMetricSample } from '@qm/admin'
 import type { ScopeMemory } from '@qm/memory'
+import { isValidMcpServerId, type McpServer, type McpServerAuthMode, type McpServerStore, type McpToolService } from '@qm/mcp'
 import type { SessionStore, RunStore } from '@qm/types'
 import type { CronStore } from '@qm/triggers'
 import { defaultModelForHarness, HARNESS_IDS, selectableCatalogForHarness, builtInModelCatalog } from '../services/model-catalog.ts'
@@ -49,6 +50,7 @@ export interface AdminDeps {
   credentialUsage?: CredentialUsageSink
   ambientJudgments?: import('@qm/approvals').AmbientJudgmentStore
   ackEmojiPicks?: import('@qm/approvals').AckEmojiPickStore
+  mcp?: { servers: McpServerStore; toolService: McpToolService }
 }
 
 interface Authz {
@@ -882,22 +884,134 @@ async function deleteCustomProvider(ctx: ApiRouteContext, deps: AdminDeps): Prom
   return notFound(ctx)
 }
 
+type McpServerRedacted = Omit<McpServer, 'bearerToken' | 'clientSecret'> & {
+  hasBearerToken: boolean
+  hasClientSecret: boolean
+}
+
+function redactMcpServer(server: McpServer): McpServerRedacted {
+  const { bearerToken, clientSecret, ...rest } = server
+  return { ...rest, hasBearerToken: !!bearerToken, hasClientSecret: !!clientSecret }
+}
+
 async function getMcpServers(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const actorId = await authorizeAdmin(ctx, deps, deps.orgScope)
   if (!actorId) return undefined
-  return notFound(ctx)
+  if (!deps.mcp) return notFound(ctx)
+  const servers = await deps.mcp.servers.list()
+  deps.auditLog?.record({
+    at: Date.now(),
+    principalId: actorId,
+    action: 'mcp-servers.read',
+    resource: 'mcp-servers',
+    scopeLabel: deps.orgScope,
+  })
+  const tools = deps.mcp.toolService.toolDefs().map(({ name, serverId, description, readOnly }) => ({
+    name,
+    serverId,
+    description,
+    readOnly,
+  }))
+  return { servers: servers.map(redactMcpServer), tools }
 }
 
 async function putMcpServer(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const actorId = await authorizeAdmin(ctx, deps, deps.orgScope)
   if (!actorId) return undefined
-  return notFound(ctx)
+  if (!deps.mcp) return notFound(ctx)
+  const id = ctx.params.id ?? ''
+  if (!isValidMcpServerId(id)) {
+    return badRequest(ctx, 'id must be 2-40 chars: lowercase letters, digits, hyphens, starting with a letter')
+  }
+  const b = isObj(ctx.body) ? ctx.body : {}
+  const rawUrl = typeof b.url === 'string' ? b.url.trim() : ''
+  let parsed: URL
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    return badRequest(ctx, 'url must be a valid URL')
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    return badRequest(ctx, 'url must be http(s)')
+  }
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+    return badRequest(ctx, 'url must not carry credentials, query, or fragment')
+  }
+  const authModes: McpServerAuthMode[] = ['none', 'bearer', 'client-credentials']
+  const auth = (typeof b.auth === 'string' ? b.auth : 'none') as McpServerAuthMode
+  if (!authModes.includes(auth)) {
+    return badRequest(ctx, `auth must be one of ${authModes.join(', ')}`)
+  }
+  const existing = await deps.mcp.servers.get(id)
+  const name = typeof b.name === 'string' && b.name.trim() ? b.name.trim().slice(0, 80) : id
+  const bearerToken =
+    typeof b.bearerToken === 'string' && b.bearerToken ? b.bearerToken : existing?.bearerToken
+  const clientIdRaw =
+    typeof b.clientId === 'string' && b.clientId ? b.clientId : existing?.clientId
+  const clientSecretRaw =
+    typeof b.clientSecret === 'string' && b.clientSecret ? b.clientSecret : existing?.clientSecret
+  const server: McpServer = {
+    id,
+    name,
+    url: rawUrl,
+    auth,
+    ...(auth === 'bearer' && bearerToken ? { bearerToken } : {}),
+    ...(auth === 'client-credentials' && clientIdRaw
+      ? { clientId: clientIdRaw }
+      : {}),
+    ...(auth === 'client-credentials' && clientSecretRaw
+      ? { clientSecret: clientSecretRaw }
+      : {}),
+    readOnly: b.readOnly !== false,
+    enabled: b.enabled !== false,
+    updatedAt: Date.now(),
+    updatedBy: actorId,
+  }
+  if (auth === 'bearer' && !server.bearerToken) {
+    return badRequest(ctx, 'bearer auth requires bearerToken')
+  }
+  if (auth === 'client-credentials' && (!server.clientId || !server.clientSecret)) {
+    return badRequest(ctx, 'client-credentials auth requires clientId and clientSecret')
+  }
+  let toolNames: string[] | undefined
+  if (b.validate !== false) {
+    try {
+      toolNames = await deps.mcp.toolService.probe(server)
+    } catch (e) {
+      return sendJson(ctx, 400, {
+        error: 'unreachable',
+        message: `tools/list against ${parsed.host} failed: ${e instanceof Error ? e.message : String(e)}`,
+      })
+    }
+  }
+  await deps.mcp.servers.put(server)
+  deps.auditLog?.record({
+    at: Date.now(),
+    principalId: actorId,
+    action: 'mcp-servers.update',
+    resource: id,
+    scopeLabel: deps.orgScope,
+  })
+  return toolNames !== undefined
+    ? { ok: true, server: redactMcpServer(server), tools: toolNames }
+    : { ok: true, server: redactMcpServer(server) }
 }
 
 async function deleteMcpServer(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const actorId = await authorizeAdmin(ctx, deps, deps.orgScope)
   if (!actorId) return undefined
-  return notFound(ctx)
+  if (!deps.mcp) return notFound(ctx)
+  const id = ctx.params.id ?? ''
+  if (!(await deps.mcp.servers.get(id))) return notFound(ctx)
+  await deps.mcp.servers.delete(id)
+  deps.auditLog?.record({
+    at: Date.now(),
+    principalId: actorId,
+    action: 'mcp-servers.delete',
+    resource: id,
+    scopeLabel: deps.orgScope,
+  })
+  return { ok: true }
 }
 
 // --- security ---

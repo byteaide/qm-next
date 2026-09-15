@@ -93,6 +93,8 @@ export interface ApiDeps {
   blobs?: BlobDeps
   /** Parity surface (11.0): the qm admin surface over lane-A stores. */
   admin?: AdminDeps
+  /** Parity surface (16.0): MCP server registry + tool service, surfaced through `/v1/admin/mcp-servers`. */
+  mcp?: NonNullable<AdminDeps['mcp']>
   /** Parity surface (11.0): skill-pack registry management. */
   skillPacks?: SkillPackDeps
   /** Parity surface (11.0): per-principal model credentials. */
@@ -249,7 +251,11 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
     registerRawRouteTable(app, opts, blobRoutes(deps.blobs, opts.secrets))
   }
   if (deps.admin) {
-    registerRouteTable(app, opts, adminRoutes(deps.admin))
+    if (deps.mcp && !deps.admin.mcp) {
+      registerRouteTable(app, opts, adminRoutes({ ...deps.admin, mcp: deps.mcp }))
+    } else {
+      registerRouteTable(app, opts, adminRoutes(deps.admin))
+    }
   }
   if (deps.skillPacks) {
     registerRouteTable(app, opts, skillPackRoutes(deps.skillPacks))
