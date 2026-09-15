@@ -7,6 +7,7 @@ import {
   createMcpToolService,
   type McpFetch,
   type McpHttpResponse,
+  type McpServer,
 } from '@qm/mcp'
 import {
   adminRoutes,
@@ -128,7 +129,7 @@ interface McpTestRig {
 }
 
 function rigWithFetch(fetchImpl: McpFetch): McpTestRig {
-  const backing = createMemoryMap()
+  const backing = createMemoryMap<McpServer>()
   const servers = createMcpServerStore(backing)
   const toolService = createMcpToolService({ servers, fetchImpl, refreshIntervalMs: 1_000_000 })
   const adminDeps = {
@@ -142,7 +143,7 @@ function rigWithFetch(fetchImpl: McpFetch): McpTestRig {
 }
 
 test('admin mcp: guard ladder (unwired 404, non-admin 403)', async () => {
-  const backing = createMemoryMap()
+  const backing = createMemoryMap<McpServer>()
   const servers = createMcpServerStore(backing)
   const toolService = createMcpToolService({ servers, refreshIntervalMs: 1_000_000 })
 
@@ -232,8 +233,8 @@ test('admin mcp: PUT validates id, url, auth, and creds; persists; redacts in GE
   assert.equal(list.statusCode, 200)
   const payload = list.json() as { servers: Array<Record<string, unknown>> }
   assert.equal(payload.servers.length, 2)
-  assert.equal(payload.servers[0].id, 'srv1', 'list is sorted by id')
-  assert.equal(payload.servers[1].id, 'srv2')
+  assert.equal(payload.servers[0]!.id, 'srv1', 'list is sorted by id')
+  assert.equal(payload.servers[1]!.id, 'srv2')
   for (const s of payload.servers) {
     assert.equal(s.bearerToken, undefined, 'list redacts bearerToken')
     assert.equal(s.clientSecret, undefined, 'list redacts clientSecret')

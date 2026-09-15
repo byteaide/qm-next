@@ -8,6 +8,7 @@ export * from './scratch-log.ts'
 export * from './provider-router.ts'
 export * from './provider-config.ts'
 export * from './provider-factory.ts'
+export * from './mcp-memory-provider.ts'
 export {
   parseFacts,
   extractFacts,

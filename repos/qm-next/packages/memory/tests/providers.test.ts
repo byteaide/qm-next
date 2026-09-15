@@ -247,7 +247,10 @@ test('provider config: memorable entries parse with the env allowlist', () => {
     {},
   )
   assert.ok(defaults)
-  assert.equal(defaults.providers[0]!.env.MEMORABLE_BACKEND, 'qm')
+  const m = defaults.providers[0]!
+  assert.equal(m.type, 'memorable')
+  if (m.type !== 'memorable') throw new Error('unreachable')
+  assert.equal(m.env.MEMORABLE_BACKEND, 'qm')
 })
 
 test('provider config: validation errors name the offender', () => {
@@ -270,7 +273,7 @@ test('provider config: validation errors name the offender', () => {
         JSON.stringify({ providers: [{ id: 'mcp1', type: 'mcp', url: 'https://x', read: {} }], routes: [] }),
         {},
       ),
-    /mcp package/,
+    /clientIdEnv must be a non-empty string/,
   )
   assert.throws(
     () =>

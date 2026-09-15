@@ -1,7 +1,9 @@
 /**
  * MEMORY_PROVIDER_CONFIG parsing, ported from qm's `provider-config.ts`.
- * Parity 15.0 carries the memorable provider type; `type: "mcp"` entries
- * are refused until the mcp client package lands (16.0, deviation).
+ * Parity 15.0 carried the memorable provider type; parity 16.0 adds the
+ * `type: "mcp"` branch over the new `@qm/mcp` client. Auth credentials
+ * come from env vars named by `clientIdEnv` / `clientSecretEnv` so the
+ * raw secret never appears in the config payload.
  */
 import { parseScopeId, type ScopeId, type ScopeKind } from '@qm/types'
 import type { MemoryCapturePolicy, MemoryProviderRoute } from './provider-router.ts'
@@ -9,17 +11,56 @@ import { parseMemorableProvider, type MemorableMemoryProviderConfig } from './me
 
 const KINDS = new Set<ScopeKind>(['personal', 'channel', 'team', 'org', 'group'])
 const ID = /^[a-z][a-z0-9-]{0,62}$/
+const ARG = /^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/
+const ENV = /^[A-Z][A-Z0-9_]*$/
 
-export type AnyMemoryProviderConfig = MemorableMemoryProviderConfig
+export interface McpMemoryAuthConfig {
+  clientId: string
+  clientSecret: string
+}
 
-/** Which capture policies a route may set against a provider. */
+export interface McpMemoryOperationConfig {
+  tool: string
+  auth: McpMemoryAuthConfig
+  queryArg?: string
+  contentArg?: string
+  actorArg?: string
+  scopeArg?: string
+  maxCharsArg?: string
+  inputArg?: string
+  replyArg?: string
+  capturedAtArg?: string
+  sourceArg?: string
+  idempotencyArg?: string
+}
+
+export interface McpMemoryProviderConfig {
+  id: string
+  type: 'mcp'
+  url: string
+  read: McpMemoryOperationConfig
+  write?: McpMemoryOperationConfig
+  timeoutMs: number
+}
+
+export type AnyMemoryProviderConfig = MemorableMemoryProviderConfig | McpMemoryProviderConfig
+
+/** Which capture policies a route may set against a provider; providers declare this so route checks stay generic. */
 function capturePoliciesOf(provider: AnyMemoryProviderConfig): ReadonlySet<MemoryCapturePolicy> {
+  if (provider.type === 'mcp') return new Set(provider.write ? ['off', 'explicit', 'automatic'] : ['off'])
   return provider.capturePolicies
 }
 
 export interface MemoryProviderConfig {
   providers: AnyMemoryProviderConfig[]
   routes: MemoryProviderRoute[]
+}
+
+function timeout(value: unknown, at: string, fallback: number, max: number): number {
+  const ms = value === undefined ? fallback : value
+  if (!Number.isSafeInteger(ms) || Number(ms) <= 0 || Number(ms) > max)
+    throw new Error(`${at} must be an integer from 1 to ${max}`)
+  return Number(ms)
 }
 
 function object(value: unknown, at: string): Record<string, unknown> {
@@ -30,6 +71,59 @@ function object(value: unknown, at: string): Record<string, unknown> {
 function string(value: unknown, at: string): string {
   if (typeof value !== 'string' || !value) throw new Error(`${at} must be a non-empty string`)
   return value
+}
+
+function privateMcpUrl(value: unknown, at: string): string {
+  const raw = string(value, at)
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new Error(`${at} must be a valid URL`)
+  }
+  const privateHttp =
+    url.protocol === 'http:' &&
+    (url.hostname === 'localhost' ||
+      url.hostname === '127.0.0.1' ||
+      url.hostname.endsWith('.internal') ||
+      url.hostname.endsWith('.flycast') ||
+      url.hostname.endsWith('.local'))
+  if ((url.protocol !== 'https:' && !privateHttp) || url.username || url.password || url.hash)
+    throw new Error(`${at} must use HTTPS or a recognized private HTTP host`)
+  return raw.replace(/\/+$/, '')
+}
+
+function mcpOperation(value: unknown, at: string, env: NodeJS.ProcessEnv): McpMemoryOperationConfig {
+  const raw = object(value, at)
+  const clientIdEnv = string(raw.clientIdEnv, `${at}.clientIdEnv`)
+  const clientSecretEnv = string(raw.clientSecretEnv, `${at}.clientSecretEnv`)
+  if (!ENV.test(clientIdEnv) || !ENV.test(clientSecretEnv))
+    throw new Error(`${at} credential env names are invalid`)
+const clientId = env[clientIdEnv]
+  const clientSecret = env[clientSecretEnv]
+  if (!clientId || !clientSecret) throw new Error(`${at} requires ${clientIdEnv} and ${clientSecretEnv}`)
+  const out: McpMemoryOperationConfig = {
+    tool: string(raw.tool, `${at}.tool`),
+    auth: { clientId, clientSecret },
+  }
+  for (const key of [
+    'queryArg',
+    'contentArg',
+    'actorArg',
+    'scopeArg',
+    'maxCharsArg',
+    'inputArg',
+    'replyArg',
+    'capturedAtArg',
+    'sourceArg',
+    'idempotencyArg',
+  ] as const) {
+    if (raw[key] === undefined) continue
+    const name = string(raw[key], `${at}.${key}`)
+    if (!ARG.test(name)) throw new Error(`${at}.${key} is invalid`)
+    out[key] = name
+  }
+  return out
 }
 
 function scope(value: unknown, at: string): ScopeKind | ScopeId {
@@ -57,9 +151,17 @@ export function parseMemoryProviderConfig(
     const raw = object(value, `MEMORY_PROVIDER_CONFIG.providers[${i}]`)
     const id = string(raw.id, `MEMORY_PROVIDER_CONFIG.providers[${i}].id`)
     if (!ID.test(id) || id === 'default') throw new Error(`invalid memory provider id: ${id}`)
-    if (raw.type === 'mcp') throw new Error('memory provider type "mcp" needs the mcp package (parity 16.0)')
-    if (raw.type !== 'memorable') throw new Error(`memory provider ${id} has unsupported type`)
-    return parseMemorableProvider(raw, id, env)
+    if (raw.type === 'memorable') return parseMemorableProvider(raw, id, env)
+    if (raw.type !== 'mcp') throw new Error(`memory provider ${id} has unsupported type`)
+    const timeoutMs = timeout(raw.timeoutMs, `memory provider ${id}.timeoutMs`, 3_000, 30_000)
+    return {
+      id,
+      type: 'mcp' as const,
+      url: privateMcpUrl(raw.url, `memory provider ${id}.url`),
+      timeoutMs,
+      read: mcpOperation(raw.read, `memory provider ${id}.read`, env),
+      ...(raw.write ? { write: mcpOperation(raw.write, `memory provider ${id}.write`, env) } : {}),
+    }
   })
   const ids = new Set(['default', ...providers.map(({ id }) => id)])
   if (ids.size !== providers.length + 1) throw new Error('memory provider ids must be unique')
