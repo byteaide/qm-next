@@ -26,7 +26,7 @@
 
 1. 停入口流量（LB/入口摘流）。
 2. `SIGTERM` 优雅卸载：runner 排空 → Fastify close → 引擎关闭 → 沙箱销毁 → PG 池关闭（cordis disposer 顺序执行）。
-3. 兜底：超时后 `SIGKILL` 安全——所有运行态在 PG，租约过期自动回收；`files/<sha256>` 内容寻址写入是先写临时文件再原子 rename。
+3. 兜底：超时后 `SIGKILL` 安全——所有运行态在 PG，租约过期自动回收（组合根 reaper 按 `reapIntervalMs`（默认 10s）扫过期租约，把在飞 run 重新排队交由其他实例认领；重排队按过期租约 CAS，只应用一次）；`files/<sha256>` 内容寻址写入是先写临时文件再原子 rename。
 
 ## 4. 回滚
 
@@ -43,8 +43,8 @@
   - runs 认领：`FOR UPDATE SKIP LOCKED` + 租约，天然多 worker 安全；
   - 投递认领：同上（provider 维度租约）；
   - cron 调度：`LeaderLease`（PG advisory lock）保证单 leader tick；
-  - 实例注册：`instance_heartbeats` 心跳表。
-- **拆分形态**（21.0 验证项）：把 `@qm/im-bridge`/`@qm/im-feishu`（IO 密集）与 api/runner（CPU 密集）拆为两个 profile 进程，共享 `databaseUrl` 即可，无粘性路由。
+  - 实例注册：`instance_heartbeats` 心跳表（21.0 已接线：实例随 drain 扫描心跳；新一代实例心跳会令旧代实例停领排空，心跳静默超过 liveness 窗口后旧代自动恢复）。
+- **拆分形态**（21.0 已演练）：把 `@qm/im-bridge`/`@qm/im-feishu`（IO 密集）与 api/runner（CPU 密集）拆为多个 profile 进程，共享 `databaseUrl` 即可，无粘性路由。`pnpm rehearsal:cutover` 全链路 PASS：同 sha 灰度双跑共担队列 → 新 sha blue-green 交接（旧代停领、在飞排空）→ 回滚恢复 → 真子进程拆分 + SIGKILL 崩溃接管（租约过期 → 其他实例 attempt+1 重跑，全程 exactly-once）。
 - **缩容**：直接摘流 + 优雅关闭；在飞 run 租约过期后由其他实例接管重跑。
 
 ## 6. 备份与还原（20.3）

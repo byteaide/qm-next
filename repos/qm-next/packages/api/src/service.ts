@@ -5,6 +5,7 @@
  * into one cordis service. This is assembly, not policy — production
  * deployments swap each piece without touching the others.
  */
+import { randomUUID } from 'node:crypto'
 import { Context, Service } from '@qm/cordis'
 import {
   bootAdminGrantSeed,
@@ -68,7 +69,7 @@ import {
   type ConsentLinkStore,
   type OAuthFlowStore,
 } from '@qm/connectors'
-import { createMemorySessionStateBus } from '@qm/runs'
+import { createDrainController, createMemorySessionStateBus, createPostgresInstanceRegistry, createReaper, type DrainController, type Reaper } from '@qm/runs'
 import { createMemorySkillStore } from '@qm/skills'
 import type { RuntimeRouteConfig } from '@qm/orchestrator'
 import { createHarnessRouter, createMockHarness, createSandboxToolContext, OrchestratorService } from '@qm/orchestrator'
@@ -116,6 +117,7 @@ import {
 import { createAmbientCursorStore, createPostgresAckEmojiPickStore, createPostgresAgentRequestStore, createPostgresAmbientJudgmentStore } from './services/ambient-stores.ts'
 import type { ChannelPolicyStore as ApiChannelPolicyStore } from './services/channel-policy-store.ts'
 import type { CronScheduler, CronStore } from '@qm/triggers'
+import { createMemoryLeaderLease } from '@qm/triggers'
 import type {
   Harness,
   IdentityService,
@@ -219,6 +221,27 @@ export interface ApiConfig {
   adminGrants?: string
   /** Postgres connection string; durable-by-default swaps every memory store for its PG twin. */
   databaseUrl?: string
+  /**
+   * Instance registry id (21.0): identifies this process in
+   * `instance_heartbeats`; also the run-claim worker id. Defaults to
+   * `api-<pid>-<random>`.
+   */
+  instanceId?: string
+  /**
+   * Build generation (21.0): instances of the same build coexist and share
+   * the run queue (灰度双跑); a live instance of a newer build drains every
+   * older one — they stop claiming new runs and finish in-flight turns
+   * (blue-green handoff). Defaults to QM_BUILD_SHA env or 'dev'.
+   */
+  buildSha?: string
+  /** Drain sweep cadence in ms (heartbeat + supersession check); default 10s. */
+  drainSweepMs?: number
+  /** Liveness window for superseding builds in ms; default 30s. */
+  drainLivenessMs?: number
+  /** Run-claim lease TTL in ms (default 30s); expired leases let another instance take the run over. */
+  leaseTtlMs?: number
+  /** Crash-recovery sweep cadence in ms (default 10s): expired-lease runs get requeued for another instance. */
+  reapIntervalMs?: number
   /**
    * File blob bytes root directory (20.0): content-addressed `files/<sha256>`
    * keys under this dir; without it (and with databaseUrl) bytes stay in RAM.
@@ -340,6 +363,12 @@ export const Config = Schema.object({
   admins: Schema.array(Schema.string()).description('Bootstrap org admins (principal ids)'),
   adminGrants: Schema.string().description('qm ADMIN_GRANTS grammar (principal:role,...) seeding durable grant stores'),
   databaseUrl: Schema.string().description('Postgres connection string; swaps memory stores for durable PG twins'),
+  instanceId: Schema.string().description('Instance registry id (21.0); also the run-claim worker id'),
+  buildSha: Schema.string().description('Build generation (21.0): same build coexists (gray split), a newer build drains older ones (blue-green)'),
+  drainSweepMs: Schema.number().description('Drain sweep cadence in ms (heartbeat + supersession check)'),
+  drainLivenessMs: Schema.number().description('Liveness window for superseding builds in ms'),
+  leaseTtlMs: Schema.number().description('Run-claim lease TTL in ms; expired leases let another instance take the run over'),
+  reapIntervalMs: Schema.number().description('Crash-recovery sweep cadence in ms; expired-lease runs get requeued for another instance'),
   filesDir: Schema.string().description('File blob bytes root directory; content-addressed files/<sha256> keys'),
   ambient: Schema.boolean().description('Ambient observability (14.0): judgment + cursor stores for the IM ambient slice'),
   agentRequests: Schema.boolean().description('Agent-request directives (14.0): durable registry for IM reply directives'),
@@ -469,6 +498,17 @@ export class ApiService extends Service<ApiConfig> {
   /** MCP registry + agent-tool bridge (20.0), present with the admin surface. */
   mcpServers?: McpServerStore
   mcpToolService?: McpToolService
+
+  /**
+   * Deploy-drain controller (21.0), present with databaseUrl: heartbeats
+   * this instance into `instance_heartbeats` and closes the run-claim gate
+   * while a newer build generation is live. Observability/tools can read
+   * `canClaim()`; shutdown stops the sweep before the runner drains.
+   */
+  drain?: DrainController
+
+  /** Instance registry id (21.0); also the run-claim worker id. */
+  instanceId?: string
 
   constructor(ctx: Context, public config: ApiConfig) {
     super(ctx, 'api')
@@ -613,9 +653,42 @@ export class ApiService extends Service<ApiConfig> {
     this.resolution = resolution
     this.orchestrator = orchestrator
     this.runEvents = runEvents
+    // Instance registry + deploy drain (21.0): with databaseUrl every
+    // instance heartbeats into `instance_heartbeats`. Same-build instances
+    // share the run queue (灰度双跑 — entry-side split is the LB's weights);
+    // a live newer build supersedes older generations — their drain
+    // controller closes the claim gate and in-flight turns finish
+    // (blue-green handoff), and claims resume when the newer build goes
+    // quiet past the liveness window (rollback).
+    const instanceId = this.config.instanceId ?? `api-${process.pid}-${randomUUID().slice(0, 8)}`
+    this.instanceId = instanceId
+    let drain: DrainController | null = null
+    if (pg) {
+      const registry = createPostgresInstanceRegistry(pg, {
+        instanceId,
+        buildSha: this.config.buildSha ?? process.env.QM_BUILD_SHA ?? 'dev',
+        startedAt: Date.now(),
+        ...(this.config.drainLivenessMs !== undefined ? { livenessMs: this.config.drainLivenessMs } : {}),
+      })
+      drain = createDrainController({
+        registry,
+        // ECS task protection stays an AWS deployment concern; the drain
+        // semantics here ride the registry alone (claims gate, in-flight
+        // lease completion).
+        protection: null,
+        busy: () => false,
+        ...(this.config.drainSweepMs !== undefined ? { sweepMs: this.config.drainSweepMs } : {}),
+      })
+      this.drain = drain
+    }
     const runner = createTurnRunner(
       { orchestrator, runs },
-      this.config.tickMs !== undefined ? { tickMs: this.config.tickMs } : {},
+      {
+        workerId: instanceId,
+        ...(this.config.tickMs !== undefined ? { tickMs: this.config.tickMs } : {}),
+        ...(this.config.leaseTtlMs !== undefined ? { ttlMs: this.config.leaseTtlMs } : {}),
+        ...(drain ? { canClaim: () => drain!.canClaim() } : {}),
+      },
     )
     runner.start()
     // Parity surface (11.0): directory + reach behind an opt-in store; cron
@@ -727,6 +800,20 @@ export class ApiService extends Service<ApiConfig> {
     if (this.config.authBroker) {
       replayDedupe = replayDedupe ?? (databaseUrl ? createPostgresReplayDedupe(databaseUrl) : createMemoryReplayDedupe())
     }
+    // Crash recovery (21.0): the reaper requeues runs whose claiming
+    // instance died mid-turn (lease expired) — the SIGKILL-safe takeover
+    // the operations runbook promises. Every durable instance sweeps; a
+    // requeue is compare-and-set on the expired lease (`ifExpiredAt`), so
+    // concurrent sweeps apply exactly once and no PG leader lease is
+    // needed. The per-process memory lease just serializes our own sweeps.
+    // Memory boots skip the reaper entirely.
+    const reaper: Reaper | null = databaseUrl
+      ? createReaper(runs, sessions, {
+          intervalMs: this.config.reapIntervalMs ?? 10_000,
+          leaderLease: createMemoryLeaderLease(),
+          ...(errors ? { errors } : {}),
+        })
+      : null
     if (this.config.ambient) {
       this.ambientJudgments = databaseUrl
         ? createPostgresAmbientJudgmentStore(databaseUrl, orgId)
@@ -826,6 +913,8 @@ export class ApiService extends Service<ApiConfig> {
     // sockets — open clients keep the process event loop alive, so a boot
     // that throws mid-wiring hangs test files and leaves zombie prod boots.
     const rollbackBoot = async (err: unknown): Promise<never> => {
+      drain?.stop()
+      reaper?.stop()
       if (this.app) await this.app.close().catch(() => undefined)
       await runner.stop().catch(() => undefined)
       for (const store of pgClosers) {
@@ -1040,7 +1129,13 @@ export class ApiService extends Service<ApiConfig> {
     }
     const addr = app.server.address()
     if (typeof addr === 'object' && addr !== null) this.address = { port: addr.port, host: addr.address }
+    // Heartbeat sweep starts only after listen succeeded (rollback above
+    // stops it; an instance that never came up must not register live).
+    drain?.start()
+    reaper?.start()
     return async () => {
+      drain?.stop()
+      reaper?.stop()
       await runner.stop()
       await app.close()
       try {

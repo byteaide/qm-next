@@ -1,4 +1,4 @@
-import type { PgPool } from '@qm/store'
+import { withSchemaLock, type PgPool } from '@qm/store'
 
 export interface InstanceRegistry {
   beat(): Promise<boolean>
@@ -18,14 +18,23 @@ export function createPostgresInstanceRegistry(
   let readyP: Promise<void> | null = null
   function ready(): Promise<void> {
     if (!readyP) {
+      // The CREATE TABLE rides the shared schema-init advisory lock:
+      // simultaneous multi-instance boots race CREATE TABLE IF NOT EXISTS
+      // on pg_catalog.pg_type (23505) exactly like the eager DDL and
+      // DurableMap ensure paths (20.0).
       readyP = pg
-        .query(
-          `CREATE TABLE IF NOT EXISTS instance_heartbeats(
-             instance_id TEXT PRIMARY KEY,
-             build_sha TEXT NOT NULL,
-             started_at BIGINT NOT NULL,
-             beat_at TIMESTAMPTZ NOT NULL
-           )`,
+        .pool()
+        .then((pool) =>
+          withSchemaLock(pool, async (q) => {
+            await q(
+              `CREATE TABLE IF NOT EXISTS instance_heartbeats(
+                 instance_id TEXT PRIMARY KEY,
+                 build_sha TEXT NOT NULL,
+                 started_at BIGINT NOT NULL,
+                 beat_at TIMESTAMPTZ NOT NULL
+               )`,
+            )
+          }),
         )
         .then(() => undefined)
         .catch((e) => {

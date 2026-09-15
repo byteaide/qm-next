@@ -10,6 +10,11 @@ export interface TurnRunnerOptions {
   workerId?: string
   ttlMs?: number
   tickMs?: number
+  /**
+   * Deploy-drain gate (21.0): when false the runner stops claiming new
+   * runs (in-flight turns finish); a newer build generation went live.
+   */
+  canClaim?: () => boolean
 }
 
 export interface TurnRunner {
@@ -29,9 +34,10 @@ export function createTurnRunner(
   let timer: NodeJS.Timeout | null = null
   let polling = false
   const runner: TurnRunner = {
-    async pollOnce() {
-      if (polling) return false
-      polling = true
+  async pollOnce() {
+    if (polling) return false
+    if (opts.canClaim && !opts.canClaim()) return false
+    polling = true
       try {
         const run = await deps.runs.claim(workerId, ttlMs)
         if (!run) return false

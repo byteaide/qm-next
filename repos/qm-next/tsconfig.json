@@ -8,5 +8,5 @@
     "rootDir": ".",
     "paths": {}
   },
-  "include": ["packages/*/src/**/*.ts", "packages/*/tests/**/*.ts", "scripts/migrate-qm.ts", "scripts/migration-rehearsal.ts"]
+  "include": ["packages/*/src/**/*.ts", "packages/*/tests/**/*.ts", "scripts/migrate-qm.ts", "scripts/migration-rehearsal.ts", "scripts/rehearsal-cutover.ts", "scripts/cutover-worker-entry.ts"]
 }

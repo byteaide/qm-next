@@ -67,6 +67,8 @@ test('memory boot: /readyz reports the database disabled and /healthz stays ok',
   })
   const dispose = await svc[Service.init]()
   try {
+    assert.equal(svc.drain, undefined, 'memory boots carry no instance registry')
+    assert.ok(svc.instanceId?.startsWith('api-'), 'instance id defaults to the api- prefix')
     const health = await svc.app.inject({ method: 'GET', url: '/healthz' })
     assert.equal(health.statusCode, 200)
     assert.deepEqual(health.json(), { ok: true })
@@ -128,4 +130,36 @@ test('durable boot: every twin table lands at boot; readyz probes up; monitoring
   assert.equal(unscoped.statusCode, 400, 'monitoring summary rides the admin ladder: missing scope is a 400')
   const unauthed = await svc.app.inject({ method: 'GET', url: '/v1/admin/monitoring/summary?scope=org:default' })
   assert.equal(unauthed.statusCode, 403, 'monitoring summary rides the admin ladder: no admin grant is a 403')
+})
+
+test('deploy-drain wiring (21.0): a live newer build generation drains older instances over the shared database', { skip: pgUrl ? false : 'QM_NEXT_PG_URL not set' }, async (t) => {
+  if (!(await postgresReachable())) return t.skip('postgres unreachable at QM_NEXT_PG_URL')
+  const databaseUrl = pgUrl!
+  const mk = async (instanceId: string, buildSha: string) => {
+    const svc = new ApiService(new Context(), {
+      port: 0,
+      secrets: ['test-secret-for-drain'],
+      databaseUrl,
+      instanceId,
+      buildSha,
+      drainSweepMs: 200,
+      drainLivenessMs: 5_000,
+    })
+    const dispose = (await svc[Service.init]()) ?? (async () => undefined)
+    t.after(dispose)
+    return svc
+  }
+  const older = await mk('wiring-test-older', 'v1')
+  const newer = await mk('wiring-test-newer', 'v2')
+  assert.ok(older.drain, 'durable boots wire the drain controller')
+  // The first sweep beats immediately after listen; the older instance
+  // sees the newer generation within a sweep or two.
+  await (async () => {
+    for (let i = 0; i < 40; i++) {
+      if (older.drain?.canClaim() === false) return
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+  })()
+  assert.equal(older.drain?.canClaim(), false, 'the older generation stops claiming new runs')
+  assert.equal(newer.drain?.canClaim(), true, 'the newer build keeps claiming')
 })

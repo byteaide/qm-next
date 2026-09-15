@@ -1,5 +1,8 @@
 export { ApiService, Config, default } from './service.ts'
 export type { ApiConfig } from './service.ts'
+// Re-exported for embedders and repository tooling (root `scripts/` cannot
+// resolve the vendored cordis package by name).
+export { Context, Service } from '@qm/cordis'
 export { createApiServer, type ApiDeps, type ApiServerOptions } from './server.ts'
 export { createTurnRunner, type TurnRunner, type TurnRunnerOptions } from './runner.ts'
 export { authenticateBearer, type TurnTokenClaims } from './auth.ts'

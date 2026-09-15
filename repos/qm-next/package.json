@@ -14,6 +14,7 @@
     "migrate:qm": "node --import tsx/esm scripts/migrate-qm.ts",
     "rehearsal:migrate": "bash scripts/run-migration-rehearsal.sh",
     "rehearsal:backup": "bash scripts/run-backup-rehearsal.sh",
+    "rehearsal:cutover": "bash scripts/run-cutover-rehearsal.sh",
     "check:im": "bash scripts/check-im-isolation.sh",
     "rescope-check": "bash scripts/rescope-check.sh",
     "sandbox:local:build": "bash scripts/local-sandbox-build.sh",

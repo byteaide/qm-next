@@ -281,5 +281,5 @@ cd repos/qm-next && pnpm rehearsal:migrate
 ### C.3 演练遗留 → 20.0 收口记录
 
 - **已收口（2026-09-15，组合根 durable sweep）**：tasks/task_events（`createPostgresTaskStore`）、acl×2（`createPostgresGrantStore`）、run_activity/run_signals（`@qm/runs` PG 构造器）、audit_log/turn_metrics/error_events/credential_usage/egress_events/admin_grants（admin sink 常开化：`databaseUrl` 下不再依赖 admin flag）、source_auth_replay（`createPostgresReplayDedupe` 随 `databaseUrl`）、ambient_judgments/ack_emoji_picks（14.0 已接）、deliveries/channel_policy(+history)/webhooks/file_artifacts（20.0 新 twin，本文件 A.2）——组合根 boot 即落地 schema，`--verify-only` 不再报告这些表。
-- **设计内缺席（非缺口）**：runtime-config 族/environments/projects/deploy 族=export-seed；surface-cache 缓存类/ratelimit=not-carried；identity 面（`deactivated_principals`/`external_members`）v1 不带；`instance_heartbeats`=TRUNCATE_ONLY（表未接线时迁移器记 note 跳过，清空语义下无害，21.0 多实例接线时补）。
+- **设计内缺席（非缺口）**：runtime-config 族/environments/projects/deploy 族=export-seed；surface-cache 缓存类/ratelimit=not-carried；identity 面（`deactivated_principals`/`external_members`）v1 不带；`instance_heartbeats`=TRUNCATE_ONLY（21.0 已接线：组合根随 drain 扫描心跳建表，迁移时清空语义不变）。
 - qm 特有不迁清单见 Part A `not-carried`（tool_calls、fork 列、messages/turns 计数、channel 缓存、idempotency、ratelimit 窗口等），已记 `parity-deviations.md` §P5 19.0。
