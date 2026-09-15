@@ -9,7 +9,7 @@ prd-qm-parity,qm-parity（qm-next 全功能对齐）,wxd + AI DevOps,draft,~23d,
 **Feature:** qm-parity — 在 qm-next（cordis 全插件架构）上补齐 qm 全量功能，成为 qm 的生产级全功能替身
 **Author:** wxd + AI DevOps
 **Date:** 2026-09-13
-**Status:** Draft
+**Status:** Approved — P1-P4 closed（tag `p4` at `0517959`）；P5 in scope
 **Estimate:** ~23d (ai:~20d test:~3d)；双车道并行墙钟 ~3-4 周
 **前置:** p001 qm-next v0.1.0（`e245b5d`，`test:pg` 239/239 基线）
 
@@ -65,11 +65,19 @@ qm-next 达成与 qm 的功能对等：同一份 qm 生产任务面（真 harnes
 13. **M3 延期项回填**：judge 真模型 + ambient cursors、reaction-as-ack、agent-request directives、memory strategy modes/memorable relay/pack 摄取/sync engine、skills pack store/ingest/materialize/sync engine、reach identity merge/openGroup、consent/keychain-ask/edit-notice/provenance、job-queue（pg-boss）。
 14. **长尾子系统**：mcp（server-store+tool-service）/connectors 全量（OAuth flows/browser-session/consent-link）/monitors/tasks/environments/projects/acl/security-screener/processes/insights/classify/webhooks/search/egress-authz/deploy（aws/docker/fly/porter providers）/deployment layers。
 
-### P5 多渠道 + 数据迁移 + 切换（~4d ai）
+### P5 web 深化 + 数据迁移 + 切换（~4d ai；2026-09-15 拍板：slack/钉钉/企微 **suspended**，v1 只做飞书 + web 端）
 
-15. **im-slack 复活**：git `d7d2db3` 实现按 `ImProvider` 契约改造回包集（+mrkdwn/Block Kit/目录分页）；im-dingtalk（Stream）、im-wecom（回调）跟进；双渠道真机验收（v0.1.0 延期项 18.0/19.0/20.0 关闭）。
-16. **数据迁移**：schema diff 报告（qm vs qm-next PG）→ 迁移器（sessions/runs/directory/memory/skills/approvals/cron/delivery/audit/metrics 全表）→ 演练迁移 + 回滚路径。
-17. **切换演练**：灰度双跑（同实例注册、流量切分）、blue-green 部署形态、worker 进程拆分验证；全门禁绿后 tag `v1.0.0`。
+15. **web 端深化**：web-ui 真活收尾（流式 SSE、deep-link 回退、错误页）+ portal SSO/admin-login-link/API relay 真路径连接性 + 体验硬化（mobile 适配 / dark mode / 键盘可达 / lighthouse a11y ≥ 95）。
+16. **数据迁移**（关键路径）：schema diff 报告（qm vs qm-next PG 全表）→ 迁移器（sessions/runs/directory/memory/skills/approvals/cron/delivery/audit/metrics 全表）→ 演练迁移 + 回滚路径 + `docs/migration.md` runbook。
+17. **监控/合规/生产化**：error-log/metrics/audit-log 完整化 + 健康检查端点 + 监控面板占位；运维 runbook（启动/关闭/回滚/扩缩容/迁移）+ PG snapshot 备份还原演练。
+18. **切换演练**：灰度双跑（instance-registry 流量切分）+ blue-green 部署形态 + worker 进程拆分验证；全门禁绿后 tag `v1.0.0`。
+
+> **suspended 项**（保留实现 git 历史 `d7d2db3` im-slack 全集；im-dingtalk/im-wecom 不在 v1 范围）：
+> - im-slack 复活
+> - im-dingtalk（Stream）+ im-wecom（回调）
+> - 双渠道真机验收（原 v0.1.0 20.0）
+>
+> 任何上述项将来重启按 `ImProvider` 契约复用现有飞书通道测试矩阵。
 
 ## Non-Goals
 
@@ -93,7 +101,7 @@ qm-next 达成与 qm 的功能对等：同一份 qm 生产任务面（真 harnes
 | P2 多引擎 + runs | 3.5d | 0.5d | 4d |
 | P3 API 面与控制台 | 4.5d | 0.5d | 5d |
 | P4 长尾 + 回填 | 4.5d | 0.5d | 5d |
-| P5 多渠道 + 迁移 + 切换 | 3.5d | 0.5d | 4d |
+| P5 web 深化 + 迁移 + 切换 | 3.5d | 0.5d | 4d |
 | **Total** | **~20d** | **~3d** | **~23d** |
 
 双车道并行墙钟 ~3-4 周（P2 三引擎可三车道；P4 可拆多车道）。
@@ -106,7 +114,7 @@ qm-next 达成与 qm 的功能对等：同一份 qm 生产任务面（真 harnes
 | P2 多引擎 | claude/codex/opencode harness + runs 深化 | 四引擎同 profile 可切换；session-state/activity 持久化 |
 | P3 API+控制台 | 30 routes + admin/auth/portal + web-ui 全活 | qm API 面路由级对齐清单过；admin UI 可操作 |
 | P4 长尾回填 | M3 砍除项 + 长尾子系统 | v0.1.0 tasks 12-16 OUT 项逐条关闭；子系统路由/存储对拍 |
-| P5 切换就绪 | slack/dingtalk/wecom + 迁移器 + 双跑 | 迁移演练+回滚通过；双渠道真机；tag `v1.0.0` |
+| P5 web 深化 + 迁移 + 切换 | web-ui 真活 + 迁移器 + 灰度双跑 | 迁移演练+回滚通过；web 真活；tag `v1.0.0` |
 
 ## Success Metrics
 
@@ -119,10 +127,10 @@ qm-next 达成与 qm 的功能对等：同一份 qm 生产任务面（真 harnes
 
 ## Open Questions / Decision Points
 
-- [ ] 引擎优先级：P1 pi 先行外，P2 三引擎顺序按 qm 实际使用频率排（待用户给出主力引擎）。
-- [ ] 长尾子系统全量确认：playgrounds/insights/monitors/classify 等是否全部在"全功能"内（默认全要，P4 开道前可再砍）。
+- [x] ~~引擎优先级：P1 pi 先行外，P2 三引擎顺序按 qm 实际使用频率排（待用户给出主力引擎）。~~ 拍板：claude/codex/opencode 平等齐上（2026-09-13 P2 9.0 汇合结论）
+- [x] ~~长尾子系统全量确认：playgrounds/insights/monitors/classify 等是否全部在"全功能"内~~ 拍板：16.0 全 11 tranches 全部落地（2026-09-15 P4 17.0 汇合）
 - [ ] 数据迁移已从 non-goal 转正（替身目标隐含）——确认目标库是独立 PG 实例还是复用 qm 实例。
-- [ ] slack/钉钉/企微确认回填（原 M4 延期项 18.0/19.0/20.0）。
+- [x] ~~slack/钉钉/企微确认回填（原 M4 延期项 18.0/19.0/20.0）。~~ 拍板：suspended；v1 只做飞书 + web（2026-09-15）
 - [ ] 切换终态：qm 退役时间表 vs 长期双跑。
 
 ## Appendix
@@ -145,3 +153,4 @@ qm-next 达成与 qm 的功能对等：同一份 qm 生产任务面（真 harnes
 | Date | Author | Changes |
 |------|--------|---------|
 | 2026-09-13 | AI DevOps | Initial draft（基于 qm 全量盘点与 v0.1.0 缺口分析） |
+| 2026-09-15 | AI DevOps | P1-P4 关闭（tag `p4` at `0517959`）；P5 范围重整：slack/钉钉/企微 **suspended**，新增 web 深化 + 监控合规生产化车道 |

@@ -4,7 +4,7 @@ Based on [ai-dev-tasks](https://github.com/snarktank/ai-dev-tasks) task format, 
 
 **PRD:** [prd-qm-parity.md](prd-qm-parity.md)
 **Created:** 2026-09-13
-**Status:** In Progress（P1、P2 已过串行门：tag `p1`/`p2`；P3 API 面未开）
+**Status:** In Progress — P1/P2/P3/P4 closed（tags `p1`/`p2`/`p3`/`p4` at `0517959`）；P5 in scope（2026-09-15：slack/钉钉/企微 suspended；v1 飞书 + web）
 **Estimate:** ~23d ai 总工作量；双车道并行墙钟 ~3-4 周 (ai:~20d test:~3d)
 
 <!--TOON:tasks_meta{id,feature,prd,status,est,est_ai,est_test,est_read,logged,started,completed}:
@@ -124,16 +124,30 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
   - [x] 17.0c OUT 项对账表入 `docs/parity-deviations.md` §P4 17.0：21 行 21 项 v0.1.0 OUT → 14.0/14.0a-d/15.0/16.0 车道映射；明确标注 P5 遗留（pg-boss / monitor-poller / oauth.ts / IM 多渠道）
   - [ ] 17.0d 打 tag `p4`（按 P1/P2 拍板惯例用户 FF 合并后打 tag——本地不动 tag 边界）
 
-### P5 多渠道 + 数据迁移 + 切换（~4d）
+### P5 web 深化 + 数据迁移 + 切换（~4d；2026-09-15 重整：slack/钉钉/企微 suspended）
 
-- [ ] 18.0 【A】im-slack 复活 ~1d：git `d7d2db3` 按 `ImProvider` 契约改造（mrkdwn/Block Kit 审批卡/目录分页）
-- [ ] 19.0 【B】im-dingtalk（Stream）+ im-wecom（回调） ~1.5d
-- [ ] 20.0 双渠道真机验收（飞书+Slack 并存） ~0.5d（v0.1.0 20.0 关闭）
-- [ ] 21.0 【串行门】数据迁移 ~2d
-  - [ ] 21.1 schema diff 报告（qm vs qm-next PG 全表） ~3h
-  - [ ] 21.2 迁移器 + 行数校验 + 回滚路径 ~6h
-  - [ ] 21.3 演练迁移（生产快照）+ `docs/migration.md` runbook ~3h
-- [ ] 22.0 切换演练 ~1d：灰度双跑（instance-registry 流量切分）、blue-green 部署、worker 进程拆分；全门禁绿；【串行门验收】tag `v1.0.0`
+- [ ] 18.0 【A】web 端深化 ~1d
+  - [ ] 18.1 web-ui 真活收尾：session 流式 SSE、turn 流式增量投递、deep-link 回退、错误页
+  - [ ] 18.2 portal SSO + admin-login link + API relay 真路径全活；连接性探针（lighthouse a11y ≥ 95）
+  - [ ] 18.3 体验硬化：mobile 适配 / dark mode / keyboard nav
+- [ ] 19.0 【B】数据迁移（关键路径）~2d
+  - [ ] 19.1 schema diff 报告（qm vs qm-next PG 全表：sessions/runs/directory/memory/skills/approvals/cron/delivery/audit/metrics）~3h
+  - [ ] 19.2 迁移器 + 行数校验 + 回滚路径 ~6h
+  - [ ] 19.3 演练迁移（生产快照）+ `docs/migration.md` runbook ~3h
+- [ ] 20.0 【C】监控/合规/生产化 ~0.5d
+  - [ ] 20.1 error-log/metrics/audit-log 完整化 + 健康检查端点 + 监控面板占位
+  - [ ] 20.2 运维 runbook：启动/关闭/回滚/扩缩容/迁移（`docs/operations.md`）
+  - [ ] 20.3 PG snapshot 备份 + 还原演练
+- [ ] 21.0 【汇合】切换演练 + tag `v1.0.0` ~0.5d：灰度双跑（instance-registry 流量切分）+ blue-green 部署 + worker 进程拆分；全门禁绿
+  - [ ] 21.1 灰度双跑（qm + qm-next 同实例注册流量切分）~2h
+  - [ ] 21.2 blue-green 部署形态验证 ~1h
+  - [ ] 21.3 worker 进程拆分验证 ~1h
+  - [ ] 21.4 全门禁绿 + tag `v1.0.0`【串行门验收】
+
+> **Suspended**（保留 git 历史 `d7d2db3` im-slack 全集；按 `ImProvider` 契约复用飞书通道测试矩阵重启）：
+> - ~~18.0 im-slack 复活~~ → 用户拍板 2026-09-15 suspended
+> - ~~19.0 im-dingtalk + im-wecom~~ → 用户拍板 2026-09-15 suspended
+> - ~~20.0 双渠道真机验收~~ → 用户拍板 2026-09-15 suspended
 
 ## Time Tracking
 
@@ -143,7 +157,7 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
 | P2 多引擎 + runs | 4d | ~2.5d（三车道） | - |
 | P3 API 面与控制台 | 5d | ~3d | - |
 | P4 长尾 + 回填 | 5d | ~3d（三车道） | - |
-| P5 多渠道 + 迁移 + 切换 | 4d | ~3d | - |
+| P5 web 深化 + 迁移 + 切换 | 4d | ~3d | - |
 | **合计** | **~23d** | **~15d（±buffer ≈ 3-4 周）** | - |
 
 ## Completion Checklist
@@ -152,5 +166,6 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
 - [ ] qm 日常场景清单 100% 等价路径（场景对拍记录）
 - [ ] 30/30 API routes 兼容清单过
 - [ ] 4/4 引擎真任务冒烟过
-- [ ] 迁移演练 + 回滚通过；双渠道真机过
+- [ ] 飞书 + web 真机对拍通过
+- [ ] 迁移演练 + 回滚通过；web 端真活连接性探针过
 - [ ] 全门禁绿（`test:pg`/typecheck/rescope-check/`check:im`）；tag `v1.0.0`
