@@ -696,3 +696,125 @@ updated to drop the "register records the fetch-error import" step
 since the stub no longer writes a fake error row). The
 api/service imports the real `@qm/skills` pack store via a
 re-export shim in `services/skill-pack-store.ts`.
+
+## P4 16.0 lane C — long-tail subsystems (2026-09-15)
+
+Each long-tail subsystem is ported as a self-contained `@qm/<name>` package
+with memory and Postgres dual implementations (where durable). The shape
+moves into the existing `DurableMap<T>` / `createPgPool(stmts)` /
+`isDeclaredKind` patterns instead of bespoke stores; the leader-lease
+contract is preserved per-package because `@qm/runs`'s `createNoopLeaderLease`
+is `fn: () => T` (no lost promise), which mismatches qm's
+`fn: (lost: Promise<void>) => T`.
+
+### Monitors
+
+- **Poller deferred to `triggers` package landing** — `monitor-poller.ts`
+  depends on `runTrigger`/`IdentityService`/`DeliveryStore`/
+  `IdempotencyStore`/`SandboxHandle` provision, none of which are
+  in `@qm/monitors`. The store + broker (arm / reattach / unwatch)
+  land now; the poller awaits a `triggers`/`runs` surface landing.
+- **Escalation guard inlined** — `assertNoEscalation` and
+  `buildTriggerBase` move into `monitor-store.ts` (qm sources them
+  from `triggers/trigger-store.ts`); the strict-optional `tail` patch
+  uses `as unknown as Partial<Monitor>` because qm's `update({cursor})`
+  explicitly sets `tail: undefined` to clear a held tail when the
+  cursor moves — a behavior qm-next keeps.
+
+### ACL
+
+- **Memory `GrantPersistence` exposed** alongside the
+  `createPostgresGrantStore` impl because the broker pattern (consumers
+  can back `createAclStore` with any persistence) is part of the
+  parity contract.
+- **`CapabilityClaims.egress` typed as `unknown`** — qm declares
+  `egress: EgressPolicy` on claims; qm-next keeps `egress?: unknown`
+  for backwards compat and casts at the egress-authz server's read
+  site.
+- **`acl_grants_version` increment table** — qm's `acl_grants_version`
+  trigger + bump function is ported verbatim (PL/pgSQL wrapped in
+  `$fn$ ... $fn$`, stripped by `assertOneStatement`'s dollar-quoted
+  regex). The PG cache invalidates on the bump instead of polling.
+
+### Tasks
+
+- **`task_events` FK to `tasks`** is enforced via `ALTER TABLE …
+  ADD CONSTRAINT … FOREIGN KEY … ON DELETE CASCADE NOT VALID` inside
+  `DO $$ … EXCEPTION WHEN duplicate_object THEN NULL; END $$` blocks
+  (idempotent across re-applies of the schema).
+- **`tasks.session_id` FK to `sessions(id)`** has the same shape;
+  qm-next's `@qm/store` already creates the `sessions` table, so both
+  can run in the same `createPgPool` connection string and the FK
+  resolves on first DDL.
+
+### Processes + insights
+
+- **`LeaderLease` divergence** — qm's `LeaderLease.hold<T>(key, fn:
+  (lost: Promise<void>) => Promise<T>)` has a `noop` that *invokes*
+  `fn`. `@qm/runs` `createNoopLeaderLease()` returns `null` without
+  invoking (qm-next's original shape; deliberate in P2 8.0).
+  `@qm/processes` and `@qm/insights` therefore each define a local
+  `ReaperLeaderLease` / `ReachDeniedLeaderLease` that matches qm's
+  signature; a future refactor will lift qm's contract into
+  `@qm/types` and replace the per-package duplicates.
+- **Watermark bug carried forward** — `reach-denied-notifier`
+  advances watermark to `e.at` then re-fetches with `since: e.at`;
+  the underlying `auditLog.tail` filter `e.at >= since` re-includes
+  the just-processed event. Single-sweep tests don't catch it.
+  Neither side fixes it.
+
+### Security
+
+- **`security-screener.ts` chunked-retry classifier** is ported
+  verbatim with the same 16_000 char cap, 1_600/256 char chunking,
+  429-driven backoff, and shadow concurrency cap. The `metadata`
+  shape nests `{qm: coordinates, [provider]: coordinates}` only when
+  the provider is non-qm (qm omits the redundant outer key).
+- **`security-posture.ts` verdict parser** uses the same
+  `firstJsonObject` depth-walking extractor; `unscreenedNotice` and
+  the rendered policy prompts are byte-equivalent strings.
+
+### Egress authz
+
+- **`CapabilityClaims.egress` cast at read site** — see ACL.
+  `claims.egress as EgressPolicy | undefined` inside
+  `buildEgressAuthzServer.checkStatus`.
+- **Audit relay's `signedRequestHeaders`** lives in `@qm/auth` (qm
+  has it in `auth/source-auth-sign.ts`); qm-next re-export is
+  identical.
+- **`isPrivateNetworkIp` moved to `@qm/egress-authz`** —
+  qm-next previously inlined a copy in `@qm/skills/pack-fetcher.ts`;
+  the canonical impl now lives here so the pack-fetcher's SSRF guard
+  and the egress proxy share one definition.
+
+### Connectors
+
+- **`@qm/connectors` excludes the IM-specific surfaces** —
+  `connectors/oauth.ts` (626L: PROVIDERS, well-known endpoints,
+  PKCE dance, refresh logic), `connectors/emoji-upload-service.ts`
+  (199L, feishu-specific), and `connectors/connector-client-store.ts`
+  (147L: per-provider admin CRUD) stay out of this package until
+  IM providers land in P5 18.0. The reusable cores
+  (background-exec-broker, oauth-flow-store, consent-link,
+  browser-session-store, secret-envelope) land now.
+- **`OAuthFlow`/`ConsentLinkRecord`/`StoredBrowserSession` types
+  re-declared** rather than imported from the deferred `oauth.ts`
+  module; the `oauth-flow-store` reuses qm's 43-char base64url
+  nonce and the 10-min TTL, the `consent-link` keeps the 24h TTL and
+  double-UUID linkId format, and the `secret-envelope` uses HKDF
+  with the same `'agent-platform.secret-box'` salt.
+
+## Cross-cutting 16.0 follow-ups
+
+- `MonitorPoller` (qm `monitors/monitor-poller.ts`, 296L) needs
+  `triggers` + `runs` surfaces to land. Tranche 9 closes the store +
+  broker only; the poller remains as a documented dependency.
+- `pg-boss` job queue (qm uses it for scheduled tasks and
+  background sweeps) stays on the deferred list — `npm install
+  pg-boss` blocked by the lockfile-only pnpm install policy until a
+  real deployment wires it in.
+- Environments, projects, and webhooks have independent
+  service-level stores (`@qm/api/src/services/{environment-registry,
+  project-store, webhook-store}.ts`) that don't fit the new
+  `@qm/<name>` package pattern; their existing wiring is preserved
+  and the long-tail packages were chosen so as not to fork them.
