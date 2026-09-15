@@ -1,0 +1,19 @@
+{
+  "name": "@qm/egress-authz",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Egress authz proxy: capability-token gated CONNECT, allow/deny list, DNS-rebinding defence, audit recorder + relay (parity 16.0).",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@qm/admin": "workspace:^",
+    "@qm/auth": "workspace:^",
+    "@qm/runs": "workspace:^",
+    "@qm/store": "workspace:^",
+    "@qm/types": "workspace:^"
+  }
+}
