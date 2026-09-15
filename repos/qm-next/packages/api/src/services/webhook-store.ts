@@ -6,6 +6,8 @@
  * accepted). Deliveries reach an agent with the 13.0 IM bridge.
  */
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
+import type { DurableMap } from '@qm/store'
+import { createMemoryMap } from '@qm/store'
 
 export const WEBHOOK_SCHEMES = ['github', 'slack', 'stripe', 'hmac-sha256'] as const
 export type WebhookScheme = (typeof WEBHOOK_SCHEMES)[number]
@@ -141,8 +143,12 @@ export interface WebhookStore {
   deliver(id: string, input: { headers: Record<string, string | string[] | undefined>; rawBody: string }): Promise<{ status: 200 | 202 | 401 | 404; body?: string }>
 }
 
-export function createMemoryWebhookStore(): WebhookStore {
-  const webhooks = new Map<string, Webhook>()
+/**
+ * DurableMap-backed webhook registry (20.0 twin lane): memory backing for
+ * tests/dev, a Postgres map over the `webhooks` table for durable
+ * deployments — callers swap by constructor alone.
+ */
+export function createWebhookStore(backing: DurableMap<Webhook> = createMemoryMap<Webhook>()): WebhookStore {
   return {
     async create(input) {
       const webhook: Webhook = {
@@ -158,23 +164,23 @@ export function createMemoryWebhookStore(): WebhookStore {
         enabled: true,
         createdAt: Date.now(),
       }
-      webhooks.set(webhook.id, webhook)
+      await backing.put(webhook.id, webhook)
       return webhook
     },
     async list() {
-      return [...webhooks.values()].map((w) => ({ ...w }))
+      return (await backing.all()).map((w) => ({ ...w }))
     },
     async get(id) {
-      const w = webhooks.get(id)
+      const w = await backing.get(id)
       return w ? { ...w } : null
     },
     async setEnabled(id, enabled) {
-      const w = webhooks.get(id)
+      const w = await backing.get(id)
       if (!w) throw new Error('no such webhook')
-      w.enabled = enabled
+      await backing.put(id, { ...w, enabled })
     },
     async deliver(id, input) {
-      const webhook = webhooks.get(id)
+      const webhook = await backing.get(id)
       if (!webhook || !webhook.enabled) return { status: 404 }
       const verifier = getVerifier(webhook.verification.scheme)
       if (!verifier) return { status: 404 }
@@ -191,4 +197,8 @@ export function createMemoryWebhookStore(): WebhookStore {
       return { status: 202 }
     },
   }
+}
+
+export function createMemoryWebhookStore(): WebhookStore {
+  return createWebhookStore()
 }

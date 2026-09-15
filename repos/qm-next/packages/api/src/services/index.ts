@@ -1,9 +1,11 @@
 export {
   createMemoryChannelPolicyStore,
+  createPostgresChannelPolicyStore,
   parseBotLedger,
   BOT_MODES,
   type BotPolicy,
   type ChannelPolicy,
+  type ChannelPolicyRevision,
   type ChannelPolicyStore,
 } from './channel-policy-store.ts'
 export {
@@ -36,6 +38,7 @@ export {
 } from './grant-ledger.ts'
 export {
   createMemoryFileStore,
+  createPostgresFileStore,
   ByteSourceTooLargeError,
   type FilePage,
   type FileStoreService,
@@ -83,6 +86,7 @@ export {
 } from './connector-token-store.ts'
 export {
   createMemoryWebhookStore,
+  createWebhookStore,
   getVerifier,
   redactWebhook,
   WEBHOOK_SCHEMES,

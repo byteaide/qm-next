@@ -104,6 +104,9 @@ importers:
       '@qm/auth':
         specifier: workspace:^
         version: link:../auth
+      '@qm/connectors':
+        specifier: workspace:^
+        version: link:../connectors
       '@qm/cordis':
         specifier: workspace:^
         version: link:../../vendor/cordis
@@ -431,6 +434,9 @@ importers:
       '@qm/cordis':
         specifier: workspace:^
         version: link:../../vendor/cordis
+      '@qm/store':
+        specifier: workspace:^
+        version: link:../store
       '@qm/types':
         specifier: workspace:^
         version: link:../types

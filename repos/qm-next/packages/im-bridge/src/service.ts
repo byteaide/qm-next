@@ -23,7 +23,7 @@ import {
 } from '@qm/approvals'
 import { resolveProviderDm } from '@qm/directory'
 import type { ImDeliveryQueue } from '@qm/im-core'
-import { ImRegistryService } from '@qm/im-core/runtime'
+import { createMemoryDeliveryQueue, createPostgresDeliveryQueue, ImRegistryService } from '@qm/im-core/runtime'
 import Schema from '@qm/schemastery'
 import { createImTurnBridge, type ImTurnBridge, type ImTurnBridgeLoopOptions, type ImTurnBridgeOptions } from './bridge.ts'
 
@@ -152,6 +152,12 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
     const registry = new ImRegistryService(this.ctx, {
       onEvent: (events) => (this.bridge ? this.bridge.sink(events) : Promise.resolve()),
     })
+    // Delivery queue (20.0 twin lane): durable Postgres queue as soon as
+    // the api composition root runs with databaseUrl; cron/trigger fires
+    // and the admin provenance view share this queue.
+    const databaseUrl = api.config.databaseUrl
+    const queue: ImDeliveryQueue = databaseUrl ? createPostgresDeliveryQueue(databaseUrl) : createMemoryDeliveryQueue()
+    this.queue = queue
     const directory = api.directory
     let ack: ImTurnBridgeOptions['ack'] | undefined
     if (this.config.ackReactions !== false) {
@@ -215,10 +221,12 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
         sessions: this.ctx.api.sessions,
         resolution: this.ctx.api.resolution,
         im: registry,
+        queue,
       },
       {
         ...(this.config.actorType ? { actorType: this.config.actorType } : {}),
         ...(this.config.replyAs ? { replyAs: this.config.replyAs } : {}),
+        ...(api.approvals ? { approvalStore: api.approvals } : {}),
         ...(ambient ? { ambient } : {}),
         ...(ack ? { ack } : {}),
         ...(agentRequests ? { agentRequests } : {}),
@@ -230,6 +238,7 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
     await this.bridge.start()
     return async () => {
       await this.bridge?.stop()
+      if (databaseUrl && 'close' in this.queue) await (this.queue as { close(): Promise<void> }).close().catch(() => undefined)
     }
   }
 }

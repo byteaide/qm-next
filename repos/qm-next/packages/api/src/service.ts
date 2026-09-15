@@ -32,28 +32,61 @@ import {
   createMemoryAckEmojiPickStore,
   createMemoryAgentRequestStore,
   createMemoryAmbientJudgmentStore,
+  createMemoryApprovalStore,
+  createPostgresApprovalStore,
   type AckEmojiPickStore,
   type AgentRequestStore,
   type AmbientCursorStore,
   type AmbientJudgmentStore,
+  type ApprovalStore,
 } from '@qm/approvals'
-import { createMemoryDirectoryStore } from '@qm/directory'
-import { createKeychain, deriveConnectorKey } from '@qm/credentials'
+import { createMemoryDirectoryStore, createPostgresDirectoryStore, type DirectoryStore } from '@qm/directory'
+import { createKeychain, createDeviceFlowCutoverStore, deriveConnectorKey, type DeviceFlowCutoverStore } from '@qm/credentials'
 import type { ImDeliveryQueue } from '@qm/im-core'
 import type { Keychain } from '@qm/types'
 import { createClaudeHarness } from '@qm/harness-claude'
 import { createCodexHarness } from '@qm/harness-codex'
 import { createOpenCodeHarness } from '@qm/harness-opencode'
 import { createPiHarness } from '@qm/harness-pi'
-import { createModelGateway, setCustomProviders, validateCustomProviderSpec, type CustomProviderSpec } from '@qm/model'
+import {
+  createCustomProviderStore,
+  createModelCredentialStore,
+  createModelGateway,
+  setCustomProviders,
+  validateCustomProviderSpec,
+  type CustomProviderSpec,
+  type CustomProviderStore,
+  type ModelCredentialStore,
+} from '@qm/model'
 import { createMemoryScopeMemory } from '@qm/memory'
+import { createMcpServerStore, createMcpToolService, type McpServerStore, type McpToolService } from '@qm/mcp'
+import {
+  createBrowserSessionStore,
+  createConsentLinkStore,
+  createOAuthFlowStore,
+  type BrowserSessionStore,
+  type ConsentLinkStore,
+  type OAuthFlowStore,
+} from '@qm/connectors'
 import { createMemorySessionStateBus } from '@qm/runs'
 import { createMemorySkillStore } from '@qm/skills'
 import type { RuntimeRouteConfig } from '@qm/orchestrator'
 import { createHarnessRouter, createMockHarness, createSandboxToolContext, OrchestratorService } from '@qm/orchestrator'
 import Schema from '@qm/schemastery'
 import { createLocalSandbox } from '@qm/sandbox'
-import { createMemoryRunEventBus, createMemoryRunStore, createMemorySessionStore } from '@qm/store'
+import {
+  createMemoryRunEventBus,
+  createMemoryRunStore,
+  createMemorySessionStore,
+  createPgPool,
+  createPostgresMap,
+  createPostgresRunStore,
+  createPostgresSessionStore,
+  createLocalByteStore,
+  createMemoryByteStore,
+  type DurableByteStore,
+  type PgPool,
+} from '@qm/store'
 import { createMemoryMap } from '@qm/store'
 import { reachDirectory } from '@qm/reach'
 import {
@@ -74,12 +107,14 @@ import {
   createMemorySurfaceCacheStore,
   createMemoryUserModelCredentialsStore,
   createMemoryWebhookStore,
+  createPostgresChannelPolicyStore,
+  createPostgresFileStore,
   createPostgresSlackMap,
   createSurfaceContextQueue,
+  createWebhookStore,
 } from './services/index.ts'
 import { createAmbientCursorStore, createPostgresAckEmojiPickStore, createPostgresAgentRequestStore, createPostgresAmbientJudgmentStore } from './services/ambient-stores.ts'
 import type { ChannelPolicyStore as ApiChannelPolicyStore } from './services/channel-policy-store.ts'
-import type { DirectoryStore } from '@qm/directory'
 import type { CronScheduler, CronStore } from '@qm/triggers'
 import type {
   Harness,
@@ -184,6 +219,11 @@ export interface ApiConfig {
   adminGrants?: string
   /** Postgres connection string; durable-by-default swaps every memory store for its PG twin. */
   databaseUrl?: string
+  /**
+   * File blob bytes root directory (20.0): content-addressed `files/<sha256>`
+   * keys under this dir; without it (and with databaseUrl) bytes stay in RAM.
+   */
+  filesDir?: string
   /** Ambient observability (14.0): judgment + cursor stores for the IM ambient slice. */
   ambient?: boolean
   /** Agent-request directives (14.0): durable registry for IM reply directives. */
@@ -300,6 +340,7 @@ export const Config = Schema.object({
   admins: Schema.array(Schema.string()).description('Bootstrap org admins (principal ids)'),
   adminGrants: Schema.string().description('qm ADMIN_GRANTS grammar (principal:role,...) seeding durable grant stores'),
   databaseUrl: Schema.string().description('Postgres connection string; swaps memory stores for durable PG twins'),
+  filesDir: Schema.string().description('File blob bytes root directory; content-addressed files/<sha256> keys'),
   ambient: Schema.boolean().description('Ambient observability (14.0): judgment + cursor stores for the IM ambient slice'),
   agentRequests: Schema.boolean().description('Agent-request directives (14.0): durable registry for IM reply directives'),
   skillPacks: Schema.boolean().description('Skill-pack management (11.0)'),
@@ -408,14 +449,49 @@ export class ApiService extends Service<ApiConfig> {
    */
   keychain?: Keychain
 
+  /** Approval store (20.0): one instance shared with the IM bridge; durable with databaseUrl. */
+  approvals?: ApprovalStore
+
+  /** Model credential registry (20.0): provider API keys over the `model_credentials` map. */
+  modelCredentials?: ModelCredentialStore
+
+  /** Custom provider registry (20.0): over the `custom_model_providers` map. */
+  customProviderRegistry?: CustomProviderStore
+
+  /** Device-flow cutover policies (20.0): over the qm-named cutover maps. */
+  deviceFlowCutover?: DeviceFlowCutoverStore
+
+  /** Connector OAuth round-trip stores (20.0), present with the connectors surface. */
+  oauthFlows?: OAuthFlowStore
+  consentLinks?: ConsentLinkStore
+  browserSessions?: BrowserSessionStore
+
+  /** MCP registry + agent-tool bridge (20.0), present with the admin surface. */
+  mcpServers?: McpServerStore
+  mcpToolService?: McpToolService
+
   constructor(ctx: Context, public config: ApiConfig) {
     super(ctx, 'api')
   }
 
   async [Service.init]() {
     if (!this.config.secrets?.length) throw new Error('api requires at least one signing secret')
-    const sessions = createMemorySessionStore()
-    const runs = createMemoryRunStore()
+    // Durable-by-default (20.0 twin sweep): every store below swaps to its
+    // Postgres twin when databaseUrl is set; memory stays the test/dev
+    // default. The shared pool owns no DDL — schema belongs to each store
+    // constructor (migration preflight relies on that).
+    const databaseUrl = this.config.databaseUrl
+    const pg: PgPool | undefined = databaseUrl ? createPgPool(databaseUrl, []) : undefined
+    const pgClosers: Array<{ close(): Promise<void> }> = []
+    const pgMap = <T>(table: string) => {
+      if (!pg) throw new Error(`pgMap(${table}) requires databaseUrl`)
+      return createPostgresMap<T>(pg, table)
+    }
+    const sessions = databaseUrl ? createPostgresSessionStore(databaseUrl) : createMemorySessionStore()
+    const runs = databaseUrl ? createPostgresRunStore(databaseUrl) : createMemoryRunStore()
+    if (databaseUrl) {
+      pgClosers.push(sessions as unknown as { close(): Promise<void> }, runs as unknown as { close(): Promise<void> })
+    }
     const runEvents = createMemoryRunEventBus()
     const modelGateway = createModelGateway()
     const customProviders = this.config.customProviders ?? []
@@ -539,40 +615,65 @@ export class ApiService extends Service<ApiConfig> {
     // Parity surface (11.0): directory + reach behind an opt-in store; cron
     // routes always register and 404 per request until the triggers plugin
     // injects its runtime into `cronsRuntime`.
-    const directoryStore = this.config.directory ? createMemoryDirectoryStore() : undefined
+    const orgId = (this.config.scopeId ?? 'org:default').replace(/^org:/, '')
+    const directoryStore = this.config.directory
+      ? databaseUrl
+        ? createPostgresDirectoryStore(databaseUrl)
+        : createMemoryDirectoryStore()
+      : undefined
+    if (databaseUrl && directoryStore) pgClosers.push(directoryStore as DirectoryStore & { close(): Promise<void> })
     const keychain = this.config.keychain
       ? createKeychain({
-          creds: createMemoryMap(),
-          grants: createMemoryMap(),
-          asks: createMemoryMap(),
+          creds: databaseUrl ? pgMap('keychain_credentials') : createMemoryMap(),
+          grants: databaseUrl ? pgMap('keychain_grants') : createMemoryMap(),
+          asks: databaseUrl ? pgMap('keychain_asks') : createMemoryMap(),
           key: deriveConnectorKey(this.config.secrets[0]!),
-          orgId: () => (this.config.scopeId ?? 'org:default').replace(/^org:/, ''),
+          orgId: () => orgId,
         })
       : undefined
     const memoryStore = this.config.memory ? createMemoryScopeMemory() : undefined
     const skillStore = this.config.skills ? createMemorySkillStore() : undefined
     const contextQueue = this.config.context ? createSurfaceContextQueue() : undefined
     const channelPolicyStore =
-      this.config.context || this.config.surfaceCache ? createMemoryChannelPolicyStore() : undefined
+      this.config.context || this.config.surfaceCache
+        ? databaseUrl
+          ? createPostgresChannelPolicyStore(databaseUrl, { orgId })
+          : createMemoryChannelPolicyStore()
+        : undefined
     const surfaceCacheStore = this.config.surfaceCache ? createMemorySurfaceCacheStore() : undefined
     const environmentRegistry = this.config.environments ? createMemoryEnvironmentRegistry() : undefined
-    const projectStore = this.config.projects
-      ? createMemoryProjectStore({ orgId: (this.config.scopeId ?? 'org:default').replace(/^org:/, '') })
-      : undefined
+    const projectStore = this.config.projects ? createMemoryProjectStore({ orgId }) : undefined
     const sessionStateBus = this.config.sessionState ? createMemorySessionStateBus() : undefined
     const grantLedger = this.config.grants || this.config.files || this.config.deployments ? createMemoryGrantLedger() : undefined
     const blobTransfer = this.config.blobs || this.config.files ? createMemoryBlobTransfer() : undefined
-    const fileStore = this.config.files ? createMemoryFileStore({ blobTransfer: blobTransfer!, grants: grantLedger! }) : undefined
-    const soulStore = this.config.soul
-      ? createMemorySoulStore((this.config.scopeId ?? 'org:default').replace(/^org:/, ''))
+    // Files (20.0 twin lane): with databaseUrl the metadata lands in the
+    // qm-shaped `file_artifacts` table and bytes go through the
+    // content-addressed byte store (`filesDir` for the FS backend; without
+    // it bytes stay in RAM and a warning says so).
+    let byteStore: DurableByteStore | undefined
+    if (this.config.files || this.config.blobs) {
+      if (this.config.filesDir) {
+        byteStore = createLocalByteStore(this.config.filesDir)
+      } else {
+        if (databaseUrl) this.ctx.logger.warn('api: databaseUrl set but filesDir missing — file bytes stay in RAM')
+        byteStore = createMemoryByteStore()
+      }
+    }
+    const fileStore = this.config.files
+      ? databaseUrl && byteStore
+        ? createPostgresFileStore({ databaseUrl, byteStore, grants: grantLedger! })
+        : createMemoryFileStore({ blobTransfer: blobTransfer!, grants: grantLedger! })
       : undefined
+    const soulStore = this.config.soul ? createMemorySoulStore(orgId) : undefined
     const runtimeConfigStore = this.config.config ? createMemoryRuntimeConfigStore() : undefined
     const deploymentStore = this.config.deployments ? createMemoryDeploymentStore({ grants: grantLedger! }) : undefined
     const deploymentLayerStore = this.config.deploymentLayer ? createMemoryDeploymentLayerStore() : undefined
     const connectorTokens = this.config.connectors ? createMemoryConnectorTokenStore() : undefined
-    const webhookStore = this.config.webhooks ? createMemoryWebhookStore() : undefined
-    const orgId = (this.config.scopeId ?? 'org:default').replace(/^org:/, '')
-    const databaseUrl = this.config.databaseUrl
+    const webhookStore = this.config.webhooks
+      ? databaseUrl
+        ? createWebhookStore(pgMap('webhooks'))
+        : createMemoryWebhookStore()
+      : undefined
     // Control-plane sinks (12.0): durable-by-default — Postgres twins when
     // databaseUrl is set, in-memory rings otherwise.
     let metrics: MetricsSink | undefined
@@ -596,12 +697,13 @@ export class ApiService extends Service<ApiConfig> {
       ? createMemoryAdminService({
           orgId,
           grants: adminGrantStore,
-          ...(databaseUrl
-            ? { slackMap: createPostgresSlackMap((await import('@qm/store')).createPgPool(databaseUrl, [])) }
-            : {}),
+          ...(pg ? { slackMap: createPostgresSlackMap(pg) } : {}),
         })
       : undefined
-    if (this.config.admin) {
+    if (this.config.admin || databaseUrl) {
+      // Observability completion (20.0): with a durable backend the sinks
+      // exist whether or not the admin console is on — audit, metrics and
+      // error records are operational data, not console features.
       metrics = databaseUrl ? createPostgresMetricsSink(databaseUrl) : createMetricsSink()
       errors = databaseUrl ? createPostgresErrorLog(databaseUrl) : createErrorLog()
       credentialUsage = databaseUrl ? createPostgresCredentialUsageSink(databaseUrl) : createCredentialUsageSink()
@@ -633,6 +735,47 @@ export class ApiService extends Service<ApiConfig> {
       this.agentRequests = databaseUrl
         ? createPostgresAgentRequestStore(databaseUrl, orgId)
         : createMemoryAgentRequestStore()
+    }
+    // Approval store (20.0 twin lane): always constructed so the IM bridge
+    // shares one instance; durable as soon as databaseUrl is set.
+    this.approvals = databaseUrl ? createPostgresApprovalStore(databaseUrl) : createMemoryApprovalStore()
+    if (databaseUrl && this.approvals) pgClosers.push(this.approvals as ApprovalStore & { close(): Promise<void> })
+    // Model/credential registries (20.0 twin lane): qm-shaped DurableMap
+    // stores (`model_credentials`, `custom_model_providers`) so a migration
+    // blob-copies rows; consumers (harness key resolution) attach later.
+    const keyMaterial = this.config.secrets[0]!
+    this.modelCredentials = createModelCredentialStore({
+      backing: databaseUrl ? pgMap('model_credentials') : createMemoryMap(),
+      keyMaterial,
+    })
+    this.customProviderRegistry = createCustomProviderStore({
+      backing: databaseUrl ? pgMap('custom_model_providers') : createMemoryMap(),
+      keyMaterial,
+    })
+    this.deviceFlowCutover = createDeviceFlowCutoverStore(
+      databaseUrl ? pgMap('device_flow_cutover') : createMemoryMap(),
+      { orgId, ...(databaseUrl ? { resets: pgMap('device_flow_cutover_resets') } : {}) },
+    )
+    // Connector OAuth/browser-session stores (20.0 twin lane): constructed
+    // with the connectors surface so the tables exist for migration
+    // (routes attach in a later lane).
+    if (this.config.connectors) {
+      const browserKey = deriveConnectorKey(keyMaterial, 'browser-sessions')
+      this.oauthFlows = createOAuthFlowStore(databaseUrl ? pgMap('oauth_flows') : createMemoryMap())
+      this.consentLinks = createConsentLinkStore(databaseUrl ? pgMap('consent_links') : createMemoryMap())
+      this.browserSessions = createBrowserSessionStore({
+        sessions: databaseUrl ? pgMap('browser_sessions') : createMemoryMap(),
+        key: browserKey,
+      })
+    }
+    // MCP registry (20.0 twin lane): the admin routes light up when the
+    // admin surface is on; the store table exists for migration either way.
+    if (this.config.admin) {
+      this.mcpServers = createMcpServerStore(databaseUrl ? pgMap('mcp_servers') : createMemoryMap())
+      this.mcpToolService = createMcpToolService({
+        servers: this.mcpServers,
+        ...(adminAuditLog ? { audit: adminAuditLog } : {}),
+      })
     }
     const skillPackStore = this.config.skillPacks ? createMemorySkillPackStore() : undefined
     const userModelCredentials = this.config.userModelAuth ? createMemoryUserModelCredentialsStore() : undefined
@@ -733,9 +876,12 @@ export class ApiService extends Service<ApiConfig> {
                 ...(metrics ? { metrics } : {}),
                 ...(errors ? { errors } : {}),
                 ...(credentialUsage ? { credentialUsage } : {}),
-                ...(this.ambientJudgments ? { ambientJudgments: this.ambientJudgments } : {}),
-                ...(this.ackPicks ? { ackEmojiPicks: this.ackPicks } : {}),
-              },
+                 ...(this.ambientJudgments ? { ambientJudgments: this.ambientJudgments } : {}),
+                 ...(this.ackPicks ? { ackEmojiPicks: this.ackPicks } : {}),
+                 ...(this.mcpServers && this.mcpToolService
+                   ? { mcp: { servers: this.mcpServers, toolService: this.mcpToolService } }
+                   : {}),
+               },
             }
           : {}),
         ...(skillPackStore && adminService ? { skillPacks: { packs: skillPackStore, ...(skillStore ? { skills: skillStore } : {}), orgScope: this.config.scopeId ?? 'org:default', admins: adminService } } : {}),
@@ -840,6 +986,15 @@ export class ApiService extends Service<ApiConfig> {
         }
         sandboxHandles.clear()
       }
+      this.mcpToolService?.close()
+      for (const store of pgClosers) {
+        try {
+          await store.close()
+        } catch (err) {
+          void err
+        }
+      }
+      if (pg) await pg.close().catch(() => undefined)
     }
   }
 }

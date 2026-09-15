@@ -14,6 +14,8 @@ import { ImTurnBridgeService } from '@qm/im-bridge'
 import {
   createCronScheduler,
   createMemoryCronStore,
+  createPostgresCronStore,
+  createPostgresLeaderLease,
   createTriggerSink,
   DEFAULT_TICK_INTERVAL_MS,
   type CronScheduler,
@@ -56,7 +58,13 @@ export class TriggersService extends Service<TriggersConfig> {
     const bridge: ImTurnBridgeService = this.ctx['im-bridge']
     const deliveries: ImDeliveryQueue | undefined = bridge.queue
     if (!deliveries) throw new Error('triggers requires the im-bridge delivery queue — load @qm/im-bridge first')
-    this.crons = createMemoryCronStore()
+    // Durable-by-default (20.0 twin lane): the cron registry and the
+    // scheduler's leader lease ride Postgres as soon as the api root runs
+    // with databaseUrl.
+    const databaseUrl = api.config.databaseUrl
+    this.crons = databaseUrl ? createPostgresCronStore(databaseUrl) : createMemoryCronStore()
+    const pgCrons: { close(): Promise<void> } | undefined = databaseUrl ? (this.crons as { close(): Promise<void> }) : undefined
+    const lease = databaseUrl ? createPostgresLeaderLease(databaseUrl) : undefined
     const replyAs = this.config.replyAs ?? 'markdown'
     const directory = api.directory
     const resolveDm = directory
@@ -72,7 +80,7 @@ export class TriggersService extends Service<TriggersConfig> {
       ...(resolveDm ? { resolveDm } : {}),
       ...(directory ? { directory } : {}),
     }
-    this.scheduler = createCronScheduler({ ...deps, crons: this.crons })
+    this.scheduler = createCronScheduler({ ...deps, crons: this.crons, ...(lease ? { lease } : {}) })
     this.triggers = createTriggerSink(deps)
     // Parity surface (11.0): expose the registry + scheduler to the API's
     // cron routes; cleared on dispose so late requests 404 cleanly. The
@@ -83,6 +91,7 @@ export class TriggersService extends Service<TriggersConfig> {
     return async () => {
       api.cronsRuntime = undefined
       this.scheduler.stop()
+      await pgCrons?.close().catch(() => undefined)
     }
   }
 }

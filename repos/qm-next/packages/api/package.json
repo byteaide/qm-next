@@ -22,6 +22,7 @@
     "@qm/harness-pi": "workspace:^",
     "@qm/im-core": "workspace:^",
     "@qm/mcp": "workspace:^",
+    "@qm/connectors": "workspace:^",
     "@qm/memory": "workspace:^",
     "@qm/model": "workspace:^",
     "@qm/orchestrator": "workspace:^",

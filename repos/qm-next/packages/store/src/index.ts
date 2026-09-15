@@ -16,3 +16,10 @@ export {
   jsonbStringify,
   type DurableMap,
 } from './durable-map.ts'
+export {
+  ByteSourceTooLargeError,
+  createLocalByteStore,
+  createMemoryByteStore,
+  type DurableByteStore,
+  type PutBytesResult,
+} from './byte-store.ts'

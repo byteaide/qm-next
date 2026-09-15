@@ -2,8 +2,10 @@
  * In-memory channel policy store (11.0 tranche 5, lane A) — the qm
  * `surface-cache/channel-policy-store` surface: per-container standing
  * orders, bot ledger, and ambient opt-in with optimistic-lock-friendly
- * `updatedAt`. Production swaps Postgres in behind the same interface.
+ * `updatedAt`. Production swaps Postgres in behind the same interface
+ * (`createPostgresChannelPolicyStore`, 20.0 twin lane).
  */
+import { createPgPool } from '@qm/store'
 
 export const BOT_MODES = ['ignore', 'rollup', 'action', 'user'] as const
 
@@ -91,4 +93,115 @@ export function createMemoryChannelPolicyStore(opts: { now?: () => number } = {}
     },
     async close() {},
   }
+}
+
+const CHANNEL_POLICY_SCHEMA_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS channel_policy(
+      org_id TEXT NOT NULL, container TEXT NOT NULL,
+      orders TEXT NOT NULL DEFAULT '', bots JSONB NOT NULL DEFAULT '{}'::jsonb,
+      set_by TEXT, updated_at BIGINT NOT NULL,
+      PRIMARY KEY(org_id, container)
+    )`,
+  `ALTER TABLE channel_policy ADD COLUMN IF NOT EXISTS bots JSONB NOT NULL DEFAULT '{}'::jsonb`,
+  `ALTER TABLE channel_policy ADD COLUMN IF NOT EXISTS ambient_enabled BOOLEAN`,
+  `ALTER TABLE channel_policy ALTER COLUMN ambient_enabled DROP NOT NULL`,
+  `ALTER TABLE channel_policy ALTER COLUMN ambient_enabled DROP DEFAULT`,
+  `CREATE TABLE IF NOT EXISTS channel_policy_history(
+      id BIGSERIAL PRIMARY KEY,
+      org_id TEXT NOT NULL, container TEXT NOT NULL,
+      orders TEXT NOT NULL, set_by TEXT, session_id TEXT,
+      created_at BIGINT NOT NULL
+    )`,
+  `ALTER TABLE channel_policy_history ADD COLUMN IF NOT EXISTS bots JSONB`,
+  `ALTER TABLE channel_policy_history ADD COLUMN IF NOT EXISTS ambient_enabled BOOLEAN`,
+  `CREATE INDEX IF NOT EXISTS channel_policy_history_container
+      ON channel_policy_history(org_id, container, id DESC)`,
+]
+
+/**
+ * Postgres twin of the channel-policy store (20.0 twin lane), translated
+ * from qm's `surface-cache/channel-policy-store` onto the qm-next
+ * interface; every set() appends a history row exactly like qm.
+ */
+export function createPostgresChannelPolicyStore(
+  connectionString: string,
+  opts: { orgId?: string } = {},
+): ChannelPolicyStore & { history(container: string, limit?: number): Promise<ChannelPolicyRevision[]> } {
+  const orgId = opts.orgId ?? 'default'
+  const store = createPgPool(connectionString, CHANNEL_POLICY_SCHEMA_STATEMENTS)
+  const policyRow = (r: Record<string, unknown>): ChannelPolicy => ({
+    container: r.container as string,
+    orders: (r.orders as string) ?? '',
+    bots: (r.bots as Record<string, BotPolicy>) ?? {},
+    ...(r.ambient_enabled != null ? { ambientEnabled: r.ambient_enabled as boolean } : {}),
+    ...(r.set_by != null ? { setBy: r.set_by as string } : {}),
+    updatedAt: Number(r.updated_at),
+  })
+  return {
+    async get(container) {
+      const rows = await store.q('SELECT * FROM channel_policy WHERE org_id = $1 AND container = $2', [orgId, container])
+      return rows[0] ? policyRow(rows[0]!) : null
+    },
+    async set(container, orders, opts2 = {}) {
+      const at = Date.now()
+      const rows = await store.q(
+        `WITH up AS (
+           INSERT INTO channel_policy(org_id, container, orders, bots, ambient_enabled, set_by, updated_at)
+           VALUES ($1,$2,$3,COALESCE($4::jsonb,'{}'::jsonb),CASE WHEN $7 THEN $6::boolean END,$5,$8)
+           ON CONFLICT (org_id, container) DO UPDATE SET orders = EXCLUDED.orders,
+             bots = COALESCE($4::jsonb, channel_policy.bots),
+             ambient_enabled = CASE WHEN $7 THEN $6::boolean ELSE channel_policy.ambient_enabled END,
+             set_by = EXCLUDED.set_by, updated_at = EXCLUDED.updated_at
+           RETURNING *
+         ), hist AS (
+           INSERT INTO channel_policy_history(org_id, container, orders, bots, ambient_enabled, set_by, created_at)
+           SELECT $1, $2, $3, up.bots, up.ambient_enabled, $5, $8 FROM up
+         )
+         SELECT * FROM up`,
+        [
+          orgId,
+          container,
+          orders,
+          opts2.bots ? JSON.stringify(opts2.bots) : null,
+          opts2.setBy ?? null,
+          opts2.ambientEnabled === undefined || opts2.ambientEnabled === null ? null : opts2.ambientEnabled,
+          opts2.ambientEnabled !== undefined && opts2.ambientEnabled !== null,
+          at,
+        ],
+      )
+      return policyRow(rows[0]!)
+    },
+    async setAmbient(container, enabled, opts2 = {}) {
+      const prev = await this.get(container)
+      return this.set(container, prev?.orders ?? '', { ...opts2, ambientEnabled: enabled })
+    },
+    async history(container, limit = 50) {
+      const rows = await store.q(
+        'SELECT * FROM channel_policy_history WHERE org_id = $1 AND container = $2 ORDER BY id DESC LIMIT $3',
+        [orgId, container, Math.max(1, limit)],
+      )
+      return rows.map((r) => ({
+        container: r.container as string,
+        orders: (r.orders as string) ?? '',
+        ...(r.bots != null ? { bots: r.bots as Record<string, BotPolicy> } : {}),
+        ...(r.ambient_enabled != null ? { ambientEnabled: r.ambient_enabled as boolean } : {}),
+        ...(r.set_by != null ? { setBy: r.set_by as string } : {}),
+        ...(r.session_id != null ? { sessionId: r.session_id as string } : {}),
+        createdAt: Number(r.created_at),
+      }))
+    },
+    async close() {
+      await store.close()
+    },
+  }
+}
+
+export interface ChannelPolicyRevision {
+  container: string
+  orders: string
+  bots?: Record<string, BotPolicy>
+  ambientEnabled?: boolean
+  setBy?: string
+  sessionId?: string
+  createdAt: number
 }
