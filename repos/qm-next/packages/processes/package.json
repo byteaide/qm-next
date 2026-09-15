@@ -2,7 +2,7 @@
   "name": "@qm/processes",
   "version": "0.1.0",
   "private": true,
-  "description": "Process session registry: track long-running processes (build, dev-server, background) across the orchestrator. Memory and Postgres dual impl, durable-by-default (parity 16.0)",
+  "description": "Process session registry + reaper + reconcile (parity 16.0). Memory and Postgres dual impl, durable-by-default.",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
@@ -10,7 +10,10 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@qm/types": "workspace:^",
     "@qm/store": "workspace:^",
+    "@qm/sandbox": "workspace:^",
+    "@qm/runs": "workspace:^",
     "pg": "^8.13.0"
   },
   "devDependencies": {
