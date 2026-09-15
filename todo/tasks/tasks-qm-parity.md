@@ -117,7 +117,12 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
   - [x] 16.0k `@qm/connectors` core（tranche 11, `6812e2e`）：background-exec-broker（reattach + write/stop/list）+ oauth-flow-store（43-字符 nonce + ttl）+ consent-link（24h ttl + 一次性 redeem）+ browser-session-store（AES-256-GCM）+ secret-envelope（HKDF v2 + 双 key fallback）；oauth.ts 完整 provider 集（626L）+ emoji-upload-service（IM-specific）延后 P5 复活
   - 验证（2026-09-15）：`pnpm typecheck` 绿 / `pnpm test` 692/665 pass/27 PG-skip/0 fail / `check:im` 绿 / `rescope-check` 绿
   - 遗留：monitor-poller（依赖 trigger + sweeper，tranche 9 仍延）、oauth.ts 全 provider 集（626L，IM-specific 旁路）、environments/projects/webhooks/search 独立 store、pg-boss job-queue（外部依赖暂缓）、deployment layers（aws/docker/fly/porter 沙箱需要真凭证）
-- [ ] 17.0 【汇合】v0.1.0 OUT 项逐条对账关闭 + `test:pg` 全绿；打 tag `p4` ~0.5d
+- [x] 17.0 【汇合】v0.1.0 OUT 项逐条对账关闭 + `test:pg` 全绿；打 tag `p4` ~0.5d（2026-09-15，worktree `aa-feature-auto-20260913-155602`）
+  - [x] 17.0a 全门禁绿：typecheck / `pnpm test` 692/665+27PG-skip/0 fail / `check:im` / `rescope-check` 全绿
+  - [x] 17.0a-fix 修 keychain 时间敏感测试（`Math.max(now(), prior+1)` 真钟 1ms+ 漂移）：注入确定性 `now()` clock + 重置为 `updatedAt` 保证 `+1` 严格单调（commit `fb6cac7`）
+  - [x] 17.0b `pnpm test:pg`（PG16 容器一次性跑全套）：751/747+4 skip（real-model smoke）+ 0 fail（exit 0）；memory+PG 双实现全 PG 列适配实证（16.0 增量列 + 既有 stores）
+  - [x] 17.0c OUT 项对账表入 `docs/parity-deviations.md` §P4 17.0：21 行 21 项 v0.1.0 OUT → 14.0/14.0a-d/15.0/16.0 车道映射；明确标注 P5 遗留（pg-boss / monitor-poller / oauth.ts / IM 多渠道）
+  - [ ] 17.0d 打 tag `p4`（按 P1/P2 拍板惯例用户 FF 合并后打 tag——本地不动 tag 边界）
 
 ### P5 多渠道 + 数据迁移 + 切换（~4d）
 

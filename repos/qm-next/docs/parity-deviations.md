@@ -818,3 +818,60 @@ is `fn: () => T` (no lost promise), which mismatches qm's
   project-store, webhook-store}.ts`) that don't fit the new
   `@qm/<name>` package pattern; their existing wiring is preserved
   and the long-tail packages were chosen so as not to fork them.
+
+## P4 17.0 OUT-item closure (2026-09-15)
+
+The PRD §P4 acceptance criterion reads "v0.1.0 tasks 12-16 OUT
+items closed lane by lane." Each item below traces the v0.1.0
+cut-and-deferral decision (recorded in
+`todo/tasks/tasks-qm-next.md` 11.2 拍板 / 12.0-16.0 边界 OUT) to
+the P4 tranche that closed it.
+
+| v0.1.0 OUT item                                  | Closed by                              | Notes |
+|--------------------------------------------------|----------------------------------------|-------|
+| 审批 pg 恢复（记录+恢复+carry approval turn）     | 14.0 (`@qm/approvals` durability)      | recordOnce + decide durability + harness pause/resume carried by the resumed turn via the `pending` → `approved` flag the orchestrator reads |
+| ambient 策略存储 + judge 端口                    | 14.0a (`createModelAmbientJudge` + cursors) | `AmbientJudge` + `AmbientService` port + `ambient_cursors` / `ambient_judgments` stores (memory + PG) |
+| ambient cursors                                  | 14.0a (`ambient_cursors` DurableMap)   | per-channel cursor cap, rollup window in `AmbientCandidate.orders` |
+| skills 仅注册表+查找 → 14.0 已加 create/verify/restore/promote/move；M3 砍除项 | 15.0 (15.0c `@qm/skills` full lifecycle) | HMAC manifest + safeSkillFilePath + materialize + sync + collisions, hooks back into `wrapResolutionWithSkills` |
+| memory strategy modes / memorable relay          | 15.0 (15.0b `MemoryStrategy` ports)    | per-turn / consolidation / scratch-promote / agent-only; relay refusals propagate |
+| memory provider routing                          | 15.0 (15.0b `provider-router.ts`)      | routed ScopeMemory with fail-open and policy gates |
+| pack ingest + sync                               | 15.0 (15.0c pack-fetcher + sync engine) | SSRF guard via `isPrivateNetworkIp` (now `@qm/egress-authz`), HMAC verify on import |
+| skills sync engine                               | 15.0 (15.0c `SkillSyncEngine`)         | leader-leased sweeper, tracked/pinned modes |
+| reach identity merge / openGroup 写回           | 15.0 (15.0a directory personKey + `openGroup`) | "needs someone besides you" 400 + 502 ladder |
+| judge 真模型 (model-based)                       | 14.0a (`createModelAmbientJudge`)      | JSON decide grammar; uses harness `models.judge` |
+| reaction-as-ack (react 位)                      | 14.0b (`react` IM capability)          | feishu `messageReaction.create` uppercases emoji; ack presenter schedule + removal |
+| agent-request directives                         | 14.0c (`AgentRequestStore` + 桥)       | `qm.agent-request.v1` 值编解码 + Lark 卡 renderer；中性文本回退 |
+| consent (recipient consent)                      | 14.0d (`CronStore.recipientConsent` + consent routes) | 三纯函数 stamp/decide/satisfied + PG JSONB ALTER upgrade |
+| keychain-ask                                     | 14.0d (`@qm/approvals` askResolutionInput/askFallbackText) | sweep 桥内默认 30s；DM 不可解析 warn+mark |
+| edit-notice                                      | 14.0d (`composeCronEditNotice` + notifyOwnerOfCronEdit) | sha256 指纹去重；非 owner 编辑通知 owner |
+| provenance                                       | 14.0d (DeliveryOrigin extension + shadow view) | fire 引擎盖章 + `/v1/admin/deliveries/shadow` |
+| web-ui stub 后端化                               | 13.0 (`createApiRelay` + 12 域中继)    | per-user 60s bearer, principal via portal-identity or dev cookie |
+| admin 控制台                                     | 12.0a (`packages/api/admin-ui/`)       | 576KB 字节级平移 + `x-admin-actor` |
+| portal SSO                                       | 12.0b (`@qm/portal`)                   | session/tmp HMAC 封印 + OIDC code+PKCE + 5 分钟 admin-login link |
+| 长尾子系统（mcp/connectors/monitors/tasks/environments/projects/acl/security-screener/processes/insights/classify/webhooks/search/egress-authz） | 16.0 (tranches 1-11) | new `@qm/{mcp,monitors,tasks,acl,security,egress-authz,connectors,processes,insights}` packages (memory + PG where durable) |
+
+Items deferred to P5 18.0/19.0/20.0/22.0 (out of P4 scope):
+
+- `pg-boss` job queue — 16.0 added a note (no `npm install pg-boss` in
+  pnpm-lockfile-only policy); stays deferred until a deployment wires it.
+- `monitor-poller.ts` — 296L; needs `triggers` + `runs` surfaces to
+  land (provision deps). 16.0 closed store + broker only.
+- `connectors/oauth.ts` (626L: PROVIDERS, well-known endpoints) and
+  `emoji-upload-service.ts` (199L, IM-specific) — out of scope until
+  IM providers land in P5 18.0.
+- `im-slack` / `im-dingtalk` / `im-wecom` — 18.0/19.0/20.0 in P5.
+
+## P4 17.0 acceptance evidence (2026-09-15)
+
+- `pnpm typecheck` — green (zero errors)
+- `pnpm test` (no PG) — 692 tests / 665 pass / 0 fail / 27 skip
+  (the 27 skips are PG variants of memory+PG dual-impl packages;
+  real-model smoke 4 skipped without API keys)
+- `pnpm test:pg` — 751 tests / 747 pass / 0 fail / 4 skip (real-model
+  smoke only)
+- `pnpm check:im` — green (no IM platform symbols in core)
+- `pnpm rescope-check` — green (no `@deepseek-ai` references in
+  vendored surfaces)
+
+`MonitorPoller` and `pg-boss` are documented P5 follow-ups; nothing
+in 16.0 depends on them being present today.
