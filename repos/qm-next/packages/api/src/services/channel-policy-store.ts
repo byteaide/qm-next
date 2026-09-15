@@ -95,7 +95,7 @@ export function createMemoryChannelPolicyStore(opts: { now?: () => number } = {}
   }
 }
 
-const CHANNEL_POLICY_SCHEMA_STATEMENTS = [
+export const CHANNEL_POLICY_SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS channel_policy(
       org_id TEXT NOT NULL, container TEXT NOT NULL,
       orders TEXT NOT NULL DEFAULT '', bots JSONB NOT NULL DEFAULT '{}'::jsonb,

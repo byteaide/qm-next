@@ -1018,4 +1018,61 @@ directory/cron/skill), single-run journal, and full target cleanup after
 `--rollback`. The rehearsal deliberately leaves constructor-only stores
 (tasks, acl, admin sinks, runs activity/signals, instance registry,
 ambient/ack stores) un-ensured — the migrator's PG-twin gap notes are the
-20.1 composition checklist, printed per run.
+20.1 composition checklist, printed per run. (20.0 closed this list —
+see the next section; the rehearsal now ensures the new twins and the
+migrator carries their rows.)
+
+## P5 20.0 monitoring / compliance / productionization (2026-09-15)
+
+Composition-root durable sweep plus the twin-gap close-out; runbook and
+backup drill live in `docs/operations.md`:
+
+- **durable-by-default sweep** (`packages/api/src/service.ts`):
+  sessions/runs/directory/approvals select their Postgres constructors
+  when `databaseUrl` is set; the triggers scheduler adds the Postgres
+  leader lease; the im-bridge builds `createPostgresDeliveryQueue`.
+  DurableMap-backed registries (keychain creds/grants/asks,
+  `model_credentials`, `custom_model_providers`, `device_flow_cutover`
+  (+resets), `mcp_servers`, `oauth_flows`, `consent_links`,
+  `browser_sessions`, `webhooks`) pass `createPostgresMap` over qm table
+  names; tables warm at boot so "start once against an empty database"
+  lands the full schema (migration runbook step 3 depends on this).
+- **observability sinks always-on with a durable backend**: metrics /
+  error log / credential usage / egress audit / audit log exist whenever
+  `databaseUrl` is set, not only under the admin flag — they are
+  operational data, not console features. `replayDedupe` likewise rides
+  `databaseUrl` (authBroker keeps its memory fallback without PG).
+- **new twins**: `createPostgresDeliveryQueue` (im-core; FOR UPDATE SKIP
+  LOCKED claim, TTL lease, retry/park identical to the memory queue),
+  `createPostgresChannelPolicyStore` (qm column-exact
+  `channel_policy`+`_history`; every set() appends history like qm),
+  `createPostgresFileStore` (`file_artifacts` qm column-exact) over
+  `createLocalByteStore`/`createMemoryByteStore` (content-addressed
+  `files/<sha256>`, matching qm's blob key layout).
+- **webhooks record-shape delta**: qm-next lands a PG twin on the
+  `webhooks` table, but qm and qm-next webhook records differ (trigger
+  base vs action/filters), so data moves via `--export-seed`, not
+  blob-copy. Table-count parity holds; row parity intentionally does not.
+- **deliveries drain-check**: qm's delivery rows (destination/text) do
+  not translate into the operation-carrier queue, and the runbook drains
+  the queue before cutover anyway. The migrator moved `deliveries` from
+  ENTITY_COPIES to a `DRAINED` check: >0 source rows warn (non-zero row
+  counts fail the run as before), 0 rows record a drained step.
+- **health/readiness**: `GET /healthz` unchanged (`{ok:true}`);
+  `GET /readyz` pings the database (503 + `database:"down"` when
+  unreachable, `database:"disabled"` without `databaseUrl`);
+  `GET /v1/admin/monitoring/summary` (admin auth ladder) returns the
+  panel-shaped placeholder: uptime, database state, delivery-queue
+  durability, crons state, error/metric/audit counts (bounded scans).
+- **decisions recorded** (operations.md §8): runtime-config family /
+  environments / projects / deploy family stay export-seed; identity
+  surfaces (`deactivated_principals`, `external_members`) out of v1;
+  S3 byte backend deferred (local FS only); `instance_heartbeats`
+  unwired until the 21.0 multi-instance lane (TRUNCATE_ONLY notes-only
+  path is by design).
+- **verification evidence**: `pnpm test:pg` full suite green including
+  the new `durable-wiring.test.ts` (durable boot asserts every twin
+  table in `information_schema`, readyz probes up, monitoring route on
+  the admin ladder) and `delivery-queue-pg.test.ts` (contract parity
+  with the memory queue); `pnpm rehearsal:migrate` re-run covers the
+  updated migrator (drain-check + channel-policy/file-artifacts copies).

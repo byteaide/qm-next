@@ -13,6 +13,8 @@
     "@qm/admin": "workspace:^",
     "@qm/approvals": "workspace:^",
     "@qm/auth": "workspace:^",
+    "@qm/acl": "workspace:^",
+    "@qm/tasks": "workspace:^",
     "@qm/credentials": "workspace:^",
     "@qm/cordis": "workspace:^",
     "@qm/directory": "workspace:^",

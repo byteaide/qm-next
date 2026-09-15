@@ -6,6 +6,7 @@
  * translates HTTP.
  */
 import type { Conversation, Destination, Orchestrator, ResolutionService, RunStore, SessionStore, TurnInput, TurnOrigin, TurnResult } from '@qm/types'
+import type { AuditLog, CredentialUsageSink, ErrorLog, MetricsSink } from '@qm/admin'
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify'
 import { authenticateBearer } from './auth.ts'
 import { registerRouteTable } from './routes/framework.ts'
@@ -113,6 +114,23 @@ export interface ApiDeps {
   adminUi?: AdminUiDeps
   /** Portal SSO (12.0): /auth/* ladder + the /admin/ui identity-issuing gate. */
   portal?: PortalDeps
+  /** Observability (20.0): readiness probe + monitoring summary inputs. */
+  monitoring?: MonitoringDeps
+}
+
+export interface MonitoringDeps {
+  /** Boot time (epoch ms) for uptime reporting. */
+  startedAt: number
+  /** PG readiness probe; absent when no databaseUrl is configured. */
+  pingDatabase?: () => Promise<boolean>
+  /** True when the delivery queue is the durable Postgres twin. */
+  deliveryQueueDurable?: boolean
+  deliveries?: () => import('@qm/im-core').ImDeliveryQueue | undefined
+  metrics?: MetricsSink
+  errors?: ErrorLog
+  auditLog?: AuditLog
+  credentialUsage?: CredentialUsageSink
+  crons?: () => import('@qm/triggers').CronStore | undefined
 }
 
 export interface ApiServerOptions {
@@ -177,6 +195,19 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
   const app = Fastify({ logger: false })
 
   app.get('/healthz', async () => ({ ok: true }))
+
+  // Readiness (20.0): liveness stays /healthz; /readyz answers "can this
+  // instance serve traffic" — the durable backend is pinged when one is
+  // configured and a failed probe sheds load with 503.
+  app.get('/readyz', async (_req, reply) => {
+    const monitoring = deps.monitoring
+    if (!monitoring) return { ok: true, components: {} }
+    const database = monitoring.pingDatabase
+      ? (await monitoring.pingDatabase().catch(() => false) ? 'up' : 'down')
+      : 'disabled'
+    if (database === 'down') return reply.code(503).send({ ok: false, components: { database } })
+    return { ok: true, components: { database } }
+  })
 
   if (deps.directory) {
     registerRouteTable(app, opts, directoryRoutes(deps.directory))

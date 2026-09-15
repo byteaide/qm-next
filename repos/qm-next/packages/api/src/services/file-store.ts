@@ -108,7 +108,7 @@ export function createMemoryFileStore(deps: { blobTransfer: BlobTransferService;
   }
 }
 
-const FILE_ARTIFACTS_SCHEMA_STATEMENTS = [
+export const FILE_ARTIFACTS_SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS file_artifacts(
     id               TEXT PRIMARY KEY,
     kind             TEXT NOT NULL DEFAULT 'file',

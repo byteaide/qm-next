@@ -2,7 +2,7 @@
 
 **PRD:** [todo/tasks/prd-qm-parity.md](../../../todo/tasks/prd-qm-parity.md)
 **Tasks:** 19.1 schema diff（本文件 Part A）→ 19.2 迁移器（Part B）→ 19.3 演练 + runbook（Part C）
-**Status:** 19.1 报告完成（2026-09-15）；19.2 迁移器完成（`scripts/migrate-qm.ts`，`pnpm migrate:qm`）；19.3 演练 PASS 44/44（`pnpm rehearsal:migrate`）+ runbook 完成
+**Status:** 19.1 报告完成（2026-09-15）；19.2 迁移器完成（`scripts/migrate-qm.ts`，`pnpm migrate:qm`）；19.3 演练 PASS 44/44（`pnpm rehearsal:migrate`）+ runbook 完成；**20.0 PG-twin 接线完成（2026-09-15）**——组合根 `databaseUrl` 下全量落地 twin schema（A.2 前置清单已勾除），deliveries 改 drain-check、file_artifacts 直拷进 ENTITY_COPIES（见 A.2/C.3 更新）
 
 ---
 
@@ -28,19 +28,19 @@
 | `not-carried` | 有意不迁移 | 理由逐项给出 |
 | `blocked-twin` | qm-next 目标 store 当前组合根只有 memory 实现 | 20.1 需先落 PG twin/接线，才能承载数据 |
 
-### A.2 目标库承载现状（20.1 前置清单）
+### A.2 目标库承载现状（20.1 前置清单 → 20.0 已收口）
 
-qm-next 组合根（`packages/api/src/service.ts`）当前对下列域默认 memory 实现（PG 构造器已导出但未被选择，或尚无 PG 实现）：
+> **20.0 更新（2026-09-15）**：组合根（`packages/api/src/service.ts`）durable-by-default sweep 完成——`databaseUrl` 下 sessions/runs/directory/crons/approvals/keychain 族/model/credentials/mcp/connectors/webhooks/channel_policy/files/tasks/acl/run 观测/replay 全部选 PG twin，DurableMap 表 boot 时暖建；下表保留为决策记录。
 
-| 域 | 现状 | 20.1 动作 |
+| 域 | 19.0 现状 | 20.0 结果 |
 |----|------|-----------|
-| directory | `packages/directory` 已有 PG store，组合根选了 memory | 组合根按 `databaseUrl` 选择 PG twin |
-| crons/approvals | PG store 已导出，plugin service 默认 memory | 同上 |
-| keychain（creds/grants/asks/secret_drops/credential_liveness） | store 接受注入 DurableMap，组合根传 `createMemoryMap()` | 传 `createPostgresMap(pg, <qm 同名表>)` |
-| deliveries | 仅 memory 队列（`createMemoryDeliveryQueue`） | 平移 qm `postgres-delivery-store`（qm 同名表直拷） |
-| surface-cache（channel_messages/state/files）+ channel_policy(+history) | memory | cache 类可弃；channel_policy 建议落 PG（管理面配置） |
-| webhooks/files(blobs+file_artifacts)/environments/projects/runtime-config/deployments/deployment-layer/context-queue | memory | webhooks/files 建议落 PG；其余 export-seed |
-| ratelimit（budget_spend/rate_limit_windows） | 未移植 | 窗口计数自过期，not-carried |
+| directory | `packages/directory` 已有 PG store，组合根选了 memory | ✅ 组合根按 `databaseUrl` 选 PG twin |
+| crons/approvals | PG store 已导出，plugin service 默认 memory | ✅ triggers/im-bridge 按 `databaseUrl` 选 PG（含 scheduler PG leader lease） |
+| keychain（creds/grants/asks/secret_drops/credential_liveness） | store 接受注入 DurableMap，组合根传 `createMemoryMap()` | ✅ creds/grants/asks 接 `createPostgresMap`（qm 同名表）；secret_drops/credential_liveness 无组合消费点，随 export-seed |
+| deliveries | 仅 memory 队列（`createMemoryDeliveryQueue`） | ✅ `createPostgresDeliveryQueue`（im-core）落地，bridge 按 `databaseUrl` 注入；数据不迁——切换 runbook 先 drain（`DRAINED` drain-check） |
+| surface-cache（channel_messages/state/files）+ channel_policy(+history) | memory | ✅ channel_policy(+history) 落 PG（qm 同列 DDL，copy）；cache 类 not-carried 维持 |
+| webhooks/files(blobs+file_artifacts)/environments/projects/runtime-config/deployments/deployment-layer/context-queue | memory | ✅ webhooks 落 PG（`webhooks` 表；数据 export-seed，形状不同）；files 落 PG（`file_artifacts` qm 同列 DDL copy + `filesDir` 字节搬运）；其余 export-seed（拍板记录 operations.md §8） |
+| ratelimit（budget_spend/rate_limit_windows） | 未移植 | 窗口计数自过期，not-carried（维持） |
 
 ### A.3 逐域 diff
 
@@ -142,7 +142,7 @@ qm 平铺列 → qm-next `meta` JSON（锚点：`@qm/types TapeMeta`，session-s
 
 | qm | qm-next | 分类 | 要点 |
 |----|---------|------|------|
-| `deliveries` | —（memory 队列） | `blocked-twin` | 20.1 平移 qm `postgres-delivery-store`（DDL/索引原样）后 `copy`；切换 runbook 先 drain 队列 |
+| `deliveries` | `deliveries`（`createPostgresDeliveryQueue`，20.0 落地） | `drain-check`（原 `blocked-twin`） | qm 行形状（destination/text）不翻译为 qm-next 操作队列；切换前强制 drain（迁移器 >0 行告警），无行携带 |
 
 #### 8) audit / metrics（观测面）
 
@@ -154,7 +154,7 @@ qm 平铺列 → qm-next `meta` JSON（锚点：`@qm/types TapeMeta`，session-s
 | DurableMap `ambient_cursors` | DurableMap `ambient_cursors` | `blob-copy` | 同名 |
 | `ambient_judgments` | `ambient_judgments` | `copy` | 一致（qm `asked_by` 经 ALTER） |
 | `ack_emoji_picks` | `ack_emoji_picks` | `copy` | 一致 |
-| `channel_policy` / `channel_policy_history` | memory | `blocked-twin` | 管理面配置，建议 20.1 落 PG 后 `copy`；否则 export-seed |
+| `channel_policy` / `channel_policy_history` | `channel_policy(+_history)`（20.0 落 PG，qm 同列 DDL） | `copy` | 管理面配置已可直拷；org 维度用迁移器 `--org-fallback` 对齐 |
 | `channel_messages` / `channel_state` / `channel_files` | memory | `not-carried` | provider 侧缓存，重同步可重建（ambient judge 从游标续跑） |
 | DurableMap `ack_emoji` | — | `not-carried` | qm 兼容旧字段；qmn 有 `ack_emoji_picks` 实体表 |
 
@@ -177,10 +177,10 @@ qm 平铺列 → qm-next `meta` JSON（锚点：`@qm/types TapeMeta`，session-s
 | `tasks` / `task_events` | 同名 | `copy` | 一致 |
 | `process_sessions` | `process_sessions` | `copy` | 一致 |
 | `environments` / `environment_attachments` | memory | `blocked-twin`→`export-seed` | 量小，重播种 |
-| `file_artifacts` | memory（files/blobs） | `blocked-twin` | blob 字节在 FS/S3；20.1 落 PG twin 后 `copy` + blob 搬运 |
+| `file_artifacts` | `file_artifacts`（20.0 落 PG，qm 同列 DDL + `filesDir` 字节存储） | `copy` | 已入迁移器 ENTITY_COPIES 直拷；blob 字节按 `files/<sha256>` 目录搬运后还原 |
 | `budget_spend` / `rate_limit_windows` | 未移植 | `not-carried` | 窗口计数自过期 |
 | `instance_heartbeats` | 同名 | `copy`（清空） | 见域 1 |
-| DurableMap `webhooks` | memory webhook store | `blocked-twin`→`export-seed` | 条目少；20.1 落 PG 后 `blob-copy` |
+| DurableMap `webhooks` | `webhooks`（20.0 落 PG DurableMap；记录形状与 qm 不同） | `export-seed` | 表已可承载，但形状不同不做行级拷贝；条目少，切换后经 admin API 重播种 |
 | DurableMap `monitors` | DurableMap `monitors` | `blob-copy` | 同名同形状 |
 | DurableMap `mcp_servers` | mcp-server-store 注入 map | `blocked-twin`→`blob-copy` | 20.1 接线同名表 |
 | DurableMap `connector_status` / `connector_clients` / `oauth_flows` / `consent_links` / `browser_sessions` | connectors 注入 map | `blocked-twin`→`blob-copy` | 20.1 接线；短 TTL 类可弃 |
@@ -265,7 +265,7 @@ cd repos/qm-next && pnpm rehearsal:migrate
 
 ### C.2 生产切换 runbook
 
-> 前置（20.1 完成后勾除）：□ deliveries PG twin □ keychain/model/mcp/connector 族组合根接 PG map □ directory/crons/approvals 组合根按 `databaseUrl` 选 PG twin □ runtime-config 族落 PG 或确认 export-seed 路径 □ webhooks/files 落 PG
+> 前置清单（20.0 已完成，2026-09-15）：☑ deliveries PG twin（drain-check 语义） ☑ keychain/model/mcp/connector 族组合根接 PG map ☑ directory/crons/approvals 组合根按 `databaseUrl` 选 PG twin ☑ runtime-config 族确认 export-seed 路径 ☑ webhooks/files 落 PG
 
 1. **冻结源**：qm 停写（维护页/API 只读），drain 队列（deliveries、context_requests）；处理全部 pending approvals（迁移器此时校验为 0）。
 2. **备份**：`pg_dump` qm 生产库（回滚底线）。
@@ -278,7 +278,8 @@ cd repos/qm-next && pnpm rehearsal:migrate
 9. **放流**：切 DNS/入口到 qm-next；qm 库保留只读 ≥ 2 周。
 10. **回滚**：任何阶段失败——切回 qm 入口（数据未损）；已 commit 的目标库 `--rollback` 后可重跑迁移。
 
-### C.3 演练遗留（20.1 输入）
+### C.3 演练遗留 → 20.0 收口记录
 
-- PG-twin 缺口（演练 note 实证）：tasks/task_events、acl×2、admin_grants、audit_log、run_activity/run_signals、instance_heartbeats、ambient_judgments、ack_emoji_picks、turn_metrics/error_events/credential_usage/egress_events、source_auth_replay、deliveries、channel_policy(+history)、webhooks、file_artifacts、runtime-config 族 —— 这些 store 的 schema/组合根选择要在 20.0/20.1 收口，迁移器无需改动即可承接。
+- **已收口（2026-09-15，组合根 durable sweep）**：tasks/task_events（`createPostgresTaskStore`）、acl×2（`createPostgresGrantStore`）、run_activity/run_signals（`@qm/runs` PG 构造器）、audit_log/turn_metrics/error_events/credential_usage/egress_events/admin_grants（admin sink 常开化：`databaseUrl` 下不再依赖 admin flag）、source_auth_replay（`createPostgresReplayDedupe` 随 `databaseUrl`）、ambient_judgments/ack_emoji_picks（14.0 已接）、deliveries/channel_policy(+history)/webhooks/file_artifacts（20.0 新 twin，本文件 A.2）——组合根 boot 即落地 schema，`--verify-only` 不再报告这些表。
+- **设计内缺席（非缺口）**：runtime-config 族/environments/projects/deploy 族=export-seed；surface-cache 缓存类/ratelimit=not-carried；identity 面（`deactivated_principals`/`external_members`）v1 不带；`instance_heartbeats`=TRUNCATE_ONLY（表未接线时迁移器记 note 跳过，清空语义下无害，21.0 多实例接线时补）。
 - qm 特有不迁清单见 Part A `not-carried`（tool_calls、fork 列、messages/turns 计数、channel 缓存、idempotency、ratelimit 窗口等），已记 `parity-deviations.md` §P5 19.0。

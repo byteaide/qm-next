@@ -51,6 +51,7 @@ export interface AdminDeps {
   ambientJudgments?: import('@qm/approvals').AmbientJudgmentStore
   ackEmojiPicks?: import('@qm/approvals').AckEmojiPickStore
   mcp?: { servers: McpServerStore; toolService: McpToolService }
+  monitoring?: import('../server.ts').MonitoringDeps
 }
 
 interface Authz {
@@ -244,6 +245,41 @@ function latencySummary(values: number[]): { count: number; p50: number | null; 
 }
 
 const METRICS_SCAN_LIMIT = 10000
+
+async function monitoringSummary(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
+  const authz = await requireScopedAdmin(ctx, deps)
+  if (!authz) return undefined
+  const m = deps.monitoring
+  if (!m) return { error: 'monitoring not wired' }
+  const database = m.pingDatabase
+    ? (await m.pingDatabase().catch(() => false) ? 'up' : 'down')
+    : 'disabled'
+  const deliveries = m.deliveries?.()
+  const [errorCount, metricCount, auditCount] = await Promise.all([
+    m.errors ? m.errors.count().catch(() => null) : Promise.resolve(null),
+    m.metrics
+      ? m.metrics.list({ limit: 100 }).then((rows) => rows.length).catch(() => null)
+      : Promise.resolve(null),
+    m.auditLog
+      ? m.auditLog.tail({ limit: 100 }).then((rows) => rows.length).catch(() => null)
+      : Promise.resolve(null),
+  ])
+  return {
+    now: Date.now(),
+    startedAt: m.startedAt,
+    uptimeS: Math.floor((Date.now() - m.startedAt) / 1000),
+    components: {
+      database,
+      deliveryQueue: deliveries ? (m.deliveryQueueDurable ? 'durable' : 'memory') : 'absent',
+      crons: m.crons?.() ? 'on' : 'off',
+    },
+    observability: {
+      errorsTotal: errorCount,
+      metricsRecent: metricCount,
+      auditRecent: auditCount,
+    },
+  }
+}
 
 async function metrics(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const authz = await requireScopedAdmin(ctx, deps)
@@ -1226,6 +1262,7 @@ export function adminRoutes(deps: AdminDeps): ReadonlyArray<Route> {
     { method: 'GET', path: '/v1/admin/retention', auth: 'either', handle: t(h((ctx) => retention(ctx, deps))) },
     { method: 'POST', path: '/v1/admin/scopes/:scope/auto-flagger/test', auth: 'either', handle: t(h((ctx) => testAutoFlagger(ctx, deps))) },
     { method: 'GET', path: '/v1/admin/metrics', auth: 'either', handle: t(h((ctx) => metrics(ctx, deps))) },
+    { method: 'GET', path: '/v1/admin/monitoring/summary', auth: 'either', handle: t(h((ctx) => monitoringSummary(ctx, deps))) },
     { method: 'GET', path: '/v1/admin/egress', auth: 'either', handle: t(h((ctx) => egress(ctx, deps))) },
     { method: 'GET', path: '/v1/admin/runs', auth: 'either', handle: t(h((ctx) => listAdminRuns(ctx, deps))) },
     { method: 'GET', path: '/v1/admin/errors', auth: 'either', handle: t(h((ctx) => listAdminErrors(ctx, deps))) },

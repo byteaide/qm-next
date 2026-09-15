@@ -95,6 +95,9 @@ importers:
 
   packages/api:
     dependencies:
+      '@qm/acl':
+        specifier: workspace:^
+        version: link:../acl
       '@qm/admin':
         specifier: workspace:^
         version: link:../admin
@@ -164,6 +167,9 @@ importers:
       '@qm/store':
         specifier: workspace:^
         version: link:../store
+      '@qm/tasks':
+        specifier: workspace:^
+        version: link:../tasks
       '@qm/triggers':
         specifier: workspace:^
         version: link:../triggers

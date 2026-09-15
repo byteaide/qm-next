@@ -482,15 +482,21 @@ export class ApiService extends Service<ApiConfig> {
     // constructor (migration preflight relies on that).
     const databaseUrl = this.config.databaseUrl
     const pg: PgPool | undefined = databaseUrl ? createPgPool(databaseUrl, []) : undefined
-    const pgClosers: Array<{ close(): Promise<void> }> = []
+    const pgClosers: Array<{ close?(): Promise<void> }> = []
+    // DurableMap tables are created lazily on first use; warm them at boot
+    // so "start once against an empty database" lands the full schema (the
+    // migration runbook's target-bootstrap step relies on this).
+    const pgWarmups: Array<{ entries(): Promise<unknown> }> = []
     const pgMap = <T>(table: string) => {
       if (!pg) throw new Error(`pgMap(${table}) requires databaseUrl`)
-      return createPostgresMap<T>(pg, table)
+      const map = createPostgresMap<T>(pg, table)
+      pgWarmups.push(map)
+      return map
     }
     const sessions = databaseUrl ? createPostgresSessionStore(databaseUrl) : createMemorySessionStore()
     const runs = databaseUrl ? createPostgresRunStore(databaseUrl) : createMemoryRunStore()
     if (databaseUrl) {
-      pgClosers.push(sessions as unknown as { close(): Promise<void> }, runs as unknown as { close(): Promise<void> })
+      pgClosers.push(sessions as unknown as { close?(): Promise<void> }, runs as unknown as { close?(): Promise<void> })
     }
     const runEvents = createMemoryRunEventBus()
     const modelGateway = createModelGateway()
@@ -719,7 +725,7 @@ export class ApiService extends Service<ApiConfig> {
       adminAuditLog = adminAuditLog ?? (databaseUrl ? createPostgresAuditLog(databaseUrl) : createAuditLog())
     }
     if (this.config.authBroker) {
-      replayDedupe = databaseUrl ? createPostgresReplayDedupe(databaseUrl) : createMemoryReplayDedupe()
+      replayDedupe = replayDedupe ?? (databaseUrl ? createPostgresReplayDedupe(databaseUrl) : createMemoryReplayDedupe())
     }
     if (this.config.ambient) {
       this.ambientJudgments = databaseUrl
@@ -777,6 +783,46 @@ export class ApiService extends Service<ApiConfig> {
         ...(adminAuditLog ? { audit: adminAuditLog } : {}),
       })
     }
+    // Constructor-only store twins (20.0 C.3 close-out): tasks, ACL and
+    // run observability stores have no routes yet (16.0 built the stores,
+    // consumers attach later) — construct them so their tables land at
+    // boot and the migration copies rows instead of reporting gaps.
+    if (databaseUrl) {
+      const { createPostgresTaskStore } = await import('@qm/tasks')
+      const { createPostgresGrantStore } = await import('@qm/acl')
+      const { createPostgresRunActivityStore, createPostgresRunSignalStore } = await import('@qm/runs')
+      const { createPostgresReplayDedupe } = await import('@qm/auth')
+      // ACL grant store owns a pool but exposes no close (process-exit
+      // cleanup, like the admin sinks).
+      createPostgresGrantStore(databaseUrl)
+      pgClosers.push(
+        createPostgresTaskStore(databaseUrl),
+        createPostgresRunSignalStore(databaseUrl),
+        createPostgresRunActivityStore(databaseUrl),
+      )
+      replayDedupe = createPostgresReplayDedupe(databaseUrl)
+    }
+    // Monitoring (20.0): readiness probe + panel-shaped summary inputs.
+    const startedAt = Date.now()
+    const monitoring = {
+      startedAt,
+      ...(pg
+        ? {
+            pingDatabase: async () => {
+              await pg.q('SELECT 1')
+              return true
+            },
+          }
+        : {}),
+      deliveryQueueDurable: Boolean(databaseUrl),
+      deliveries: () => this.cronsRuntime?.deliveries,
+      ...(metrics ? { metrics } : {}),
+      ...(errors ? { errors } : {}),
+      ...(adminAuditLog ? { auditLog: adminAuditLog } : {}),
+      ...(credentialUsage ? { credentialUsage } : {}),
+      crons: () => this.cronsRuntime?.crons,
+    }
+    for (const map of pgWarmups) await map.entries()
     const skillPackStore = this.config.skillPacks ? createMemorySkillPackStore() : undefined
     const userModelCredentials = this.config.userModelAuth ? createMemoryUserModelCredentialsStore() : undefined
     const secretDropStore = this.config.secretDrops ? createMemorySecretDropStore() : undefined
@@ -786,6 +832,7 @@ export class ApiService extends Service<ApiConfig> {
         sessions,
         runs,
         resolution,
+        ...(monitoring ? { monitoring } : {}),
         // Parity surface (11.0): sessions/conversations ride the session
         // store every deployment already has.
         surface: {
@@ -881,6 +928,7 @@ export class ApiService extends Service<ApiConfig> {
                  ...(this.mcpServers && this.mcpToolService
                    ? { mcp: { servers: this.mcpServers, toolService: this.mcpToolService } }
                    : {}),
+                 ...(monitoring ? { monitoring } : {}),
                },
             }
           : {}),
@@ -989,7 +1037,7 @@ export class ApiService extends Service<ApiConfig> {
       this.mcpToolService?.close()
       for (const store of pgClosers) {
         try {
-          await store.close()
+          await store.close?.()
         } catch (err) {
           void err
         }

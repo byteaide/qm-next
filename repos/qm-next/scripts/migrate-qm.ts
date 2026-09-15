@@ -104,6 +104,13 @@ interface StepResult {
 
 const TRUNCATE_ONLY = ['session_leases', 'instance_heartbeats']
 
+// Queues drained before cutover (runbook hard precondition): the durable
+// twin exists in qm-next (20.0) but no rows are expected to carry — qm's
+// delivery row shape (destination/text) does not translate to the
+// operation-carrier queue, and anything still queued must be delivered or
+// dropped before the switch anyway.
+const DRAINED = ['deliveries']
+
 const ENTITY_COPIES = [
   'memory_revisions',
   'tasks',
@@ -122,9 +129,9 @@ const ENTITY_COPIES = [
   'error_events',
   'credential_usage',
   'egress_events',
-  'deliveries',
   'channel_policy',
   'channel_policy_history',
+  'file_artifacts',
 ]
 
 const BLOB_COPIES: Array<[string, string]> = [
@@ -633,6 +640,17 @@ async function main(): Promise<void> {
         }
         await exec.query(`DELETE FROM "${table}"`)
         results.push({ table, mode: 'truncate-only', src: 0, dst: 0, note: 'cleared for cutover' })
+      }
+
+      for (const table of DRAINED) {
+        if (!want(table)) continue
+        if (!(await tableExists(source.q, table))) continue
+        const drained = await countRows(source.q, table)
+        if (drained > 0) {
+          notes.push(`source ${table} still has ${drained} row(s) — drain before cutover (runbook step 1); rows do not carry`)
+        } else {
+          results.push({ table, mode: 'drain-check', src: 0, dst: 0, note: 'drained' })
+        }
       }
 
       for (const table of ENTITY_COPIES) {

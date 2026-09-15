@@ -26,6 +26,9 @@ import { APPROVALS_SCHEMA_STATEMENTS } from '../packages/approvals/src/postgres-
 import { DIRECTORY_SCHEMA_STATEMENTS } from '../packages/directory/src/postgres-directory-store.ts'
 import { SKILLS_SCHEMA_STATEMENTS } from '../packages/skills/src/postgres-store.ts'
 import { MEMORY_SCHEMA_STATEMENTS } from '../packages/memory/src/postgres-store.ts'
+import { DELIVERIES_SCHEMA_STATEMENTS } from '../packages/im-core/src/runtime/postgres-delivery-queue.ts'
+import { CHANNEL_POLICY_SCHEMA_STATEMENTS } from '../packages/api/src/services/channel-policy-store.ts'
+import { FILE_ARTIFACTS_SCHEMA_STATEMENTS } from '../packages/api/src/services/file-store.ts'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -76,6 +79,7 @@ const BLOB_DESTINATIONS = [
   'consent_links',
   'browser_sessions',
   'insight_cursors',
+  'webhooks',
 ]
 
 async function ensureTargetSchema(): Promise<void> {
@@ -88,6 +92,9 @@ async function ensureTargetSchema(): Promise<void> {
     ...DIRECTORY_SCHEMA_STATEMENTS,
     ...SKILLS_SCHEMA_STATEMENTS,
     ...MEMORY_SCHEMA_STATEMENTS,
+    ...DELIVERIES_SCHEMA_STATEMENTS,
+    ...CHANNEL_POLICY_SCHEMA_STATEMENTS,
+    ...FILE_ARTIFACTS_SCHEMA_STATEMENTS,
   ])
   const { createPostgresMap } = await import('../packages/store/src/durable-map.ts')
   try {
@@ -286,6 +293,12 @@ const SEED: Array<[string, string, unknown[]]> = [
   ['approvals', `INSERT INTO approvals (id, json) VALUES ($1,$2)`, ['req:1', { sessionId: 's1', command: 'rm -rf /tmp/x', kind: 'approval', createdAt: 1700000050000 }]],
   ['approval_grants', `INSERT INTO approval_grants (id, json) VALUES ($1,$2)`, ['U1:git push', { session: true, always: false }]],
   ['webhooks', `INSERT INTO webhooks (id, json) VALUES ($1,$2)`, ['w1', { url: 'https://example.com/hook', secret: 'shhh' }]],
+  ['channel_policy', `INSERT INTO channel_policy (org_id, container, orders, bots, ambient_enabled, set_by, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    ['default-org', 'C123', 'summarize daily', '{}', true, 'U1', 1700000060000]],
+  ['channel_policy_history', `INSERT INTO channel_policy_history (org_id, container, orders, bots, ambient_enabled, set_by, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    ['default-org', 'C123', 'summarize daily', '{}', true, 'U1', 1700000060000]],
+  ['file_artifacts', `INSERT INTO file_artifacts (id, kind, owner_scope_id, path, name, mimetype, size_bytes, blob_key, sha256, direction, created_by, created_in_scope, created_at, updated_at, enabled, source)
+     VALUES ('fa1', 'file', 'personal:U1', 'artifacts/fa1/notes.txt', 'notes.txt', 'text/plain', 12, 'files/deadbeef', 'deadbeef', 'in', 'U1', NULL, 1700000070000, 1700000070000, TRUE, 'live')`, []],
 ]
 
 async function seedSource(): Promise<void> {
@@ -426,6 +439,13 @@ async function main(): Promise<void> {
     admin_slack_installation: 1,
     ambient_judgments: -1,
     ack_emoji_picks: -1,
+    // 20.0 twins landed: these targets now exist at boot and the
+    // migrator carries their rows (drain-class tables stay empty).
+    channel_policy: 1,
+    channel_policy_history: 1,
+    file_artifacts: 1,
+    deliveries: 0,
+    webhooks: 0,
   }
   for (const [table, want] of Object.entries(expect)) {
     check(`${table} = ${want}`, state[table] === want, `got ${state[table]}`)
