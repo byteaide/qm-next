@@ -1,0 +1,18 @@
+{
+  "name": "@qm/connectors",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Connector core: background-exec broker, OAuth client store + flow store, consent link, browser session, and secret envelope helpers (parity 16.0).",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@qm/processes": "workspace:^",
+    "@qm/sandbox": "workspace:^",
+    "@qm/store": "workspace:^",
+    "@qm/types": "workspace:^"
+  }
+}

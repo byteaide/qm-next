@@ -234,6 +234,21 @@ importers:
         specifier: workspace:^
         version: link:../../vendor/schemastery
 
+  packages/connectors:
+    dependencies:
+      '@qm/processes':
+        specifier: workspace:^
+        version: link:../processes
+      '@qm/sandbox':
+        specifier: workspace:^
+        version: link:../sandbox
+      '@qm/store':
+        specifier: workspace:^
+        version: link:../store
+      '@qm/types':
+        specifier: workspace:^
+        version: link:../types
+
   packages/credentials:
     dependencies:
       '@qm/store':
