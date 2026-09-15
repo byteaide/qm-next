@@ -11,6 +11,8 @@
     "build": "bash scripts/build-vendor.sh",
     "test": "node --import tsx/esm --test packages/*/tests/*.test.ts",
     "test:pg": "bash scripts/run-pg.sh",
+    "migrate:qm": "node --import tsx/esm scripts/migrate-qm.ts",
+    "rehearsal:migrate": "bash scripts/run-migration-rehearsal.sh",
     "check:im": "bash scripts/check-im-isolation.sh",
     "rescope-check": "bash scripts/rescope-check.sh",
     "sandbox:local:build": "bash scripts/local-sandbox-build.sh",

@@ -975,3 +975,47 @@ Real-path verification:
   27 skip (PG variants, consistent with the P4 baseline);
   `pnpm check:im` + `pnpm rescope-check` green. `pnpm test:pg` stays
   with the 21.4 milestone gate.
+
+## P5 19.0 data migration decisions (2026-09-15)
+
+Schema diff, migrator and rehearsal live in `docs/migration.md`
+(Part A/B/C); the deviations ledger for the migration itself:
+
+- **sessions/participants view state**: qm keeps `title/archived/pinned/
+  color` per participant; qm-next folds them onto `sessions` (single
+  console). Migrator folds from the live participant with the earliest
+  `valid_from`; per-participant variants are not carried.
+- **session_tape**: qm's flat `bare_text/ts/change_time/hidden/overheard/
+  author` become the `TapeMeta` JSON `meta` column (camelCase, exact
+  `@qm/types` shape); qm's NOT NULL `payload` relaxes to nullable.
+- **llm request log**: `session_llm_requests` + `llm_prompt_envelopes`
+  merge into `llm_requests` (envelope joined by `prompt_hash`, `*_json`
+  suffixes dropped, INT timings widened to BIGINT).
+- **sessions search**: qm uses a generated `tsvector` + GIN; qm-next
+  `searchEntries` is a LIKE scan. Behavior delta documented (deviation,
+  not migrated); a GIN twin is optional 20.1 work.
+- **not carried** (no qm-next consumer, re-derivable, or transient):
+  `tool_calls`, `sessions.messages/turns/forked_*`, `llm_prompt_envelopes`
+  (folded), embedded `Cron.fireLog` (fire history lives in
+  `cron_fire_log`), `channel_messages/channel_state/channel_files`,
+  `idempotency`, `budget_spend/rate_limit_windows`, `directory_meta`,
+  pending `approvals` blobs (drain-before-cutover enforced).
+- **directory reshape**: org+Slack-shaped tables become provider-neutral
+  people/spaces/members/rosters; `--source-provider` names the source
+  platform; `type` copies through (`internal|guest` both sides).
+- **crons/skills blob→cols**: field names verified against qm `Cron`/
+  `SkillManifest` and the qm-next row mappers; qm `ownerType` defaults to
+  `internal`; skills with incomplete manifests are skipped with a count.
+- **approval grants family** and the config-federation DurableMaps export
+  to a JSON seed (`--export-seed`) for post-cutover re-seeding instead of
+  direct migration.
+- **instance_heartbeats/session_leases** truncate-only (liveness/lease
+  state does not survive cutover).
+
+Rehearsal evidence (`pnpm rehearsal:migrate`, 44/44 checks): dry-run
+rollback, committed counts, semantic spot-checks (fold/meta/envelope/
+directory/cron/skill), single-run journal, and full target cleanup after
+`--rollback`. The rehearsal deliberately leaves constructor-only stores
+(tasks, acl, admin sinks, runs activity/signals, instance registry,
+ambient/ack stores) un-ensured — the migrator's PG-twin gap notes are the
+20.1 composition checklist, printed per run.
