@@ -875,3 +875,51 @@ Items deferred to P5 18.0/19.0/20.0/22.0 (out of P4 scope):
 
 `MonitorPoller` and `pg-boss` are documented P5 follow-ups; nothing
 in 16.0 depends on them being present today.
+
+## P5 18.1 error-page / error-state inventory (2026-09-15)
+
+Scope: confirm the web surface's error pages/states match qm's
+production web UI. Method: whole-tree diff of the ported SPA against
+the source, plus server-side handler review, plus the test suite.
+
+Client (`packages/web-ui/app/src` vs `repos/qm/plugins/web-ui/src`):
+`diff -rq` reports exactly three deltas — `theme.ts` (new, dark mode),
+`main.ts` (+2 lines: `applyTheme()`/`watchSystemTheme()` bootstrap),
+`shell.css` (+5 lines: dark `.badge.warn` variant). Zero error-path
+deltas. Carried over intact, therefore parity-complete by
+construction:
+
+- Unknown/forbidden session deep link → `showMainEmpty("That
+  conversation wasn't found…")` or `canvasToast` on a restored canvas
+  (`shell.ts:964-967`).
+- Invalid app-edit link (bad slug) → `showMainEmpty` notice
+  (`shell.ts:940`).
+- Turn start/follow/retry/fork failures → `composer.state.error`
+  (`chat.ts:422,672,1231,1423`); run-level error states surface via
+  `showStateError` inline banner (`chat.ts:1106`, `error-banner.ts`).
+- Per-view load/action failures → notices via `errMessage` fallbacks
+  (crons/contexts/webhooks/memory/skills/ambient-policy/
+  context-model).
+- Benign background reads → `swallow()` (`chassis/src/errors.ts`).
+- Unknown-view deep links → soft fallback to restored canvas/chats
+  (same as qm production; not an error page by design).
+
+Server (`packages/web-ui/src/server.ts`):
+
+- `setNotFoundHandler` serves static files with SPA fallback to
+  `index.html` (deep links + unmatched routes → 404 JSON shape
+  `{"error":"not_found"}`, replacing qm's terminal catch-all at
+  `plugins/web-ui/server/index.ts:2488` — equivalent behaviour).
+- Upstream core failures map to 404/502 JSON
+  (`not_found`/`upstream_error`/`bad_core_response`); skill name
+  collision → 409 `conflict`; anonymous callers → 401 via the `/me`
+  gate.
+
+Verification (this commit's checkout): `pnpm install` + `pnpm build`
+(vendor) fresh, then `node --import tsx/esm --test
+packages/web-ui/tests/web-ui.test.ts
+packages/web-ui/tests/web-ui-relay.test.ts` — 15/15 pass (includes
+SSE replay + hardening gates); `pnpm --filter @qm/web-ui
+typecheck:app` — green.
+
+No gaps found; no code changes required for 18.1's error-page item.

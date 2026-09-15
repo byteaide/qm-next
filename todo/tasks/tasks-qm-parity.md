@@ -127,9 +127,9 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
 ### P5 web 深化 + 数据迁移 + 切换（~4d；2026-09-15 重整：slack/钉钉/企微 suspended）
 
 - [ ] 18.0 【A】web 端深化 ~1d
-  - [ ] 18.1 web-ui 真活收尾：session 流式 SSE、turn 流式增量投递、deep-link 回退、错误页（2026-09-15 调查：流式两项 13.0 已建——server `/api/runs/:id/events` delta→partial+replay+心跳，client `streamRunViaSse` EventSource+超时回退 poll；deep-link `parseDeepLink`/`deepLinkPath` 已接 shell.ts；剩余：错误页/错误态盘点）
+  - [x] 18.1 web-ui 真活收尾：session 流式 SSE、turn 流式增量投递、deep-link 回退、错误页（2026-09-15 调查：流式两项 13.0 已建——server `/api/runs/:id/events` delta→partial+replay+心跳，client `streamRunViaSse` EventSource+超时回退 poll；deep-link `parseDeepLink`/`deepLinkPath` 已接 shell.ts；错误页/错误态盘点完成——整树 diff 仅 theme 三处、零错误路径差异，服务端 setNotFoundHandler SPA 回退 + 404/502 映射在位，15/15 web-ui 测试绿 + typecheck 绿，证据入 `parity-deviations.md` §P5 18.1）
   - [ ] 18.2 portal SSO + admin-login link + API relay 真路径全活；连接性探针（lighthouse a11y ≥ 95）
-  - [ ] 18.3 体验硬化：mobile 适配（既有断点 360-860px + hover:none 已覆盖）/ **dark mode 已落**（`3b04c6b`：pi-web-ui `.dark` 令牌块接线 + index.html FOUC 预绘脚本 + `.badge.warn` 暗色变体；调查确认 mobile/键盘导航/reduced-motion/deep-link 均已存在，18.3 收敛为 dark mode 单点）/ keyboard nav（`:focus-visible` 全覆盖 + dialog/pane focus 管理既有）
+  - [x] 18.3 体验硬化：mobile 适配（既有断点 360-860px + hover:none 已覆盖）/ **dark mode 已落**（`3b04c6b`：pi-web-ui `.dark` 令牌块接线 + index.html FOUC 预绘脚本 + `.badge.warn` 暗色变体；调查确认 mobile/键盘导航/reduced-motion/deep-link 均已存在，18.3 收敛为 dark mode 单点）/ keyboard nav（`:focus-visible` 全覆盖 + dialog/pane focus 管理既有）
 - [ ] 19.0 【B】数据迁移（关键路径）~2d
   - [ ] 19.1 schema diff 报告（qm vs qm-next PG 全表：sessions/runs/directory/memory/skills/approvals/cron/delivery/audit/metrics）~3h
   - [ ] 19.2 迁移器 + 行数校验 + 回滚路径 ~6h
