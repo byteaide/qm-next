@@ -9,3 +9,6 @@
 repos/*
 !repos/qm-next
 .DS_Store
+
+# IDE local state
+.windsurf/

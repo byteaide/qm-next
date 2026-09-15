@@ -122,7 +122,7 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
   - [x] 17.0a-fix 修 keychain 时间敏感测试（`Math.max(now(), prior+1)` 真钟 1ms+ 漂移）：注入确定性 `now()` clock + 重置为 `updatedAt` 保证 `+1` 严格单调（commit `fb6cac7`）
   - [x] 17.0b `pnpm test:pg`（PG16 容器一次性跑全套）：751/747+4 skip（real-model smoke）+ 0 fail（exit 0）；memory+PG 双实现全 PG 列适配实证（16.0 增量列 + 既有 stores）
   - [x] 17.0c OUT 项对账表入 `docs/parity-deviations.md` §P4 17.0：21 行 21 项 v0.1.0 OUT → 14.0/14.0a-d/15.0/16.0 车道映射；明确标注 P5 遗留（pg-boss / monitor-poller / oauth.ts / IM 多渠道）
-  - [ ] 17.0d 打 tag `p4`（按 P1/P2 拍板惯例用户 FF 合并后打 tag——本地不动 tag 边界）
+  - [x] 17.0d 打 tag `p4`（2026-09-15 注释型 tag `e31cf3e` → `0517959`，对齐 `p1` 样式；用户 FF 合并后落）
 
 ### P5 web 深化 + 数据迁移 + 切换（~4d；2026-09-15 重整：slack/钉钉/企微 suspended）
 
