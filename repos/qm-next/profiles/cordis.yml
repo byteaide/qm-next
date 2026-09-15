@@ -31,3 +31,12 @@
   name: '@qm/web-ui'
   config:
     port: 0
+    # Same secret as portal.sessionSecret — web-ui verifies the
+    # x-portal-identity header the portal mints (the SSO trust seam).
+    portalIdentitySecret: 'dev-portal-session-secret-0123456789abcdef'
+- id: portal
+  name: '@qm/portal'
+  config:
+    port: 0
+    publicUrl: 'http://127.0.0.1:8095'
+    sessionSecret: 'dev-portal-session-secret-0123456789abcdef'

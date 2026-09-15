@@ -15,6 +15,10 @@ const ctx = await bootProfile(fileURLToPath(new URL('../profiles/cordis.yml', im
 
 const { host, port } = ctx['web-ui'].address
 console.log(`web-ui: booted, surface http://${host}:${port} (dev sign-in: any principal)`)
+const portal = (ctx as unknown as { portal?: { address: { host: string; port: number } } }).portal
+if (portal) {
+  console.log(`web-ui: portal front http://${portal.address.host}:${portal.address.port} (SSO: local bypass on loopback)`)
+}
 
 let stopping = false
 async function shutdown(signal: string): Promise<void> {

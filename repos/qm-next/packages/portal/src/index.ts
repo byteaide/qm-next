@@ -39,12 +39,25 @@ export {
 } from './oidc.ts'
 export {
   createPortalState,
+  currentSession,
   derivedCookieDomain,
   isLocalPortalUrl,
   isLoopbackAddress,
   nonAdminDeniedHtml,
   portalBootProblems,
   registerPortal,
+  renewSessionCookies,
   signInErrorHtml,
   type PortalDeps,
+  type PortalState,
 } from './portal-routes.ts'
+export {
+  createCoreAdminProbe,
+  createPortalServer,
+  PortalService,
+  type PortalConfig,
+  type PortalServerDeps,
+  type PortalServerOpts,
+} from './service.ts'
+import { PortalService } from './service.ts'
+export default PortalService

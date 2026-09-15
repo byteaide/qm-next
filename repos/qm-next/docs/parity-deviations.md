@@ -923,3 +923,55 @@ SSE replay + hardening gates); `pnpm --filter @qm/web-ui
 typecheck:app` — green.
 
 No gaps found; no code changes required for 18.1's error-page item.
+
+## P5 18.2 portal SSO + surface relay live (2026-09-15)
+
+Deviation #49's unported half — the qm portal's surface-relay
+(`proxyToSurface`) — is now ported onto the single-process runtime.
+
+New composition (`packages/portal/src/service.ts`):
+
+- `createPortalServer` mounts `registerPortal` (SSO routes + admin gate)
+  plus a catch-all surface proxy: every non-`/auth` path forwards to the
+  web-ui upstream over loopback fetch, and a valid portal session rides
+  along exactly as qm's `proxyToSurface` did — `webuiuser` cookie +
+  short-TTL `x-portal-identity` minted under the shared secret. Streaming
+  responses (SSE run events) proxy through (`Readable.fromWeb`).
+- `PortalService` (cordis, injects `api` + `web-ui` by id — structural
+  slices instead of package imports, because `@qm/api` imports
+  `@qm/portal` for the admin gate and the reverse dependency would cycle).
+- Admin status probes the core `GET /v1/admin/whoami` lane with a signed
+  bearer (60s cache) — qm's whoami-based admin gate, fed by
+  `createMemoryAdminService({seedAdmins})` in dev/PG grant tables in
+  production.
+- Admin-login links: `POST /auth/admin-login` verifies the sealed
+  five-minute single-use claims (replay dedupe) and mints the boss
+  session — the operator CLI path.
+- `profiles/cordis.yml` wires portal + web-ui with the shared dev secret
+  (`sessionSecret` ≡ `portalIdentitySecret`); `scripts/dev-web-ui.ts`
+  prints both surfaces.
+
+Deviations from qm's two-process deployment: the portal fronts web-ui
+over loopback fetch instead of a reverse proxy (single process, same
+trust shape); impersonation routes stay unported (deviation #49 note
+stands).
+
+Real-path verification:
+
+- `packages/portal/tests/portal-web-path.test.ts` — live HTTP over
+  listening sockets: anon `/admin/ui` → 302 `/auth/login`; local bypass
+  session → `/me` `mode:"portal"`; turn POST through the portal reaches
+  done with SSE replay through the proxy; relay lanes carry the acting
+  principal; admin-login link → boss session admitted through the core
+  whoami probe; replayed link → 400.
+- `scripts/probe-web-connectivity.ts` — full profile boot (api +
+  im-bridge + triggers + web-ui + portal), 7/7 probes PASS: SPA index +
+  hashed asset through the portal, SSO bypass, portal-mode `/me`, turn
+  202, SSE `event: done` replay, admin gate 302.
+- `scripts/lighthouse-a11y.ts` — Lighthouse 13.4.1 headless Chrome
+  against the portal front: **a11y score 98** (≥ 95 gate; sole failed
+  audit `landmark-one-main`).
+- `pnpm typecheck` green; `pnpm test` 694 tests / 667 pass / 0 fail /
+  27 skip (PG variants, consistent with the P4 baseline);
+  `pnpm check:im` + `pnpm rescope-check` green. `pnpm test:pg` stays
+  with the 21.4 milestone gate.

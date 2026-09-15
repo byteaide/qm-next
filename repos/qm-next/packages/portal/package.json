@@ -11,11 +11,22 @@
   },
   "dependencies": {
     "@qm/auth": "workspace:^",
+    "@qm/cordis": "workspace:^",
+    "@qm/schemastery": "workspace:^",
+    "fastify": "^5.12.1",
     "jose": "^6.2.3",
     "lru-cache": "^11.5.2"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
-    "fastify": "^5.12.1"
+    "@qm/credentials": "workspace:^",
+    "@qm/directory": "workspace:^",
+    "@qm/memory": "workspace:^",
+    "@qm/orchestrator": "workspace:^",
+    "@qm/skills": "workspace:^",
+    "@qm/store": "workspace:^",
+    "@qm/triggers": "workspace:^",
+    "@qm/types": "workspace:^",
+    "@qm/web-ui": "workspace:^",
+    "@types/node": "^24.0.0"
   }
 }

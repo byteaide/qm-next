@@ -54,7 +54,7 @@ export interface PortalDeps {
   now?: () => number
 }
 
-interface PortalState {
+export interface PortalState {
   deps: PortalDeps
   origin: string
   secureCookies: boolean
@@ -326,14 +326,16 @@ function localDevSession(state: PortalState, req: FastifyRequest, nowMs = Date.n
   return { k: 'session', sub: state.deps.devPrincipal ?? 'dev-admin', org: state.deps.orgId, iat: now, exp: now + state.sessionTtlS }
 }
 
-function currentSession(state: PortalState, req: FastifyRequest): SessionClaims | null {
+/** The request's portal session (sealed cookie or the local dev bypass lane). */
+export function currentSession(state: PortalState, req: FastifyRequest): SessionClaims | null {
   return (
     openSession(readCookie(req.headers.cookie, 'portal_session'), state.sessionKey, state.deps.now?.() ?? Date.now(), state.deps.orgId, state.sessionMaxTtlS) ??
     localDevSession(state, req)
   )
 }
 
-function renewSessionCookies(state: PortalState, req: FastifyRequest): string[] | null {
+/** Re-seal the session cookie when it passed half its TTL; null when fresh/absent. */
+export function renewSessionCookies(state: PortalState, req: FastifyRequest): string[] | null {
   const session = openSession(
     readCookie(req.headers.cookie, 'portal_session'),
     state.sessionKey,

@@ -36,6 +36,9 @@ importers:
       '@qm/im-feishu':
         specifier: workspace:*
         version: link:packages/im-feishu
+      '@qm/portal':
+        specifier: workspace:*
+        version: link:packages/portal
       '@qm/reach':
         specifier: workspace:*
         version: link:packages/reach
@@ -375,7 +378,7 @@ importers:
         version: 0.0.4
       '@earendil-works/pi-ai':
         specifier: 0.82.0
-        version: 0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.6.4))(ws@8.21.3)(zod@4.6.4)
+        version: 0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
       '@qm/model':
         specifier: workspace:^
         version: link:../model
@@ -561,6 +564,15 @@ importers:
       '@qm/auth':
         specifier: workspace:^
         version: link:../auth
+      '@qm/cordis':
+        specifier: workspace:^
+        version: link:../../vendor/cordis
+      '@qm/schemastery':
+        specifier: workspace:^
+        version: link:../../vendor/schemastery
+      fastify:
+        specifier: ^5.12.1
+        version: 5.12.4
       jose:
         specifier: ^6.2.3
         version: 6.2.12
@@ -568,12 +580,36 @@ importers:
         specifier: ^11.5.2
         version: 11.5.2
     devDependencies:
+      '@qm/credentials':
+        specifier: workspace:^
+        version: link:../credentials
+      '@qm/directory':
+        specifier: workspace:^
+        version: link:../directory
+      '@qm/memory':
+        specifier: workspace:^
+        version: link:../memory
+      '@qm/orchestrator':
+        specifier: workspace:^
+        version: link:../orchestrator
+      '@qm/skills':
+        specifier: workspace:^
+        version: link:../skills
+      '@qm/store':
+        specifier: workspace:^
+        version: link:../store
+      '@qm/triggers':
+        specifier: workspace:^
+        version: link:../triggers
+      '@qm/types':
+        specifier: workspace:^
+        version: link:../types
+      '@qm/web-ui':
+        specifier: workspace:^
+        version: link:../web-ui
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.4
-      fastify:
-        specifier: ^5.12.1
-        version: 5.12.4
 
   packages/processes:
     dependencies:
@@ -888,10 +924,10 @@ importers:
     dependencies:
       '@earendil-works/pi-agent-core':
         specifier: 0.82.0
-        version: 0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
+        version: 0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.6.4))(ws@8.21.3)(zod@4.6.4)
       '@earendil-works/pi-ai':
         specifier: 0.82.0
-        version: 0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
+        version: 0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.6.4))(ws@8.21.3)(zod@4.6.4)
       '@earendil-works/pi-tui':
         specifier: 0.82.0
         version: 0.82.0
@@ -2793,7 +2829,6 @@ packages:
 
   opencode-ai@1.17.18:
     resolution: {integrity: sha512-gpCE5X3dwvYam2ba9r3mw+FTPBTDlmKkguiOoYF1nv9MVA3sDIXje3tPQ+EMNxYkWD43FN3+eVC1GW6tRO9Aiw==}
-    cpu: [arm64, x64]
     os: [darwin, linux, win32]
     hasBin: true
 
@@ -3763,9 +3798,9 @@ snapshots:
       - ws
       - zod
 
-  '@earendil-works/pi-agent-core@0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)':
+  '@earendil-works/pi-agent-core@0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.6.4))(ws@8.21.3)(zod@4.6.4)':
     dependencies:
-      '@earendil-works/pi-ai': 0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
+      '@earendil-works/pi-ai': 0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.6.4))(ws@8.21.3)(zod@4.6.4)
       diff: 8.0.4
       ignore: 7.0.5
       typebox: 1.1.38
