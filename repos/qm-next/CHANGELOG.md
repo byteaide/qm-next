@@ -208,3 +208,30 @@ P5 重新洗牌为四条车道（详见 `todo/tasks/tasks-qm-parity.md` §P5）�
 
 时间预算 ~4d ai 总工作量不变；只是把"多渠道"时间挪到 web 深化 +
 数据迁移 + 切换收束。
+
+### P5 20.0 监控/合规/生产化（2026-09-15）
+
+- **组合根 durable-by-default sweep**：`databaseUrl` 下 sessions/runs/
+  directory/approvals/crons（含 PG leader lease）/投递队列全量选 PG twin；
+  keychain、model、device-flow、mcp、connectors、webhooks 等 DurableMap
+  族接 `createPostgresMap`（沿用 qm 表名，迁移即直拷），boot 时暖建表——
+  空库启动一次即完成全量 schema 落地（迁移 runbook 第 3 步依赖）。
+- **新 twin**：`@qm/im-core` `createPostgresDeliveryQueue`（SKIP LOCKED
+  认领/租约/退避/park 与内存版同语义）；`@qm/api`
+  `createPostgresChannelPolicyStore`（qm 同列 `channel_policy`+`_history`，
+  set 即写历史）；`createPostgresFileStore`（`file_artifacts` qm 同列 DDL）
+  + `@qm/store` `DurableByteStore`（内容寻址 `files/<sha256>`，local FS/
+  memory 双后端，S3 延后）。
+- **观测面**：admin sink 族（metrics/error/credential-usage/egress/audit）
+  在 `databaseUrl` 下常开（不再依赖 admin flag）；`GET /readyz` 就绪探针
+  （PG ping，down 返 503）；`GET /v1/admin/monitoring/summary` 监控面板
+  占位（uptime/库态/队列耐久性/crons/错误与审计计数，admin 鉴权）。
+- **C.3 收口**：tasks/acl/run-activity/run-signals/replay-dedupe 构造器
+  随 `databaseUrl` 实例化，迁移 `--verify-only` 不再报告这些表。
+- **运维**：`docs/operations.md`（启动/关闭/回滚/扩缩容/备份/迁移摘要 +
+  20.0 拍板记录）；`pnpm rehearsal:backup`（快照→破坏→还原→行数断言
+  演练，PASS）+ `scripts/pg-snapshot.sh` 生产快照工具。
+- **迁移器**：`deliveries` 改 drain-check（切换前强制清空，行不携带）；
+  `channel_policy(+history)`/`file_artifacts` 进 ENTITY_COPIES 直拷。
+- **验证**：`pnpm test:pg` 全绿（新增 durable-wiring 端到端表清单断言、
+  delivery-queue-pg 契约对拍）；备份还原演练 PASS。

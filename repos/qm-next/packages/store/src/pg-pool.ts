@@ -80,6 +80,7 @@ export function createPgPool(connectionString: string, statements: string[]): Pg
         poolP = null
         throw e
       })
+      return poolP
     }
     return poolP
   }
@@ -94,5 +95,10 @@ export function createPgPool(connectionString: string, statements: string[]): Pg
   async function close(): Promise<void> {
     if (poolP) await (await poolP).end()
   }
+  // Schema ownership fires at construction (20.0): "start once against an
+  // empty database" must land the DDL without waiting for a first query.
+  // A failed build stays retryable — poolP resets and the first real query
+  // surfaces the error.
+  pool().catch(() => undefined)
   return { pool, q, query, close }
 }

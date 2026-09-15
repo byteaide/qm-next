@@ -113,11 +113,11 @@ const DRAINED = ['deliveries']
 
 const ENTITY_COPIES = [
   'memory_revisions',
-  'tasks',
-  'task_events',
   'process_sessions',
-  'acl_grants',
+  // version row cleared AFTER grants on rollback (trigger re-bumps it on
+  // grant deletes) — the rollback pass walks this list in reverse.
   'acl_grants_version',
+  'acl_grants',
   'admin_grants',
   'audit_log',
   'run_activity',
@@ -133,6 +133,10 @@ const ENTITY_COPIES = [
   'channel_policy_history',
   'file_artifacts',
 ]
+
+// FK dependents: tasks→sessions, task_events→tasks — copied only after
+// the sessions transform has landed its rows.
+const ENTITY_COPIES_AFTER_SESSIONS = ['tasks', 'task_events']
 
 const BLOB_COPIES: Array<[string, string]> = [
   ['skill_bundles', 'skill_bundles'],
@@ -673,6 +677,17 @@ async function main(): Promise<void> {
       for (const [domain, run] of transforms) {
         if (!want(domain)) continue
         results.push(...(await run()))
+      }
+
+      for (const table of ENTITY_COPIES_AFTER_SESSIONS) {
+        if (!want(table)) continue
+        if (!(await tableExists(source.q, table))) continue
+        if (!(await tableExists(target.q, table))) {
+          notes.push(`target missing table: ${table} (PG-twin gap) — source rows (${await countRows(source.q, table)}) not migrated`)
+          continue
+        }
+        const { src, dst } = await copyIntersected(source, exec, table, args.batch)
+        results.push({ table, verifyTable: table, mode: 'copy', src, dst, note: src !== dst ? `${src - dst} duplicate/conflicting row(s) skipped` : undefined })
       }
 
       for (const [srcTable, dstTable] of BLOB_COPIES) {

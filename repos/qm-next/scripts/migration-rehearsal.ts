@@ -29,7 +29,6 @@ import { MEMORY_SCHEMA_STATEMENTS } from '../packages/memory/src/postgres-store.
 import { DELIVERIES_SCHEMA_STATEMENTS } from '../packages/im-core/src/runtime/postgres-delivery-queue.ts'
 import { CHANNEL_POLICY_SCHEMA_STATEMENTS } from '../packages/api/src/services/channel-policy-store.ts'
 import { FILE_ARTIFACTS_SCHEMA_STATEMENTS } from '../packages/api/src/services/file-store.ts'
-
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 type Row = Record<string, unknown>
@@ -97,13 +96,49 @@ async function ensureTargetSchema(): Promise<void> {
     ...FILE_ARTIFACTS_SCHEMA_STATEMENTS,
   ])
   const { createPostgresMap } = await import('../packages/store/src/durable-map.ts')
+  // Constructor-only stores (20.0): a durable api boot instantiates these,
+  // so the rehearsal mirrors that — no more PG-twin gap notes for them.
+  // instance_heartbeats stays un-ensured by design (TRUNCATE_ONLY note).
+  const closers: Array<{ close?(): Promise<void> }> = []
+  const { createPostgresTaskStore } = await import('../packages/tasks/src/postgres-task-store.ts')
+  const { createPostgresGrantStore } = await import('../packages/acl/src/postgres-grant-store.ts')
+  const { createPostgresProcessRegistry } = await import('../packages/processes/src/process-registry.ts')
+  const { createPostgresRunActivityStore, createPostgresRunSignalStore } = await import('../packages/runs/src/index.ts')
+  const { createPostgresReplayDedupe } = await import('../packages/auth/src/replay-dedupe.ts')
+  const {
+    createPostgresAdminGrantStore,
+    createPostgresAuditLog,
+    createPostgresErrorLog,
+    createPostgresMetricsSink,
+    createPostgresCredentialUsageSink,
+    createPostgresEgressAuditSink,
+  } = await import('../packages/admin/src/index.ts')
+  const { createPostgresAmbientJudgmentStore, createPostgresAckEmojiPickStore } = await import('../packages/api/src/services/ambient-stores.ts')
   try {
     await pool.pool()
+  const pushCloser = (store: unknown): void => {
+    closers.push(store as { close?(): Promise<void> })
+  }
+  pushCloser(createPostgresTaskStore(TARGET_URL!))
+  pushCloser(createPostgresGrantStore(TARGET_URL!))
+  pushCloser(createPostgresProcessRegistry(TARGET_URL!))
+  pushCloser(createPostgresRunActivityStore(TARGET_URL!))
+  pushCloser(createPostgresRunSignalStore(TARGET_URL!))
+  pushCloser(createPostgresReplayDedupe(TARGET_URL!))
+  pushCloser(createPostgresAdminGrantStore(TARGET_URL!))
+  pushCloser(createPostgresAuditLog(TARGET_URL!))
+  pushCloser(createPostgresErrorLog(TARGET_URL!))
+  pushCloser(createPostgresMetricsSink(TARGET_URL!))
+  pushCloser(createPostgresCredentialUsageSink(TARGET_URL!))
+  pushCloser(createPostgresEgressAuditSink(TARGET_URL!))
+  pushCloser(createPostgresAmbientJudgmentStore(TARGET_URL!, 'default'))
+  pushCloser(createPostgresAckEmojiPickStore(TARGET_URL!, 'default'))
     for (const table of BLOB_DESTINATIONS) {
       const map = createPostgresMap<Row>(pool, table)
       await map.get('__warm__')
     }
   } finally {
+    for (const closer of closers) await closer.close?.().catch(() => undefined)
     await pool.close()
   }
 }
@@ -192,6 +227,30 @@ const DDL = [
   `CREATE TABLE IF NOT EXISTS approvals( id TEXT PRIMARY KEY, json JSONB NOT NULL )`,
   `CREATE TABLE IF NOT EXISTS approval_grants( id TEXT PRIMARY KEY, json JSONB NOT NULL )`,
   `CREATE TABLE IF NOT EXISTS webhooks( id TEXT PRIMARY KEY, json JSONB NOT NULL )`,
+  `CREATE TABLE IF NOT EXISTS channel_policy(
+      org_id TEXT NOT NULL, container TEXT NOT NULL,
+      orders TEXT NOT NULL DEFAULT '', bots JSONB NOT NULL DEFAULT '{}'::jsonb,
+      set_by TEXT, updated_at BIGINT NOT NULL,
+      PRIMARY KEY(org_id, container)
+    )`,
+  `ALTER TABLE channel_policy ADD COLUMN IF NOT EXISTS ambient_enabled BOOLEAN`,
+  `CREATE TABLE IF NOT EXISTS channel_policy_history(
+      id BIGSERIAL PRIMARY KEY,
+      org_id TEXT NOT NULL, container TEXT NOT NULL,
+      orders TEXT NOT NULL, set_by TEXT, session_id TEXT,
+      created_at BIGINT NOT NULL
+    )`,
+  `ALTER TABLE channel_policy_history ADD COLUMN IF NOT EXISTS bots JSONB`,
+  `ALTER TABLE channel_policy_history ADD COLUMN IF NOT EXISTS ambient_enabled BOOLEAN`,
+  `CREATE TABLE IF NOT EXISTS file_artifacts(
+      id TEXT PRIMARY KEY, kind TEXT NOT NULL DEFAULT 'file',
+      owner_scope_id TEXT NOT NULL, path TEXT NOT NULL, name TEXT NOT NULL,
+      mimetype TEXT NOT NULL, size_bytes BIGINT NOT NULL,
+      blob_key TEXT, sha256 TEXT, direction TEXT NOT NULL,
+      created_by TEXT NOT NULL, created_in_scope TEXT,
+      created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL,
+      enabled BOOLEAN NOT NULL DEFAULT TRUE, source TEXT NOT NULL DEFAULT 'live'
+    )`,
 ]
 
 const SEED: Array<[string, string, unknown[]]> = [
@@ -376,7 +435,7 @@ async function targetQuery(text: string, params: unknown[] = []): Promise<Row[]>
 }
 
 async function main(): Promise<void> {
-  const seedTables = ['sessions', 'session_entries', 'participants', 'session_tape', 'llm_requests', 'session_leases', 'runs', 'run_activity', 'run_signals', 'instance_heartbeats', 'memory_revisions', 'tasks', 'task_events', 'process_sessions', 'acl_grants', 'acl_grants_version', 'admin_grants', 'audit_log', 'directory_people', 'directory_spaces', 'directory_space_members', 'directory_rosters', 'directory_sync_state', 'crons', 'cron_fire_log', 'skills', 'skill_bundles', 'skill_packs', 'monitors', 'model_credentials', 'custom_model_providers', 'admin_slack_installation', 'turn_metrics', 'error_events', 'credential_usage', 'egress_events', 'source_auth_replay', 'approvals', 'ambient_judgments', 'ack_emoji_picks']
+  const seedTables = ['sessions', 'session_entries', 'participants', 'session_tape', 'llm_requests', 'session_leases', 'runs', 'run_activity', 'run_signals', 'instance_heartbeats', 'memory_revisions', 'tasks', 'task_events', 'process_sessions', 'acl_grants', 'acl_grants_version', 'admin_grants', 'audit_log', 'directory_people', 'directory_spaces', 'directory_space_members', 'directory_rosters', 'directory_sync_state', 'crons', 'cron_fire_log', 'skills', 'skill_bundles', 'skill_packs', 'monitors', 'model_credentials', 'custom_model_providers', 'admin_slack_installation', 'turn_metrics', 'error_events', 'credential_usage', 'egress_events', 'source_auth_replay', 'approvals', 'ambient_judgments', 'ack_emoji_picks', 'channel_policy', 'channel_policy_history', 'file_artifacts', 'deliveries', 'webhooks']
 
   await ensureTargetSchema()
   await seedSource()
@@ -401,9 +460,9 @@ async function main(): Promise<void> {
 
   console.log('phase 5: verify migrated state')
   const state = await targetCounts(seedTables)
-  // -1 means the target table does not exist: the migrator reported a
-  // PG-twin gap and skipped it (schema owners live in constructor-only
-  // stores — 20.0 composition work).
+  // 20.0 twin sweep: a durable boot lands every twin table, so the
+  // migrator carries their seeded rows. Only `instance_heartbeats` stays
+  // un-ensured (-1, TRUNCATE_ONLY note path by design).
   const expect: TargetState = {
     sessions: 2,
     session_entries: 3,
@@ -412,17 +471,17 @@ async function main(): Promise<void> {
     llm_requests: 2,
     session_leases: 0,
     runs: 1,
-    run_activity: -1,
-    run_signals: -1,
+    run_activity: 1,
+    run_signals: 1,
     instance_heartbeats: -1,
     memory_revisions: 1,
-    tasks: -1,
-    task_events: -1,
-    process_sessions: -1,
-    acl_grants: -1,
-    acl_grants_version: -1,
-    admin_grants: -1,
-    audit_log: -1,
+    tasks: 1,
+    task_events: 1,
+    process_sessions: 1,
+    acl_grants: 1,
+    acl_grants_version: 1,
+    admin_grants: 1,
+    audit_log: 1,
     directory_people: 3,
     directory_spaces: 3,
     directory_space_members: 3,
@@ -437,8 +496,8 @@ async function main(): Promise<void> {
     model_credentials: 1,
     custom_model_providers: 1,
     admin_slack_installation: 1,
-    ambient_judgments: -1,
-    ack_emoji_picks: -1,
+    ambient_judgments: 1,
+    ack_emoji_picks: 1,
     // 20.0 twins landed: these targets now exist at boot and the
     // migrator carries their rows (drain-class tables stay empty).
     channel_policy: 1,
