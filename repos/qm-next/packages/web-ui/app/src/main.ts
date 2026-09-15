@@ -3,6 +3,7 @@ import "./shell.css";
 import { bootSafely } from "./shell";
 import { registerChatSearchHotkey } from "./search";
 import { closeFormMenus } from "./ui";
+import { applyTheme, watchSystemTheme } from "./theme";
 import { allConversations } from "./conversations";
 import {
   clearSessionSelection,
@@ -47,4 +48,6 @@ document.addEventListener("keydown", (e) => {
 });
 
 registerChatSearchHotkey();
+applyTheme();
+watchSystemTheme();
 void bootSafely();

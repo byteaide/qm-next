@@ -4066,6 +4066,11 @@ a.chat-row-open {
   color: #8a5a00;
   background: #fff3c4;
 }
+/* Dark: palette values match the vendored pi-web-ui yellow-500/yellow-950 tokens. */
+.dark .badge.warn {
+  color: oklch(79.5% 0.184 86.047);
+  background: oklch(28.6% 0.066 53.813);
+}
 .deploy-url code {
   font-size: 12px;
   color: var(--muted-foreground);

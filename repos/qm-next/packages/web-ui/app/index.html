@@ -7,6 +7,22 @@
     <link rel="icon" href="%BASE_URL%favicon.svg" />
     <meta name="brand-self-label" content="QM" />
     <meta name="description" content="Web surface for the org agent — custom chat UI stitched to the platform core." />
+    <script>
+      // Pre-paint theme sync (FOUC guard) — must stay in lockstep with app/src/theme.ts.
+      (function () {
+        try {
+          var c = localStorage.getItem("qm.theme");
+          var dark =
+            c === "dark" ||
+            ((c == null || c === "system") &&
+              matchMedia("(prefers-color-scheme: dark)").matches);
+          if (dark) {
+            document.documentElement.classList.add("dark");
+            document.documentElement.style.colorScheme = "dark";
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>
