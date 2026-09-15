@@ -144,11 +144,11 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
     - 拍板（记 operations.md §8 + parity-deviations §P5 20.0）：runtime-config 族/environments/projects/deploy 族=export-seed；identity 面（deactivated_principals/external_members）v1 不带；webhooks 数据 export-seed（qm/qm-next 记录形状不同，不做行级拷贝）；S3 字节后端延后；`instance_heartbeats` 21.0 多实例接线（TRUNCATE_ONLY note 路径设计内）
   - [x] 20.2 运维 runbook `docs/operations.md`（2026-09-15：生产形态/启动（含目标库自举）/关闭/回滚矩阵/扩缩容（水平就绪点：runs+投递 SKIP LOCKED、cron leader lease、实例心跳）/备份还原/迁移摘要/拍板记录）
   - [x] 20.3 PG snapshot 备份 + 还原演练（2026-09-15：`scripts/pg-snapshot.sh` 生产快照工具（pg_dump custom + filesDir tar）+ `pnpm rehearsal:backup`（一次性 PG16：播种→快照→破坏→还原→行数+完整性断言，**PASS 100/100**））
-- [ ] 21.0 【汇合】切换演练 + tag `v1.0.0` ~0.5d：灰度双跑（instance-registry 流量切分）+ blue-green 部署 + worker 进程拆分；全门禁绿
+- [x] 21.0 【汇合】切换演练 + tag `v1.0.0` ~0.5d：灰度双跑（instance-registry 流量切分）+ blue-green 部署 + worker 进程拆分；全门禁绿（2026-09-15 完成：21.1–21.4 全过；canonical ff-merge `af813d3` + tag `v1.0.0` @ `af813d3`）
   - [x] 21.1 灰度双跑（qm + qm-next 同实例注册流量切分）~2h（2026-09-15：组合根接线 PG instance registry + drain controller——`databaseUrl` 下实例随 drain 扫描心跳入 `instance_heartbeats`（CREATE TABLE 收进 schema-init advisory lock，多实例并发启动安全）；同 build_sha 实例共存共担 run 队列（入口切分归 LB 权重），entry `canClaim` 接入 turn runner；`rehearsal:cutover` phase 1 PASS——同 sha 双实例 20/20 attempts=1、两个 worker 均有认领、互不排空）
   - [x] 21.2 blue-green 部署形态验证 ~1h（2026-09-15：`rehearsal:cutover` phase 2 PASS——新一代 build_sha 实例心跳令全部旧代停领（claim gate 关闭、在飞排空），新实例独揽后续 claims（10/10），处置新版后旧代在 liveness 窗口过期后自动恢复（回滚路径）；PG 门控测试 `durable-wiring` 双实例 drain 交接断言）
   - [x] 21.3 worker 进程拆分验证 ~1h（2026-09-15：`rehearsal:cutover` phase 3 PASS——真子进程（`scripts/cutover-worker-entry.ts`）跨 OS 进程共享 `databaseUrl` 认领：子进程心跳使父实例排空、两子进程 20/20 attempts=1 无粘性路由；SIGKILL 持有 run 的 worker → reaper 扫过期租约重排队（attempt+1）→ worker-b 接管完成，全库 71 runs exactly-once。接线发现并修复真空缺：组合根从未跑 reaper（runbook §3"租约过期自动回收"此前无人兑现）——现 `reapIntervalMs`（默认 10s）接线 createReaper，内存租约串行本进程扫描、跨实例靠 reapExpired CAS 免锁）
-  - [ ] 21.4 全门禁绿 + tag `v1.0.0`【串行门验收】（2026-09-15 门禁全绿：typecheck / test 700✔668/0✖ / test:pg **759✔755/0✖/4 skip（真模型 key 门）** / check:im / rescope-check / rehearsal:migrate PASS / rehearsal:backup PASS 100/100 / rehearsal:cutover PASS 11 checks；tag 待 canonical ff-merge 后打）
+  - [x] 21.4 全门禁绿 + tag `v1.0.0`【串行门验收】（2026-09-15 门禁全绿：typecheck / test 700✔668/0✖ / test:pg **759✔755/0✖/4 skip（真模型 key 门）** / check:im / rescope-check / rehearsal:migrate PASS / rehearsal:backup PASS 100/100 / rehearsal:cutover PASS 11 checks 连跑二次（flake 保险）；canonical ff-merge 完成，tag `v1.0.0` @ `af813d3`）
 
 > **Suspended**（保留 git 历史 `d7d2db3` im-slack 全集；按 `ImProvider` 契约复用飞书通道测试矩阵重启）：
 > - ~~18.0 im-slack 复活~~ → 用户拍板 2026-09-15 suspended
@@ -168,10 +168,10 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
 
 ## Completion Checklist
 
-- [ ] 全部任务勾选
-- [ ] qm 日常场景清单 100% 等价路径（场景对拍记录）
-- [ ] 30/30 API routes 兼容清单过
-- [ ] 4/4 引擎真任务冒烟过
-- [ ] 飞书 + web 真机对拍通过
+- [x] 全部任务勾选（2026-09-15 随 21.0 收口；18.0/19.0/20.0 用户拍板 suspended 除外）
+- [x] qm 日常场景清单 100% 等价路径（场景对拍记录——P1–P2 场景逐项对拍，含 4.1/4.2）
+- [x] 30/30 API routes 兼容清单过（P3 闭合，tag p3）
+- [ ] 4/4 引擎真任务冒烟过（跳过式真模型用例已落地，真跑待 key，沿 #36）
+- [x] 飞书 + web 真机对拍通过（飞书 4.2 真任务；web 18.2 真活探针 + lighthouse a11y 98）
 - [x] 迁移演练 + 回滚通过（19.3 PASS 44/44）；web 端真活连接性探针过（18.2，lighthouse a11y 98）
-- [ ] 全门禁绿（`test:pg`/typecheck/rescope-check/`check:im`）；tag `v1.0.0`
+- [x] 全门禁绿（`test:pg`/typecheck/rescope-check/`check:im`）；tag `v1.0.0`（2026-09-15：test:pg 755✔/0✖/4 skip、rehearsal:cutover PASS×2；tag @ `af813d3`）
