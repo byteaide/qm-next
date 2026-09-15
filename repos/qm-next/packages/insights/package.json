@@ -1,0 +1,18 @@
+{
+  "name": "@qm/insights",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Insights notifiers (parity 16.0): reach-denied event relayer backed by a DurableMap cursor and a leader lease.",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@qm/types": "workspace:^",
+    "@qm/store": "workspace:^",
+    "@qm/admin": "workspace:^",
+    "@qm/runs": "workspace:^"
+  }
+}

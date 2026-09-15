@@ -55,7 +55,7 @@ function resultText(result: McpToolResult): string {
 export function createMcpMemoryProvider(opts: {
   read: McpMemoryOperation
   write?: McpMemoryOperation
-}): ScopeMemory {
+}): ScopeMemory & { capture: NonNullable<ScopeMemory['capture']> } {
   const read = async (
     scopeId: ScopeId,
     query: string,
