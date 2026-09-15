@@ -485,6 +485,28 @@ importers:
         specifier: workspace:^
         version: link:../types
 
+  packages/monitors:
+    dependencies:
+      '@qm/admin':
+        specifier: workspace:^
+        version: link:../admin
+      '@qm/processes':
+        specifier: workspace:^
+        version: link:../processes
+      '@qm/store':
+        specifier: workspace:^
+        version: link:../store
+      '@qm/types':
+        specifier: workspace:^
+        version: link:../types
+      pg:
+        specifier: ^8.13.0
+        version: 8.23.0
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.23.1
+
   packages/orchestrator:
     dependencies:
       '@qm/cordis':

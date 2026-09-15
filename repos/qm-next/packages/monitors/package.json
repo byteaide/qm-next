@@ -1,0 +1,22 @@
+{
+  "name": "@qm/monitors",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Background-job monitors: durable store for watch config + broker for arm/disarm (parity 16.0). Memory and Postgres dual impl via DurableMap.",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@qm/admin": "workspace:^",
+    "@qm/processes": "workspace:^",
+    "@qm/store": "workspace:^",
+    "@qm/types": "workspace:^",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0"
+  }
+}
