@@ -218,18 +218,21 @@ test('asks: dedupe per scope, approve mints grant and adopts, decline records no
 })
 
 test('service credentials: broker CRUD, conditional writes, secret decryption', async () => {
-  const { keychain } = createMemoryKeychainFixture()
+  let clock = 1_789_436_029_070
+  const { keychain } = createMemoryKeychainFixture({ now: () => clock })
   const orgScope = 'org:acme'
-  await keychain.setServiceCredential(orgScope, { slug: 'stripe', name: 'Stripe', secret: 'sk_live', host: 'api.stripe.com' })
+  await keychain.setServiceCredential(orgScope, { slug: 'stripe', name: 'Stripe', secret: 'svc-cred-test-fixture', host: 'api.stripe.com' })
   const listed = await keychain.listServiceCredentials(orgScope)
   assert.equal(listed.length, 1)
   assert.equal(listed[0]!.hasSecret, true)
   assert.equal(listed[0]!.enabled, true)
   const secret = await keychain.getServiceCredentialSecret(orgScope, 'stripe')
-  assert.equal(secret!.secret, 'sk_live')
+  assert.equal(secret!.secret, 'svc-cred-test-fixture')
   const updatedAt = listed[0]!.updatedAt
-  assert.equal(await keychain.setServiceCredentialIfCurrent(orgScope, { slug: 'stripe', name: 'Stripe', secret: 'sk_new', host: 'api.stripe.com' }, updatedAt + 5), null)
-  assert.equal(await keychain.setServiceCredentialIfCurrent(orgScope, { slug: 'stripe', name: 'Stripe', secret: 'sk_new', host: 'api.stripe.com' }, updatedAt), updatedAt + 1)
+  clock = updatedAt
+  assert.equal(await keychain.setServiceCredentialIfCurrent(orgScope, { slug: 'stripe', name: 'Stripe', secret: 'svc-cred-test-fixture', host: 'api.stripe.com' }, updatedAt + 5), null)
+  clock = updatedAt
+  assert.equal(await keychain.setServiceCredentialIfCurrent(orgScope, { slug: 'stripe', name: 'Stripe', secret: 'svc-cred-test-fixture', host: 'api.stripe.com' }, updatedAt), updatedAt + 1)
   assert.equal(await keychain.deleteServiceCredentialIfCurrent(orgScope, 'stripe', updatedAt + 99), false)
   assert.equal(await keychain.deleteServiceCredentialIfCurrent(orgScope, 'stripe', updatedAt + 1), true)
   assert.equal(await keychain.getServiceCredentialSecret(orgScope, 'stripe'), null)
