@@ -1,9 +1,10 @@
 /**
  * Typed durable KV maps over jsonb: the qm DurableMap pair, translated
  * onto @qm/store's PgPool. The optional schema-apply hook is dropped —
- * qm-next applies DDL through createPgPool statements.
+ * boot warms DurableMaps after the createPgPool eager DDL, and both DDL
+ * paths share the schema-init advisory lock (see pg-pool.withSchemaLock).
  */
-import type { PgPool, PoolClient } from './pg-pool.ts'
+import { withSchemaLock, type PgPool, type PoolClient } from './pg-pool.ts'
 
 export interface DurableMap<T> {
   all(): Promise<T[]>
@@ -127,7 +128,13 @@ export function createPostgresMap<T>(pg: PgPool, table: string): DurableMap<T> {
         `CREATE TABLE IF NOT EXISTS ${VERSIONS_TABLE} (tbl TEXT PRIMARY KEY, v BIGINT NOT NULL)`,
       ]
       readyP = (async () => {
-        for (const sql of statements) await pg.query(sql)
+        // The ensure DDL rides the shared schema-init advisory lock: several
+        // maps warm concurrently with the eager createPgPool DDL at boot,
+        // and unlocked concurrent CREATE TABLE IF NOT EXISTS races
+        // pg_catalog.pg_type into a 23505 duplicate-key crash.
+        await withSchemaLock(await pg.pool(), async (q) => {
+          for (const sql of statements) await q(sql)
+        })
       })().catch((e) => {
         readyP = null
         throw e

@@ -48,15 +48,36 @@ export function assertOneStatement(stmt: string): void {
   }
 }
 
-async function applyDdl(pool: Pool, statements: string[]): Promise<void> {
-  const ddl = await pool.connect()
+/**
+ * Run schema statements under the shared `qm-next:schema-init` advisory
+ * lock. Concurrent boot DDL races CREATE TABLE IF NOT EXISTS on
+ * pg_catalog.pg_type (duplicate key 23505, pg_type_typname_nsp_index):
+ * two sessions pass the existence check before either commits the type
+ * row. Holding the session-level lock across the whole batch serializes
+ * every schema creator — the eager createPgPool applyDdl and the lazy
+ * DurableMap ensures alike — so the IF NOT EXISTS re-check stays safe.
+ */
+export async function withSchemaLock<T>(
+  pool: Pool,
+  run: (q: (text: string) => Promise<unknown>) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect()
   try {
-    await ddl.query('SELECT pg_advisory_lock(hashtext(\'qm-next:schema-init\'))')
-    for (const stmt of statements) await ddl.query(stmt)
+    await client.query('SELECT pg_advisory_lock(hashtext(\'qm-next:schema-init\'))')
+    try {
+      return await run((text) => client.query(text))
+    } finally {
+      await client.query('SELECT pg_advisory_unlock(hashtext(\'qm-next:schema-init\'))').catch(() => undefined)
+    }
   } finally {
-    await ddl.query('SELECT pg_advisory_unlock(hashtext(\'qm-next:schema-init\'))').catch(() => undefined)
-    ddl.release()
+    client.release()
   }
+}
+
+async function applyDdl(pool: Pool, statements: string[]): Promise<void> {
+  await withSchemaLock(pool, async (q) => {
+    for (const stmt of statements) await q(stmt)
+  })
 }
 
 export function createPgPool(connectionString: string, statements: string[]): PgPool {

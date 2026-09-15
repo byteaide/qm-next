@@ -17,7 +17,7 @@
 
 ## 2. 启动
 
-1. **目标库自举**（空库或升级库）：`databaseUrl` 指向库后启动一次即完成 schema 落地——实体表由各 store 构造器建（`createPgPool` 启动即 DDL），DurableMap 表由组合根 boot 时 warmup（`entries()` 触发建表）。迁移 runbook 第 3 步依赖此行为。
+1. **目标库自举**（空库或升级库）：`databaseUrl` 指向库后启动一次即完成 schema 落地——实体表由各 store 构造器建（`createPgPool` 启动即 DDL），DurableMap 表由组合根 boot 时 warmup（`entries()` 触发建表）。两条 DDL 路径共用 `qm-next:schema-init` advisory lock 串行执行，多实例同时启动安全（并发 `CREATE TABLE IF NOT EXISTS` 会撞 `pg_catalog.pg_type` 唯一索引）。启动中途失败（暖表/listen）会回滚已开资源（runner/app/PG 池全关），不留僵尸进程。迁移 runbook 第 3 步依赖此行为。
 2. profile 装配检查单：`secrets` ≥ 1；`databaseUrl`；`filesDir`；IM 面（`@qm/im-bridge` 的 `ambientPolicySource: 'api'`、飞书凭据）；admin/portal 面（`portalIdentitySecret` / OIDC）。
 3. 健康确认：`/readyz` 返回 `{"ok":true,"components":{"database":"up"}}` 后再放流量。
 4. 交付队列自愈：`deliveries` 表租约到期自动可再认领——崩溃重启不丢投递，无需人工干预。

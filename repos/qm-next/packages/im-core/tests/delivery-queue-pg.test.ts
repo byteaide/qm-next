@@ -47,6 +47,10 @@ test('postgres delivery queue: idempotent enqueue, lease claim, ack', { skip: pg
   await queue.ack(afterLease[0]!.id)
   const stored = await queue.get(afterLease[0]!.id)
   assert.ok(stored?.deliveredAt, 'ack marks delivered')
+  // The un-acked delivery is still inside its 30ms re-claim lease; let it
+  // expire so the assertion isolates the acked row: after expiry only the
+  // un-acked one is claimable — an acked delivery never comes back.
+  await sleep(40)
   assert.equal((await queue.claim('pgtest', { ttlMs: 30, max: 10 })).length, 1, 'acked never re-claims')
 })
 

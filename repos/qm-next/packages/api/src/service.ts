@@ -822,7 +822,27 @@ export class ApiService extends Service<ApiConfig> {
       ...(credentialUsage ? { credentialUsage } : {}),
       crons: () => this.cronsRuntime?.crons,
     }
-    for (const map of pgWarmups) await map.entries()
+    // Partial-boot rollback (20.0): a failed durable boot must not leak pool
+    // sockets — open clients keep the process event loop alive, so a boot
+    // that throws mid-wiring hangs test files and leaves zombie prod boots.
+    const rollbackBoot = async (err: unknown): Promise<never> => {
+      if (this.app) await this.app.close().catch(() => undefined)
+      await runner.stop().catch(() => undefined)
+      for (const store of pgClosers) {
+        try {
+          await store.close?.()
+        } catch (closeErr) {
+          void closeErr
+        }
+      }
+      await pg?.close().catch(() => undefined)
+      throw err
+    }
+    try {
+      for (const map of pgWarmups) await map.entries()
+    } catch (err) {
+      await rollbackBoot(err)
+    }
     const skillPackStore = this.config.skillPacks ? createMemorySkillPackStore() : undefined
     const userModelCredentials = this.config.userModelAuth ? createMemoryUserModelCredentialsStore() : undefined
     const secretDropStore = this.config.secretDrops ? createMemorySecretDropStore() : undefined
@@ -1013,7 +1033,11 @@ export class ApiService extends Service<ApiConfig> {
       { secrets: this.config.secrets },
     )
     this.app = app
-    await app.listen({ port: this.config.port ?? 0, host: this.config.host ?? '127.0.0.1' })
+    try {
+      await app.listen({ port: this.config.port ?? 0, host: this.config.host ?? '127.0.0.1' })
+    } catch (err) {
+      await rollbackBoot(err)
+    }
     const addr = app.server.address()
     if (typeof addr === 'object' && addr !== null) this.address = { port: addr.port, host: addr.address }
     return async () => {

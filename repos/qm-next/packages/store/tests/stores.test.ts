@@ -301,7 +301,10 @@ test(
       await cleanup.end()
     })
     await sessionStoreCases(t, async () => {
-      await cleanup.query('TRUNCATE sessions, session_entries, participants, session_leases')
+      // CASCADE clears the qm-parity FK dependents (tasks/task_events →
+      // sessions) that an earlier boot test (durable-wiring) lands on the
+      // shared per-file database; without it the truncate is refused.
+      await cleanup.query('TRUNCATE sessions, session_entries, participants, session_leases CASCADE')
       return { store, close: async () => undefined }
     })
   },

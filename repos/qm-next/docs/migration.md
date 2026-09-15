@@ -269,7 +269,7 @@ cd repos/qm-next && pnpm rehearsal:migrate
 
 1. **冻结源**：qm 停写（维护页/API 只读），drain 队列（deliveries、context_requests）；处理全部 pending approvals（迁移器此时校验为 0）。
 2. **备份**：`pg_dump` qm 生产库（回滚底线）。
-3. **建目标**：qm-next 以 `databaseUrl` 指向新库启动一次（schema 全量落地），停。
+3. **建目标**：qm-next 以 `databaseUrl` 指向新库启动一次（schema 全量落地），停。多实例并发启动安全：eager DDL 与 DurableMap 暖建共用 `qm-next:schema-init` advisory lock 串行。
 4. **演练值预检**：`--verify-only` 核对缺失表清单 = 预期（无意外 twin gap）。
 5. **dry run**：全量跑一遍看报告表，确认 src/dst 与 twin-gap note 符合预期。
 6. **提交**：`--commit`（记录 journal）；行数校验不过则自动回滚，修正后重跑。

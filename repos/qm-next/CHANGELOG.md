@@ -233,5 +233,11 @@ P5 重新洗牌为四条车道（详见 `todo/tasks/tasks-qm-parity.md` §P5）�
   演练，PASS）+ `scripts/pg-snapshot.sh` 生产快照工具。
 - **迁移器**：`deliveries` 改 drain-check（切换前强制清空，行不携带）；
   `channel_policy(+history)`/`file_artifacts` 进 ENTITY_COPIES 直拷。
+- **boot DDL 竞态修复**：DurableMap 惰性建表与 `createPgPool` eager DDL
+  并发时撞 `pg_catalog.pg_type` 唯一索引（23505 `durable_map_versions`）；
+  两条路径收进共享 `withSchemaLock`（同一 `qm-next:schema-init` advisory
+  lock）串行。配套：组合根 boot 失败（暖表/listen）回滚已开资源，不再
+  泄漏 pool socket 挂死进程；durable-wiring 断言改回 qm-verbatim admin
+  阶梯（缺 scope 400 / 无授权 403，admin 面无 401 级）。
 - **验证**：`pnpm test:pg` 全绿（新增 durable-wiring 端到端表清单断言、
   delivery-queue-pg 契约对拍）；备份还原演练 PASS。

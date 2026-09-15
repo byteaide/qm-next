@@ -97,8 +97,11 @@ test('durable boot: every twin table lands at boot; readyz probes up; monitoring
     admin: true,
     admins: ['admin-user'],
   })
-  const dispose = await svc[Service.init]()
+  // Register cleanup before init: a rejected init must not strand the
+  // pools it already opened (leaked sockets keep the test file alive).
+  let dispose: (() => Promise<void>) | undefined
   t.after(() => dispose?.())
+  dispose = await svc[Service.init]()
 
   const { createPgPool } = await import('@qm/store')
   const check = createPgPool(pgUrl!, [])
@@ -119,6 +122,10 @@ test('durable boot: every twin table lands at boot; readyz probes up; monitoring
   assert.equal(ready.statusCode, 200)
   assert.deepEqual(ready.json(), { ok: true, components: { database: 'up' } })
 
-  const unauthed = await svc.app.inject({ method: 'GET', url: '/v1/admin/monitoring/summary' })
-  assert.equal(unauthed.statusCode, 401, 'monitoring summary rides the admin auth ladder')
+  // The admin ladder is qm-verbatim: missing ?scope= is a 400 before auth,
+  // and an actor without an admin grant is a 403 — there is no 401 rung.
+  const unscoped = await svc.app.inject({ method: 'GET', url: '/v1/admin/monitoring/summary' })
+  assert.equal(unscoped.statusCode, 400, 'monitoring summary rides the admin ladder: missing scope is a 400')
+  const unauthed = await svc.app.inject({ method: 'GET', url: '/v1/admin/monitoring/summary?scope=org:default' })
+  assert.equal(unauthed.statusCode, 403, 'monitoring summary rides the admin ladder: no admin grant is a 403')
 })
