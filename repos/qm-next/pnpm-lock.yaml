@@ -55,6 +55,25 @@ importers:
         specifier: ^5.6.0
         version: 5.9.3
 
+  packages/acl:
+    dependencies:
+      '@qm/admin':
+        specifier: workspace:^
+        version: link:../admin
+      '@qm/store':
+        specifier: workspace:^
+        version: link:../store
+      '@qm/types':
+        specifier: workspace:^
+        version: link:../types
+      pg:
+        specifier: ^8.13.0
+        version: 8.23.0
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.23.1
+
   packages/admin:
     dependencies:
       '@qm/store':
