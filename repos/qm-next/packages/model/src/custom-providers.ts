@@ -149,3 +149,67 @@ export function customModelsJson(): { providers: Record<string, unknown> } | und
     ),
   }
 }
+
+/** Snapshot of the current custom-provider specs (read-only view for admin UI). */
+export function listCustomProviderSpecs(): readonly CustomProviderSpec[] {
+  return providers
+}
+
+/**
+ * Register or replace a single custom provider at runtime (admin path).
+ * Validates the spec, indexes models into the runtime registry, and bumps
+ * the version counter so downstream caches invalidate.
+ */
+export function upsertCustomProvider(spec: CustomProviderSpec): void {
+  validateCustomProviderSpec(spec)
+  // Drop any existing entries for this provider id, then re-add.
+  providers = providers.filter((p) => p.id !== spec.id)
+  providers.push({ ...spec, models: [...spec.models] })
+  // Rebuild registry: keep models from other providers, replace this one.
+  const next = new Map<string, CustomRuntimeModel>()
+  for (const existing of providers) {
+    if (existing.id === spec.id) continue
+    for (const m of existing.models) next.set(m.id, toRuntimeModel(existing, m))
+  }
+  for (const m of spec.models) next.set(m.id, toRuntimeModel(spec, m))
+  registry = next
+  version += 1
+}
+
+/** Remove a custom provider by id; no-op if not present. */
+export function removeCustomProvider(id: string): boolean {
+  const before = providers.length
+  providers = providers.filter((p) => p.id !== id)
+  if (providers.length === before) return false
+  const next = new Map<string, CustomRuntimeModel>()
+  for (const existing of providers) {
+    for (const m of existing.models) next.set(m.id, toRuntimeModel(existing, m))
+  }
+  registry = next
+  version += 1
+  return true
+}
+
+/** In-memory key registry for built-in model providers (api key overrides). */
+const providerKeys = new Map<string, { apiKey: string; setBy?: string; setAt: number }>()
+
+export function listProviderKeys(): Array<{ provider: string; hasApiKey: boolean; setBy?: string; setAt: number }> {
+  return [...providerKeys.entries()].map(([provider, v]) => ({
+    provider,
+    hasApiKey: Boolean(v.apiKey),
+    ...(v.setBy ? { setBy: v.setBy } : {}),
+    setAt: v.setAt,
+  }))
+}
+
+export function getProviderKey(provider: string): string | undefined {
+  return providerKeys.get(provider)?.apiKey
+}
+
+export function setProviderKey(provider: string, apiKey: string, setBy?: string): void {
+  providerKeys.set(provider, { apiKey, ...(setBy ? { setBy } : {}), setAt: Date.now() })
+}
+
+export function deleteProviderKey(provider: string): boolean {
+  return providerKeys.delete(provider)
+}

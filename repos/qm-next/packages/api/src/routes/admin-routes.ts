@@ -16,6 +16,16 @@ import type { SessionStore, RunStore } from '@qm/types'
 import type { CronStore } from '@qm/triggers'
 import { defaultModelForHarness, HARNESS_IDS, selectableCatalogForHarness, builtInModelCatalog } from '../services/model-catalog.ts'
 import {
+  deleteProviderKey,
+  getProviderKey,
+  listCustomProviderSpecs,
+  listProviderKeys,
+  setProviderKey,
+  upsertCustomProvider,
+  removeCustomProvider,
+  type CustomProviderSpec,
+} from '@qm/model'
+import {
   AdminError,
   adminStatusFromGrants,
   type AdminService,
@@ -883,41 +893,135 @@ async function getSlackEmojiList(ctx: ApiRouteContext, deps: AdminDeps): Promise
 async function getModelProviders(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const actorId = await authorizeAdmin(ctx, deps, deps.orgScope)
   if (!actorId) return undefined
-  return notFound(ctx)
+  // D6 fix: previously returned 404 not_found. Now lists built-in providers
+  // (model catalog) and merges runtime overrides from the in-memory key
+  // registry so admins can see which providers have keys set.
+  const builtIn = builtInModelCatalog()
+  const overrides = new Map(listProviderKeys().map((p) => [p.provider, p]))
+  const providers = builtIn.map((m) => {
+    const override = overrides.get(m.provider)
+    return {
+      id: m.provider,
+      name: m.provider,
+      models: [m.id],
+      ...(override?.hasApiKey ? { hasApiKey: true } : {}),
+      ...(override?.setBy ? { setBy: override.setBy } : {}),
+      ...(override?.setAt ? { setAt: override.setAt } : {}),
+    }
+  })
+  return { providers }
 }
 
 async function putModelProvider(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const actorId = await authorizeAdmin(ctx, deps, deps.orgScope)
   if (!actorId) return undefined
-  return notFound(ctx)
+  const provider = String(ctx.params.provider ?? '').trim()
+  if (!provider) return badRequest(ctx, 'provider required')
+  const b = isObj(ctx.body) ? ctx.body : {}
+  const apiKey = typeof b.apiKey === 'string' ? b.apiKey : ''
+  if (!apiKey) return badRequest(ctx, 'apiKey required')
+  // D9 fix: previously returned 404 not_found. Now stores the key override
+  // in the in-memory registry so subsequent model calls can resolve it.
+  setProviderKey(provider, apiKey, actorId)
+  deps.auditLog?.record({
+    at: Date.now(),
+    actor: actorId,
+    scopeId: deps.orgScope,
+    action: 'admin.model_provider.key_set',
+    target: provider,
+  })
+  return sendJson(ctx, 200, { ok: true, provider, setBy: actorId })
 }
 
 async function deleteModelProvider(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const actorId = await authorizeAdmin(ctx, deps, deps.orgScope)
   if (!actorId) return undefined
-  return notFound(ctx)
+  const provider = String(ctx.params.provider ?? '').trim()
+  if (!provider) return badRequest(ctx, 'provider required')
+  // D9 fix: previously returned 404. Now removes the in-memory key override.
+  const removed = deleteProviderKey(provider)
+  if (!removed) return sendJson(ctx, 200, { ok: true, provider, removed: false })
+  deps.auditLog?.record({
+    at: Date.now(),
+    actor: actorId,
+    scopeId: deps.orgScope,
+    action: 'admin.model_provider.key_removed',
+    target: provider,
+  })
+  return sendJson(ctx, 200, { ok: true, provider, removed: true })
 }
 
 async function getCustomProviders(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const actorId = await authorizeAdmin(ctx, deps, deps.orgScope)
   if (!actorId) return undefined
-  return { providers: [] }
+  // D8 fix: previously returned a hardcoded {providers: []}. Now lists the
+  // runtime custom-provider registry so admins see everything they (and
+  // boot-time config) registered.
+  const specs = listCustomProviderSpecs()
+  return {
+    providers: specs.map((s) => ({
+      id: s.id,
+      name: s.name,
+      protocol: s.protocol,
+      baseUrl: s.baseUrl,
+      models: s.models.map((m) => ({ id: m.id, name: m.name ?? m.id })),
+    })),
+  }
 }
 
 async function putCustomProvider(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const actorId = await authorizeAdmin(ctx, deps, deps.orgScope)
   if (!actorId) return undefined
+  const id = String(ctx.params.provider ?? '').trim()
+  if (!id) return badRequest(ctx, 'provider id required in path')
   const b = isObj(ctx.body) ? ctx.body : {}
-  if (typeof b.name !== 'string' || !b.name || typeof b.baseUrl !== 'string' || !b.baseUrl) {
-    return badRequest(ctx, 'name and baseUrl are required')
-  }
-  return notFound(ctx)
+  const name = typeof b.name === 'string' ? b.name.trim() : ''
+  const baseUrl = typeof b.baseUrl === 'string' ? b.baseUrl.trim() : ''
+  if (!name) return badRequest(ctx, 'name required')
+  if (!baseUrl) return badRequest(ctx, 'baseUrl required')
+  const protocol = b.protocol === 'anthropic' ? 'anthropic' : 'openai'
+  const rawModels = Array.isArray(b.models) ? b.models : []
+  if (rawModels.length === 0) return badRequest(ctx, 'at least one model is required')
+  const models = rawModels
+    .filter((m): m is { id?: unknown; name?: unknown } => isObj(m))
+    .map((m) => ({
+      id: typeof m.id === 'string' ? m.id.trim() : '',
+      ...(typeof m.name === 'string' ? { name: m.name } : {}),
+    }))
+    .filter((m) => m.id)
+  if (models.length === 0) return badRequest(ctx, 'every model needs a string id')
+  // D7 fix: previously returned 404 after validation. Now actually
+  // registers the provider in the runtime custom-providers registry.
+  const spec: CustomProviderSpec = { id, name, protocol, baseUrl, models }
+  upsertCustomProvider(spec)
+  deps.auditLog?.record({
+    at: Date.now(),
+    actor: actorId,
+    scopeId: deps.orgScope,
+    action: 'admin.custom_provider.upserted',
+    target: id,
+  })
+  return sendJson(ctx, 201, { ok: true, id, modelCount: models.length })
 }
 
 async function deleteCustomProvider(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const actorId = await authorizeAdmin(ctx, deps, deps.orgScope)
   if (!actorId) return undefined
-  return notFound(ctx)
+  const id = String(ctx.params.provider ?? '').trim()
+  if (!id) return badRequest(ctx, 'provider id required in path')
+  // D7 fix: previously returned 404 not_found. Now removes the provider
+  // from the runtime registry (idempotent — returns ok even if absent).
+  const removed = removeCustomProvider(id)
+  if (removed) {
+    deps.auditLog?.record({
+      at: Date.now(),
+      actor: actorId,
+      scopeId: deps.orgScope,
+      action: 'admin.custom_provider.removed',
+      target: id,
+    })
+  }
+  return sendJson(ctx, 200, { ok: true, id, removed })
 }
 
 type McpServerRedacted = Omit<McpServer, 'bearerToken' | 'clientSecret'> & {

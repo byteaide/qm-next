@@ -612,11 +612,17 @@ await scenario('S6', '长内容 (~10KB) 写入读回', async () => {
 })
 
 await scenario('S6', '特殊字符 / Unicode 写入读回', async () => {
+  // D3 fix: normalizeReplace ensures content ends with \n (POSIX file convention),
+  // so accept either no-trailing-newline input or input that already ends with \n.
+  // We assert the read content matches input up to a possibly-added trailing \n.
   const unicode = '中文 🚀 emoji\n中文标点：，。；「」\n\t\\"quote\\"'
   const put = await req('PUT', '/v1/memory', { principalId: MEM_VIEWER, content: unicode })
   if (put.status !== 200) throw new Error(`put status=${put.status}`)
   const get = await req('GET', `/v1/memory?principalId=${MEM_VIEWER}`)
-  if (get.status !== 200 || get.body.content !== unicode) throw new Error(`mismatch: ${JSON.stringify(get.body.content)}`)
+  if (get.status !== 200) throw new Error(`get status=${get.status}`)
+  const read = get.body.content ?? ''
+  const expected = read === unicode || read === `${unicode}\n` ? unicode : null
+  if (!expected) throw new Error(`mismatch: ${JSON.stringify(read)}`)
   return { ok: true }
 })
 
@@ -1174,7 +1180,10 @@ await scenario('S17', 'admin custom-providers 应包含 sensenova', async () => 
 })
 
 await scenario('S17', 'admin custom-providers PUT (注册新 provider)', async () => {
-  const newId = `${RUN_TAG}-test-provider`
+  // D7 fix: handler is now implemented. Use a slug that passes
+  // validateCustomProviderSpec (/^[a-z][a-z0-9-]{1,31}$/) — was 178953...-test-provider before
+  // the fix exposed the validation rejection.
+  const newId = `qa-test-${Date.now().toString(36).slice(-6)}`
   const { status, body } = await req(
     'PUT',
     `/v1/admin/custom-providers/${newId}`,
@@ -1186,7 +1195,6 @@ await scenario('S17', 'admin custom-providers PUT (注册新 provider)', async (
     },
     adminAuthHeaders,
   )
-  // 已知缺陷 D7：handler 是 stub，校验后返回 notFound
   if (status === 404) throw new Error(`D7 admin custom-providers PUT is stub (returns 404)`)
   if (status !== 200 && status !== 201) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
   return { status, newId }
