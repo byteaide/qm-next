@@ -81,6 +81,11 @@ export class OrchestratorService extends Service implements Orchestrator {
       input.surface,
       conversation.channelName,
     )
+    // D1 fix: register the actor as a session participant so that subsequent
+    // /v1/sessions?principalId=... lookups (which use listByParticipant) include
+    // the session, and POST /v1/sessions/:id/{fork,patch} (which gate on
+    // sessionForViewer) accept the actor.
+    await deps.sessions.addParticipant(session.id, actor.id)
     const leaseAttempt = await deps.sessions.acquireLease(session.id, 'turn')
     if (!leaseAttempt.lease) {
       return { status: 'refused', reason: 'another turn is active for this session' }
