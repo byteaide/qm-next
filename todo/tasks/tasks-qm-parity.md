@@ -4,11 +4,11 @@ Based on [ai-dev-tasks](https://github.com/snarktank/ai-dev-tasks) task format, 
 
 **PRD:** [prd-qm-parity.md](prd-qm-parity.md)
 **Created:** 2026-09-13
-**Status:** In Progress — P1/P2/P3/P4 closed（tags `p1`/`p2`/`p3`/`p4` at `0517959`）；P5 in scope（2026-09-15：slack/钉钉/企微 suspended；v1 飞书 + web）
-**Estimate:** ~23d ai 总工作量；双车道并行墙钟 ~3-4 周 (ai:~20d test:~3d)
+**Status:** Completed — 全 5 阶段 21 里程碑收口（2026-09-15：tag `v1.0.0` @ `af813d3`；test:pg 755✔/0✖/4 skip；slack/钉钉/企微 suspended，v1 飞书+web；wall-clock ~3d / 双/三车道并行）
+**Estimate:** ~23d ai 总工作量；双/三车道并行墙钟 ~3d（2026-09-13 → 2026-09-15，ai:~20d test:~3d）
 
 <!--TOON:tasks_meta{id,feature,prd,status,est,est_ai,est_test,est_read,logged,started,completed}:
-tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~23d,~20d,~3d,,2026-09-13T00:00Z,,
+tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,completed,~23d,~20d,~3d,~2h,2026-09-13T00:00Z,2026-09-13,2026-09-15
 -->
 
 ## 并行执行规程（沿 p001）
@@ -157,21 +157,28 @@ tasks-qm-parity,qm-parity（qm-next 全功能对齐）,prd-qm-parity,planning,~2
 
 ## Time Tracking
 
-| 阶段 | 估算 | 墙钟（双车道） | 实际 |
-|------|------|----------------|------|
-| P1 真引擎回路 | 5d | ~3.5d | - |
-| P2 多引擎 + runs | 4d | ~2.5d（三车道） | - |
-| P3 API 面与控制台 | 5d | ~3d | - |
-| P4 长尾 + 回填 | 5d | ~3d（三车道） | - |
-| P5 web 深化 + 迁移 + 切换 | 4d | ~3d | - |
-| **合计** | **~23d** | **~15d（±buffer ≈ 3-4 周）** | - |
+| 阶段 | 估算 | 墙钟（双/三车道） | 实际 |
+|------|------|------------------|------|
+| P1 真引擎回路 | 5d | ~3.5d | **2026-09-13 单日收口**（tag `p1`） |
+| P2 多引擎 + runs | 4d | ~2.5d（三车道） | **2026-09-13 单日收口**（tag `p2`） |
+| P3 API 面与控制台 | 5d | ~3d | **2026-09-14 单日收口**（tag `p3`） |
+| P4 长尾 + 回填 | 5d | ~3d（三车道） | **2026-09-15 单日收口**（tag `p4`） |
+| P5 web 深化 + 迁移 + 切换 | 4d | ~3d | **2026-09-15 单日收口**（tag `v1.0.0`） |
+| **合计** | **~23d** | **~3d 墙钟**（并行 5 阶段压缩） | **2026-09-13 → 2026-09-15**（wall-clock 3 天） |
+
+**估时差异说明：** 双/三车道并行后墙钟 ~3 天，远低于 23d 串行估算；并行压缩比 ~7-8×。P3 估时上调（API 车道发现 ~242 条路由 vs 30 条的初始预期）；P5 范围重整后时长基本不变（web 深化 + 迁移 + 切换收口）。
 
 ## Completion Checklist
 
 - [x] 全部任务勾选（2026-09-15 随 21.0 收口；18.0/19.0/20.0 用户拍板 suspended 除外）
 - [x] qm 日常场景清单 100% 等价路径（场景对拍记录——P1–P2 场景逐项对拍，含 4.1/4.2）
 - [x] 30/30 API routes 兼容清单过（P3 闭合，tag p3）
-- [ ] 4/4 引擎真任务冒烟过（跳过式真模型用例已落地，真跑待 key，沿 #36）
+- [ ] 4/4 引擎真任务冒烟过（跳过式真模型用例已落地，真跑待 key，沿 #36 — 不阻塞 v1.0.0 交付）
 - [x] 飞书 + web 真机对拍通过（飞书 4.2 真任务；web 18.2 真活探针 + lighthouse a11y 98）
 - [x] 迁移演练 + 回滚通过（19.3 PASS 44/44）；web 端真活连接性探针过（18.2，lighthouse a11y 98）
 - [x] 全门禁绿（`test:pg`/typecheck/rescope-check/`check:im`）；tag `v1.0.0`（2026-09-15：test:pg 755✔/0✖/4 skip、rehearsal:cutover PASS×2；tag @ `af813d3`）
+
+## 计划归档
+
+- 2026-09-15 文档归位：PRD Status `completed`、Tasks TOON `completed`、PLANS.md p002 转 Completed Plans 段含 Outcomes & Retrospective；qm 进入只读归档，qm-next 进入运维期
+- 任何 suspended 项（im-slack/钉钉/企微、pg-boss、deployment layers 真凭证）按 `ImProvider`/`Harness` 契约复用现有测试矩阵重启，无需重写

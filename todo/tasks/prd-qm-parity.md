@@ -1,7 +1,7 @@
 # Product Requirements Document: qm-parity — qm-next 全功能对齐（qm 全功能替身）
 
-<!--TOON:prd{id,feature,author,status,est,est_ai,est_test,est_read,logged}:
-prd-qm-parity,qm-parity（qm-next 全功能对齐）,wxd + AI DevOps,draft,~23d,~20d,~3d,~2h,2026-09-13T00:00Z
+<!--TOON:prd{id,feature,author,status,est,est_ai,est_test,est_read,logged,started,completed}:
+prd-qm-parity,qm-parity（qm-next 全功能对齐）,wxd + AI DevOps,completed,~23d,~20d,~3d,~2h,2026-09-13T00:00Z,2026-09-13,2026-09-15
 -->
 
 ## Overview
@@ -9,9 +9,10 @@ prd-qm-parity,qm-parity（qm-next 全功能对齐）,wxd + AI DevOps,draft,~23d,
 **Feature:** qm-parity — 在 qm-next（cordis 全插件架构）上补齐 qm 全量功能，成为 qm 的生产级全功能替身
 **Author:** wxd + AI DevOps
 **Date:** 2026-09-13
-**Status:** Approved — P1-P4 closed（tag `p4` at `0517959`）；P5 in scope
-**Estimate:** ~23d (ai:~20d test:~3d)；双车道并行墙钟 ~3-4 周
+**Status:** Completed（v1.0.0 @ `af813d3`，2026-09-15；tag 链 `p1`/`p2`/`p3`/`p4` + `v1.0.0`；5 阶段 21 里程碑全收口，PRD 5 项 Open Questions 均已拍板）
+**Estimate:** ~23d (ai:~20d test:~3d)；双/三车道并行墙钟 ~3d（2026-09-13 → 2026-09-15）
 **前置:** p001 qm-next v0.1.0（`e245b5d`，`test:pg` 239/239 基线）
+**归宿:** [PLANS.md p002 Completed 段](../../PLANS.md) 含完整 Outcomes & Retrospective
 
 ### Problem Statement
 
@@ -154,3 +155,5 @@ qm-next 达成与 qm 的功能对等：同一份 qm 生产任务面（真 harnes
 |------|--------|---------|
 | 2026-09-13 | AI DevOps | Initial draft（基于 qm 全量盘点与 v0.1.0 缺口分析） |
 | 2026-09-15 | AI DevOps | P1-P4 关闭（tag `p4` at `0517959`）；P5 范围重整：slack/钉钉/企微 **suspended**，新增 web 深化 + 监控合规生产化车道 |
+| 2026-09-15 | AI DevOps | P5 收口（tag `v1.0.0` @ `af813d3`）：web 深化 + 数据迁移 44/44 PASS + 生产化 PG-twin 接线 + 切换演练 11 checks PASS；PRD 状态归位 `completed`，Open Questions 5 项拍板入档 |
+| 2026-09-15 | AI DevOps | 计划收尾（plan closure）：PRD Status 文本 + TOON status=completed；PLANS.md p002 转 Completed Plans 段，含 Outcomes & Retrospective |
