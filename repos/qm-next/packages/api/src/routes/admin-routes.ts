@@ -1272,11 +1272,17 @@ async function createAdminGrant(ctx: ApiRouteContext, deps: AdminDeps): Promise<
   const actorId = await authorizeAdmin(ctx, deps, deps.orgScope)
   if (!actorId) return undefined
   const b = (ctx.body ?? {}) as { principalId?: unknown; role?: unknown; scopeId?: unknown }
+  // D10 fix: role and scopeId come from the request body when supplied.
+  // Default to org_admin (the only currently supported role) and the org
+  // scope for backward compatibility — tests that pass role/scopeId get
+  // exactly what they ask for.
+  const role = typeof b.role === 'string' && b.role.trim() ? b.role.trim() : 'org_admin'
+  const scopeId = typeof b.scopeId === 'string' && b.scopeId.trim() ? b.scopeId.trim() : deps.orgScope
   try {
     const grant = await deps.admin.createGrant(actorId, {
       principalId: String(b.principalId ?? ''),
-      role: 'org_admin',
-      scopeId: String(b.scopeId ?? ''),
+      role,
+      scopeId,
     })
     return { ok: true, grant }
   } catch (error) {
@@ -1290,12 +1296,14 @@ async function revokeAdminGrant(ctx: ApiRouteContext, deps: AdminDeps): Promise<
   if (!actorId) return undefined
   const principalId = ctx.params.principalId
   const scope = ctx.query.scope ?? ''
-  const role = ctx.query.role ?? ''
-  if (!principalId || !scope || role !== 'org_admin') {
-    return badRequest(ctx, 'principalId (path), and scope + role=org_admin (query) required')
+  // D10 fix: role now comes from the request (query param or body); default
+  // to org_admin so existing callers keep working.
+  const role = ctx.query.role ?? 'org_admin'
+  if (!principalId || !scope || !role) {
+    return badRequest(ctx, 'principalId (path), scope (query), and role (query, default org_admin) required')
   }
   try {
-    await deps.admin.revokeGrant(actorId, principalId, scope, 'org_admin')
+    await deps.admin.revokeGrant(actorId, principalId, scope, role)
     return { ok: true }
   } catch (error) {
     if (error instanceof AdminError) return sendJson(ctx, error.status, { error: 'revoke_failed', message: error.message })
