@@ -56,6 +56,10 @@ export function memoryRoutes(deps: MemoryRoutesDeps): ReadonlyArray<Route> {
       handle: async (ctx) => {
         const principalId = ctx.query.principalId
         if (typeof principalId !== 'string' || !principalId) return badRequest(ctx, 'principalId required')
+        const viewer = viewerOf(ctx)
+        if (!viewer) return badRequest(ctx, 'viewer required')
+        // D2 fix: cross-principalId reads must 404; only your own scope is visible.
+        if (principalId !== viewer) return notFound(ctx)
         if (!deps.memory) return notFound(ctx)
         const head = await deps.memory.head(personalScope(principalId))
         return sendJson(ctx, 200, { content: head.content, revision: head.revision })
@@ -70,6 +74,10 @@ export function memoryRoutes(deps: MemoryRoutesDeps): ReadonlyArray<Route> {
         const body = (ctx.body ?? {}) as Record<string, unknown>
         const principalId = typeof body.principalId === 'string' ? body.principalId : undefined
         if (!principalId) return badRequest(ctx, 'principalId required')
+        const viewer = viewerOf(ctx)
+        if (!viewer) return badRequest(ctx, 'viewer required')
+        // D2 fix: cross-principalId writes are forbidden; you can only write your own scope.
+        if (principalId !== viewer) return notFound(ctx)
         if (typeof body.content !== 'string') return badRequest(ctx, 'content (string) required')
         const scopeId = personalScope(principalId)
         const revision = typeof body.revision === 'string' && body.revision !== '' ? body.revision : undefined
