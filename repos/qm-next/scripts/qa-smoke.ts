@@ -1885,6 +1885,167 @@ await scenario('S31', 'POST /v1/grants/revoke (撤销测试 grant)', async () =>
 })
 
 // ════════════════════════════════════════════════════════════════════════
+// §S32. Connectors OAuth Mock（Phase 3C — 8 用例）
+// ════════════════════════════════════════════════════════════════════════
+console.log('\n§S32 Connectors OAuth Mock')
+
+let consentLinkId: string | undefined
+let consentState: string | undefined
+let consentCode: string | undefined
+let consentHost: string | undefined
+let oauthStartState: string | undefined
+
+await scenario('S32', 'GET /v1/connectors/catalog (mock provider 列表)', async () => {
+  const { status, body } = await req('GET', '/v1/connectors/catalog')
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  const list = Array.isArray(body?.catalog) ? body.catalog : []
+  if (list.length === 0) throw new Error('catalog empty')
+  if (!list.some((p: { id: string }) => p.id === 'google-mock')) throw new Error('google-mock missing')
+  return { status, count: list.length }
+})
+
+await scenario('S32', 'POST /v1/connectors/oauth/consent/mint (创建 consent link)', async () => {
+  // Note: /v1/connectors/oauth/consent/mint uses auth { aud: 'oauth-consent' }.
+  // Lane A has no cap tokens so even a source bearer should reach the
+  // handler (the route falls back to bearer-based auth on lane A).
+  const { status, body } = await req('POST', '/v1/connectors/oauth/consent/mint', {
+    provider: 'google-mock',
+    host: 'google-m.example.test',
+    principalId: 'qa-smoke',
+    redirectUri: 'https://example.test/cb',
+  })
+  if (status === 404) throw new Error(`route not registered (consent links still stub)`)
+  if (status !== 200 && status !== 201) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  consentLinkId = body?.linkId
+  consentState = body?.state
+  if (!consentLinkId || !consentState) throw new Error(`missing linkId/state: ${JSON.stringify(body)}`)
+  consentHost = body?.host
+  return { status, linkId: consentLinkId }
+})
+
+await scenario('S32', 'POST consent/mint 缺参数 → 400', async () => {
+  const { status, body } = await req('POST', '/v1/connectors/oauth/consent/mint', { provider: 'google-mock' })
+  if (status !== 400) throw new Error(`expected 400 got ${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S32', 'POST consent/mint 未知 provider → 404', async () => {
+  const { status, body } = await req('POST', '/v1/connectors/oauth/consent/mint', {
+    provider: 'unknown-mock',
+    host: 'unknown.example.test',
+    principalId: 'qa-smoke',
+    redirectUri: 'https://example.test/cb',
+  })
+  if (status !== 404) throw new Error(`expected 404 got ${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S32', 'GET /v1/connectors/oauth/consent/redeem/:linkId (签发 auth code)', async () => {
+  if (!consentLinkId) throw new Error('no consent link from previous test')
+  const { status, body } = await req('GET', `/v1/connectors/oauth/consent/redeem/${consentLinkId}`)
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (!body?.code || !body?.state) throw new Error(`missing code/state: ${JSON.stringify(body)}`)
+  consentCode = body.code
+  return { status, code: consentCode }
+})
+
+await scenario('S32', 'GET redeem 重复 redeem → 410', async () => {
+  if (!consentLinkId) throw new Error('no consent link')
+  const { status, body } = await req('GET', `/v1/connectors/oauth/consent/redeem/${consentLinkId}`)
+  if (status !== 410) throw new Error(`expected 410 got ${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S32', 'GET redeem 不存在 linkId → 404', async () => {
+  const { status, body } = await req('GET', '/v1/connectors/oauth/consent/redeem/nonexistent-link-id')
+  if (status !== 404) throw new Error(`expected 404 got ${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S32', 'GET /v1/connectors/oauth/:provider/start (返回 authorize URL)', async () => {
+  oauthStartState = `state-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  const { status, body } = await req('GET', `/v1/connectors/oauth/slack-mock/start?state=${encodeURIComponent(oauthStartState)}`)
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (!body?.authorizeUrl || !body?.state) throw new Error(`missing authorizeUrl/state: ${JSON.stringify(body)}`)
+  return { status, authorizeHost: new URL(body.authorizeUrl).host }
+})
+
+await scenario('S32', 'GET /v1/connectors/oauth/:provider/start 缺 state → 400', async () => {
+  const { status, body } = await req('GET', '/v1/connectors/oauth/slack-mock/start')
+  if (status !== 400) throw new Error(`expected 400 got ${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S32', 'GET /v1/connectors/oauth/:provider/start 未知 provider → 404', async () => {
+  const { status, body } = await req('GET', `/v1/connectors/oauth/unknown-provider/start?state=anything`)
+  if (status !== 404) throw new Error(`expected 404 got ${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S32', 'GET /v1/connectors/oauth/:provider/callback (code+state 完整闭环)', async () => {
+  if (!consentCode || !consentState) throw new Error('no consent code/state from previous tests')
+  const res = await fetch(
+    `${baseUrl}/v1/connectors/oauth/google-mock/callback?code=${encodeURIComponent(consentCode)}&state=${encodeURIComponent(consentState)}`,
+  )
+  const text = await res.text()
+  let parsed: any; try { parsed = JSON.parse(text) } catch { parsed = text }
+  if (res.status !== 200) throw new Error(`status=${res.status} body=${JSON.stringify(parsed)}`)
+  if (parsed?.provider !== 'google-mock') throw new Error(`expected google-mock got ${JSON.stringify(parsed)}`)
+  return { status: res.status, provider: parsed.provider }
+})
+
+await scenario('S32', 'GET callback 错 code → 400', async () => {
+  const { status, body } = await req('GET', `/v1/connectors/oauth/google-mock/start?state=test-state`)
+  if (status !== 200) throw new Error(`setup failed: status=${status}`)
+  const res = await fetch(`${baseUrl}/v1/connectors/oauth/google-mock/callback?code=wrong-code&state=test-state`)
+  const text = await res.text()
+  let parsed: any; try { parsed = JSON.parse(text) } catch { parsed = text }
+  if (res.status !== 400) throw new Error(`expected 400 got ${res.status} body=${JSON.stringify(parsed)}`)
+  return { status: res.status }
+})
+
+await scenario('S32', 'POST /v1/connectors/token (手动注册 token → status 应含 host)', async () => {
+  const { status, body } = await req('POST', '/v1/connectors/token', {
+    host: 'google-m.example.test',
+    principalId: 'qa-smoke',
+    accessToken: 'phase3c-mock-token',
+    accountType: 'default',
+  })
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  // Now check status reflects the token
+  const check = await req('GET', '/v1/connectors/oauth/status?principalId=qa-smoke')
+  if (check.status !== 200) throw new Error(`status check failed: ${check.status}`)
+  const providers = check.body?.providers ?? {}
+  const googleEntry = providers['google-mock']
+  if (!googleEntry || !googleEntry.hasToken) throw new Error(`google-mock should have hasToken=true after POST token, got ${JSON.stringify(googleEntry)}`)
+  return { status, hasToken: googleEntry.hasToken }
+})
+
+await scenario('S32', 'GET /v1/connectors/oauth/status (空 principal → 400)', async () => {
+  const { status, body } = await req('GET', '/v1/connectors/oauth/status')
+  if (status !== 400) throw new Error(`expected 400 got ${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S32', 'POST /v1/connectors/oauth/revoke (按 host 删 token → status hasToken=false)', async () => {
+  const { status, body } = await req('POST', '/v1/connectors/oauth/revoke', {
+    principalId: 'qa-smoke',
+    host: 'google-m.example.test',
+  })
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  const check = await req('GET', '/v1/connectors/oauth/status?principalId=qa-smoke')
+  const googleEntry = check.body?.providers?.['google-mock']
+  if (googleEntry?.hasToken !== false) throw new Error(`google-mock should have hasToken=false after revoke, got ${JSON.stringify(googleEntry)}`)
+  return { status, hasToken: googleEntry?.hasToken }
+})
+
+await scenario('S32', 'POST revoke 缺 principalId → 400', async () => {
+  const { status, body } = await req('POST', '/v1/connectors/oauth/revoke', { host: 'google-m.example.test' })
+  if (status !== 400) throw new Error(`expected 400 got ${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+// ════════════════════════════════════════════════════════════════════════
 // 汇总报告
 // ════════════════════════════════════════════════════════════════════════
 
@@ -1924,6 +2085,7 @@ const sectionTitles: Record<string, string> = {
   S29: 'Admin provider 写 (D6-D9 回归)',
   S30: 'Sessions 详情 (Fork/Entries)',
   S31: 'User misc (Surface-config/Pin/Soul/Grants revoke)',
+  S32: 'Connectors OAuth Mock (Phase 3C)',
 }
 
 console.log('')
