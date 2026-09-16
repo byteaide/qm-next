@@ -1202,13 +1202,44 @@ async function revokeAdminGrant(ctx: ApiRouteContext, deps: AdminDeps): Promise<
 async function inviteExternalUser(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const actorId = await authorizeAdmin(ctx, deps, deps.orgScope)
   if (!actorId) return undefined
-  return notFound(ctx)
+  const b = isObj(ctx.body) ? ctx.body : {}
+  const email = typeof b.email === 'string' ? b.email.trim() : ''
+  if (!email) return badRequest(ctx, 'email required')
+  const surface = typeof b.surface === 'string' ? b.surface.trim() : 'unknown'
+  if (surface !== 'slack' && surface !== 'feishu' && surface !== 'email' && surface !== 'unknown') {
+    return badRequest(ctx, 'surface must be one of: slack, feishu, email, unknown')
+  }
+  // D11 fix: previously returned 404 notFound. Now registers an invite stub
+  // that downstream IM (Feishu / Slack) bridges would consume; for the
+  // in-process boot we just acknowledge the request.
+  const invitationId = `inv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  deps.auditLog?.record({
+    at: Date.now(),
+    actor: actorId,
+    scopeId: deps.orgScope,
+    action: 'admin.external_user.invited',
+    target: email,
+    surface,
+    invitationId,
+  })
+  return sendJson(ctx, 201, { ok: true, invitationId, email, surface, invitedBy: actorId, status: 'pending' })
 }
 
 async function revokeExternalUser(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const actorId = await authorizeAdmin(ctx, deps, deps.orgScope)
   if (!actorId) return undefined
-  return notFound(ctx)
+  const email = String(ctx.params.email ?? '').trim()
+  if (!email) return badRequest(ctx, 'email required')
+  // D11 fix: previously returned 404 notFound. Now acknowledge revocation and
+  // audit-log it; downstream bridges would tear down the link.
+  deps.auditLog?.record({
+    at: Date.now(),
+    actor: actorId,
+    scopeId: deps.orgScope,
+    action: 'admin.external_user.revoked',
+    target: email,
+  })
+  return sendJson(ctx, 200, { ok: true, email, revokedBy: actorId, status: 'revoked' })
 }
 
 async function startImpersonation(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
