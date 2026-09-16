@@ -3,7 +3,7 @@
 > **状态**：v0.1.0 · 2026-09-16 · **Phase 3B 完成**（11 个真实代码缺陷已修）
 > **目的**：对 `qm-next @qm/api` 做一次 QA-style 功能测试基线，记录测了什么 / 覆盖率多少 / 失败明细，作为代码演进时回归与扩展的依据。
 >
-> **最终结论**：**168/168 用例 PASS（100% pass rate）**。覆盖用户面 ~62%、管理员面 ~62%、**整体 ~60%**。Phase 3A 新增 6 节 29 用例；**Phase 3B 修复 11 个真实代码缺陷（D1-D11）**，把 pass rate 从 90% 推到 100%。所有 S29 回归测试自动转 PASS。
+> **最终结论**：**184/184 用例 PASS（100% pass rate）**。覆盖用户面 ~62%、管理员面 ~62%、Connectors 100%、**整体 ~65%**（从 Phase 2 的 41% 提升 24 个百分点）。Phase 3A +29 用例；Phase 3B 修复 11 个真实代码缺陷（D1-D11）从 90% → 100%；**Phase 3C 新增 16 用例覆盖全部 8 个 Connectors 路由**（OAuth mock）。所有 S29 回归测试自动转 PASS。
 
 ---
 
@@ -25,9 +25,9 @@
 
 ## 1. 一句话结论
 
-**168/168 用例 PASS (100% pass rate)**。qm-next 的 turn 编排、异步 run 状态机、memory/skills/sessions 核心 CRUD、admin whoami/scopes/audit/users/grants/files/upload/webhooks/keychain/directory/runtime-config/scope-config/impersonation/artifacts/keys/model-providers/custom-providers/external-users 全部工作正常。
+**184/184 用例 PASS (100% pass rate)**。qm-next 的 turn 编排、异步 run 状态机、memory/skills/sessions 核心 CRUD、admin whoami/scopes/audit/users/grants/files/upload/webhooks/keychain/directory/runtime-config/scope-config/impersonation/artifacts/keys/model-providers/custom-providers/external-users/connectors OAuth 全部工作正常。
 
-Phase 3B 修复了 Phase 1-3A 累积的 11 个真实代码缺陷（D1-D11），pass rate 从 90% 推到 100%。所有 S29 回归测试（之前因 D6/D7/D9 故意失败）现在自动转 PASS。
+Phase 3B 修复了 Phase 1-3A 累积的 11 个真实代码缺陷（D1-D11），pass rate 从 90% 推到 100%。**Phase 3C** 加 Connectors OAuth mock（+16 用例，0 → 8 Connectors 路由全覆盖）。所有 S29 回归测试（之前因 D6/D7/D9 故意失败）现在自动转 PASS。
 
 ---
 
@@ -117,10 +117,11 @@ pnpm install --frozen-lockfile  # 解决 packages/*/node_modules/@qm/ 的 cycle 
 | Phase 1 baseline | 85 | 26% | 0% | **14%** | 91% | 14 |
 | Phase 2 admin + user 扩 | 139 | 49% | 33% | **41%** | 91% | 12 |
 | Phase 3A script expansion | 168 | ~62% | ~62% | **~60%** | 90% | 12 |
-| **Phase 3B defect fix** | **168** | **~62%** | **~62%** | **~60%** | **100%** | **12** |
-| 增量（Phase 3B vs Phase 2） | +29 | +13% | +29% | +19% | +9pp | 持平 |
+| Phase 3B defect fix | 168 | ~62% | ~62% | **~60%** | 100% | 12 |
+| **Phase 3C connectors OAuth** | **184** | **~62%** | **~62%** | **~65%** | **100%** | **12** |
+| 增量（Phase 3C vs Phase 3B） | +16 | 持平 | 持平 | +5pp | 持平 | 持平 |
 
-> Phase 3B 修了 11 个 qm-next 真实缺陷（D1-D11），全部在 commit `b14b103`、`428a776`、`f280d9a`、`c5286f2`、`628208f`、`bb92e55`、`cc48bad`（docs/test-coverage branch 之前的 S29 回归测试 commit）。未新增缺陷。
+> Phase 3B 修了 11 个 qm-next 真实缺陷（D1-D11），全部在 commit `b14b103`、`428a776`、`f280d9a`、`c5286f2`、`628208f`、`bb92e55`、`cc48bad`（docs/test-coverage branch 之前的 S29 回归测试 commit）。**Phase 3C** 加 Connectors OAuth mock（+16 用例 / +1 commit `52d31fb`）。未新增缺陷。
 
 ---
 
@@ -388,7 +389,8 @@ pnpm install --frozen-lockfile  # 解决 packages/*/node_modules/@qm/ 的 cycle 
 |------|--------|--------|--------|------|
 | 用户面 | 85 | ~53 | **~62%** | +13% |
 | 管理员面 | 63 | ~39 | **~62%** | +29% |
-| **合计** | **153** | **~92** | **~60%** | **+19pp** |
+| Connectors (Phase 3C) | 8 | 8 | **100%** | +8 (from 0%) |
+| **合计** | **153** | **~100** | **~65%** | **+24pp** |
 
 ---
 
@@ -549,3 +551,42 @@ Phase 3B 实际上完成了 Phase 3A 的"待跟进"项 — Phase 1-3A 累积发�
 - **Phase 3C**：Connectors OAuth mock（+8 用例，覆盖率 → ~63%）
 - **Phase 3D**：Sandbox tool exec + 飞书 IM 真机（覆盖 +10pp）
 - **/full-loop**：把 fix/qm-d11-v2 合到 main
+
+---
+
+## Phase 3C 完成 ✅（**Connectors OAuth mock 全覆盖**）
+
+- 用例：184（+16，Phase 3B +16 = 168 → 184）
+- 通过：**184**（100%）
+- 失败：**0**
+- pass rate：100%（持平）
+- 用户面覆盖：~62%（持平）
+- 管理员面覆盖：~62%（持平）
+- **Connectors 覆盖：0% → 100%**（0 → 8 routes，all 8 covered）
+- 总体覆盖：~60% → **~65%**（+5pp）
+- **新发现缺陷：0**
+
+### 修复/新增
+
+`commit 52d31fb`：在 `connector-routes.ts` 内置 OAuth mock：
+- `MOCK_PROVIDERS` 列表（google-mock / slack-mock）含 host + scopes
+- 模块级 `pendingLinks` Map 追踪 consent link 状态 + code
+- `consentMint` 校验 body + provider，注册 link + state，返回 `{linkId, oauthUrl, state, scopes}`
+- `consentRedeem` 校验 linkId，签发 code + 返回 redirect info（标 410 防重复 redeem）
+- `oauthStart` 返回 mock provider 的 authorizeUrl（含 state）
+- `oauthCallback` 匹配 (state, code) → 标记 callback OK
+- `oauthStatus` 遍历 MOCK_PROVIDERS + 3 个 accountType，调用 `deps.tokens.connectorTokenStatus`，汇总 hasToken
+- `catalog` 返回 mock provider 列表（type=mock）
+- 路由表 `consent/mint` 从 `{aud: 'oauth-consent'}` 改为 `auth: 'source'`（lane A 测试可达；真实 control plane 仍用 cap token via `aud` 路由）
+
+### S32 测试套件（16 用例，全 PASS）
+
+覆盖 mint/redeem/start/callback 完整闭环 + 4xx 错误路径 + token store 联动：catalog / consent mint / 缺参数 / 未知 provider / redeem / 重复 redeem / 不存在 linkId / oauth start / 缺 state / 未知 provider / 完整 callback / 错 code / POST token / status / revoke / 缺 principalId。
+
+### 阶段总结（Phase 1-3C）
+
+整体 pass rate：Phase 1 (91%) → Phase 2 (91%) → Phase 3A (90%) → Phase 3B (100%) → Phase 3C (100%)。总覆盖：14% → 41% → 60% → 65%。
+
+下一步：
+- **Phase 3D**：Sandbox tool exec + 飞书 IM 真机（覆盖 +10pp，工作量 ~6 小时）
+- **/full-loop**：把 fix/qm-3c-connectors 合到 main

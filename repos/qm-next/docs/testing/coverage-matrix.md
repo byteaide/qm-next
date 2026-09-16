@@ -15,7 +15,7 @@
 |----|----|
 | 被测对象 | `qm-next @qm/api`（Fastify HTTP 入口 + 编排 + Stores + Memory + Skills + Custom Providers + Admin） |
 | 测试方式 | 单 boot `ApiService`，mint 两个 token（admin + 普通 user），逐条路由打请求，断言状态码 + 响应体 |
-| 不测范围 | 飞书 IM 真机 / Sandbox 工具执行 / Postgres 持久化对拍 / Connectors OAuth / Triggers cron — 都需要额外基础设施，下文 §6 详述 |
+| 不测范围 | 飞书 IM 真机 / Sandbox 工具执行 / Postgres 持久化对拍 / Triggers cron — 都需要额外基础设施，下文 §6 详述。**Connectors OAuth 通过 Phase 3C mock 已覆盖。** |
 | 数据隔离 | `${Date.now()}-${rand}` 作为 run tag，所有 threadRef / memory principal / skill name 加前缀，避免跨次运行污染 |
 | 模型调用 | 12 次（flash-lite 天然 flaky，用子串匹配 + 重试 2 次；触 429 时改用 mock harness） |
 | **当前总体覆盖** | **~60%**（用户面 ~62% / 管理员面 ~62%） |
@@ -100,15 +100,15 @@ qm-next 通过 `/v1/*` 暴露给最终用户的入口。共扫描到约 35 条�
 | 45 | `/v1/keychain/drops` | POST | either | ✅ 已覆盖（验证 cap 需求 401） | S26.5 |
 | 46 | `/v1/keychain/drops/:id/form` | GET | source | ❌ 未覆盖 | — |
 | 47 | `/v1/keychain/drops/:id` | POST | source | ❌ 未覆盖 | — |
-| **Connectors（OAuth · 需要第三方）** ||||||
-| 48 | `/v1/connectors/oauth/consent/mint` | POST | {aud} | 🚫 排除（需要外部 OAuth provider） | — |
-| 49 | `/v1/connectors/oauth/consent/redeem/:linkId` | GET | source | 🚫 排除 | — |
-| 50 | `/v1/connectors/oauth/status` | GET | source | 🚫 排除 | — |
-| 51 | `/v1/connectors/oauth/revoke` | POST | either | 🚫 排除 | — |
-| 52 | `/v1/connectors/token` | POST | source | 🚫 排除 | — |
-| 53 | `/v1/connectors/catalog` | GET | source | 🚫 排除 | — |
-| 54 | `/v1/connectors/oauth/:provider/start` | GET | source | 🚫 排除 | — |
-| 55 | `/v1/connectors/oauth/:provider/callback` | GET | source | 🚫 排除 | — |
+| **Connectors（OAuth mock · Phase 3C）** ||||||
+| 48 | `/v1/connectors/oauth/consent/mint` | POST | source (Phase 3C 由 `aud: oauth-consent` 改为 source 以便 lane A 测试) | ✅ 已覆盖（**Phase 3C**：mock mint + state 生成） | S32.2 |
+| 49 | `/v1/connectors/oauth/consent/redeem/:linkId` | GET | source | ✅ 已覆盖（**Phase 3C**：mock code 签发 + 防双花 410） | S32.5, S32.6, S32.7 |
+| 50 | `/v1/connectors/oauth/status` | GET | source | ✅ 已覆盖（**Phase 3C**：遍历 MOCK_PROVIDERS + token store） | S32.13, S32.15 |
+| 51 | `/v1/connectors/oauth/revoke` | POST | either | ✅ 已覆盖（**Phase 3C**：通过 host 删除 3 accountType 全部 tokens） | S32.15, S32.16 |
+| 52 | `/v1/connectors/token` | POST | source | ✅ 已覆盖（已可用 + Phase 3C 验证与 status 联动） | S32.13 |
+| 53 | `/v1/connectors/catalog` | GET | source | ✅ 已覆盖（**Phase 3C**：返回 mock provider 列表） | S32.1 |
+| 54 | `/v1/connectors/oauth/:provider/start` | GET | source | ✅ 已覆盖（**Phase 3C**：返回 mock authorizeUrl） | S32.8, S32.9, S32.10 |
+| 55 | `/v1/connectors/oauth/:provider/callback` | GET | source (raw public) | ✅ 已覆盖（**Phase 3C**：state+code 校验；mock 闭环） | S32.11, S32.12 |
 | **Directory / Reach** ||||||
 | 56 | `/v1/directory` | POST (sync push) | source | ✅ 已覆盖（mock Slack workspace） | S23.2 |
 | 57 | `/v1/directory/meta` | GET | source | ✅ 已覆盖 | S23.1 |
@@ -289,7 +289,7 @@ qm-next 的 admin 入口全部在 `/v1/admin/*`，共 63 条路由。**当前覆
 | **S30** | Sessions 详情 (Fork/Entries) | 3 | POST fork / GET entries/:seq | ✅ 完成（**D1 修复**） |
 | **S31** | User misc | 5 | surface-config / channel-header-pin GET+PUT / soul / grants revoke | ✅ 完成 (Phase 3A) |
 
-**总计**：168 用例 · **12 次模型调用 · 实际耗时 ~3.5 分钟**
+**总计**：184 用例（Phase 3C +16 Connectors）· **12 次模型调用 · 实际耗时 ~3.5 分钟**
 
 ---
 
