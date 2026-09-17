@@ -74,16 +74,19 @@ index.html 预绘制脚本)。
 ```
 i18n/
   index.ts        # Locale 类型、当前 locale 状态、t()、LocaleController、切换事件
-  ui.en.ts        # 界面词表英文(en 原文即 key,无需英文文件时可省——直接以 key 为文案)
+  ui.en.ts        # 界面词表英文(en 原文即 key)。必须存在:作为单一事实源,
+                  # 模板里的 key 必须在此登记,parity 测试才有意义
   ui.zh.ts        # 界面词表中文,按页面 namespace 分组(chats/composer/sessions/...)
-  errors.en.ts    # 错误码 → 英文(可选,默认回退响应原文)
-  errors.zh.ts    # 61 个错误码 → 中文
+  errors.zh.ts    # 错误码 → 中文(61 码;查不到的码回退后端原文)
 ```
 
 - `t(key, params?)`:`{name}` 占位符插值,覆盖 `"Open the ${o.crumb} project"`
   类模板(`session-scope.ts:104`);提供极简 `tPlural(count, one, other)` 处理英文复数
-- 词表为 TS 对象,`satisfies Record<string, string>` 类型约束;CI 测试校验
-  en/zh key 全对齐(防漂移)
+- 词表为 TS 对象,`satisfies Record<string, string>` 类型约束;类型层面由
+  `ui.zh.ts satisfies Record<keyof typeof uiEn, string>` 强制 zh 覆盖全部 en key,
+  另有 node:test 对齐测试双保险(P4)
+- 依赖方向:`i18n/` 不导入 `core-bridge.ts` 等上层模块(词表是叶子模块);
+  `core-bridge.ts` 可以导入 `i18n/`
 - `LocaleController(host)`:~30 行 ReactiveController,订阅 locale 变更事件触发
   `host.requestUpdate()` —— Lit 切语言即时重渲染的标准做法
 - 持久化完全照抄 theme.ts:localStorage `qm.locale`;首次默认
@@ -97,8 +100,11 @@ i18n/
 
 - `core-bridge.ts` `api()`(唯一改动点):构造 `ApiError` 时新增
   `displayMessage = errors[body.error] ?? message`;原始 message 保留
-- `errMessage(e)`(chassis/errors.ts):`ApiError` 分支返回 `displayMessage`;
-  原始英文 message 转 `console.debug` 供调试
+- `errMessage(e)`(chassis/errors.ts):返回值优先取错误对象上的
+  `displayMessage` 属性(**结构性检查**,不 import ApiError 类型——chassis 是被
+  core-bridge 依赖的底层模块,反向导入会成环);原始英文 message 转
+  `console.debug` 供调试。改动 ~4 行;chassis 源自 qm 上游 vendored
+  (plugins/chassis,原逐字节相同),此处为记录在案的有意分叉
 - 词表策略:
   - 专属码(~60 个)→ 精确中文文案(deploy_failed → "部署失败"等)
   - 通用码(~10 个)→ 泛化文案(bad_request → "请求无效",not_found → "资源不存在");
@@ -120,11 +126,22 @@ message 两类来源(pi-harness.ts:808-828):
 
 ### 4.4 Portal(服务端 HTML)
 
-- SPA 切换语言时写 cookie `qm.locale`(portal 与 SPA 同域)
+- SPA 切换语言时写 cookie `qm.locale`(portal 与 SPA 同源,均注册在同一
+  Fastify app 上,cookie 直接可读;portal 已有 `cookieDomain` 机制可复用)
 - portal-routes.ts 模板按 cookie 取词表,缺省回退 `Accept-Language`,再回退 en
-- ~15 条文案,独立小词表模块放 portal 包内;页面 `<html lang>` 同步
+- ~15 条文案,独立小词表模块放 portal 包内;页面 `<html lang>`
+  (portal-routes.ts:221)按所选 locale 输出
+- 约束:portal 登录页 CSP 按 sha256 校验内联脚本(admin-login.test.ts:60),
+  i18n 只改文本节点,**不得改动内联脚本**,否则要重算 hash
 
-### 4.5 日期/数字
+### 4.5 已知不可译范围(明示)
+
+- `@earendil-works/pi-web-ui`(npm 依赖,0.75.3)组件内部自带的英文文案
+  不在本方案范围内——外部包内部不可注入词表;本方案只负责我们自己渲染的文本。
+  实际影响面小(设计系统组件多为结构元素),若发现用户可见的英文残留再单独评估
+- LLM/agent 输出内容(见 §1 非目标)
+
+### 4.6 日期/数字
 
 `cron-format.ts`、`toLocaleString` 调用点传入已解析 locale;随 Phase 3 各文件
 清扫顺带处理,不单独立项。
@@ -133,14 +150,29 @@ message 两类来源(pi-harness.ts:808-828):
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| P1 基建 | i18n/ 目录、t()、LocaleController、qm.locale 持久化、预绘制脚本、设置菜单切换器 | 切换语言即时生效并持久化;`<html lang>` 跟随;刷新后保持 |
-| P2 错误通道 | errors 词表(61 码)、api() displayMessage、errMessage 改造、turn_failure/type 映射 | 401/404/bad_request/业务专属码错误横幅全中文;英文原文仅 console |
-| P3 静态文案清扫 | document-title → 按文件从大到小:chat(86)、contexts(52)、composer(45)、sessions(43)、deploys(41)、crons(35)、skills(33)、connectors(28)、其余;含 aria/placeholder 与日期 locale | 模板内 `rg '>[A-Z][a-z]+ [a-z]+'` 与 `"(title\|aria-label\|placeholder)="\[A-Z\]` 命中 ≈ 0(注释除外) |
-| P4 Portal + 防漂移 | portal cookie/词表;en/zh key 对齐测试;残留英文扫描脚本进 CI | portal 页面跟随语言;词表对齐测试绿 |
+| P1 基建 | i18n/ 目录、t()、LocaleController、qm.locale 持久化、预绘制脚本、设置菜单切换器 | `pnpm --filter @qm/web-ui typecheck:app` 绿;vite dev 手动验证:切换即时生效并持久化、`<html lang>` 跟随、刷新后保持 |
+| P2 错误通道 | errors 词表(61 码)、api() displayMessage、errMessage 改造(~4 行,结构性检查)、turn_failure/type 映射 | 浏览器验证 401/404/bad_request/业务专属码错误横幅全中文;英文原文仅 console.debug |
+| P3 静态文案清扫 | document-title → 按文件从大到小:chat(86)、contexts(52)、composer(45)、sessions(43)、deploys(41)、crons(35)、skills(33)、connectors(28)、其余;含 aria/placeholder 与日期 locale | `rg '>[A-Z][a-z]+ [a-z]+'` 与 `"(title\|aria-label\|placeholder)="\[A-Z\]` 命中人工核对后无真实文案残留(扫描有误报,如代码示例文本);每文件提交粒度 |
+| P4 Portal + 防漂移 | portal cookie/词表(不动内联脚本);en/zh key 对齐测试;残留英文扫描 | portal 页面跟随语言;`pnpm test` 全绿(含新增 i18n 对齐测试) |
 | P5(备选) | Admin 控制台(index.html 14.9k 行) | 另立方案,不复用本文件范围 |
 
 估算:P1+P2 合计约 1~1.5 天;P3 为体力清扫,约 2~3 天(AI 可批量执行,
-每文件提交粒度,便于 review 与回滚)。
+每文件提交粒度,便于 review 与回滚);P4 约 0.5 天。
+
+## 5.1 测试与质量门(影响范围评估结论)
+
+- **现有测试全部不受影响**:后端各包与 portal 的测试(node:test,
+  `packages/*/tests/*.test.ts`)断言的是状态码/响应头/cookie/数据形状,
+  不断言英文文案;后端代码零改动。portal 登录页测试校验 CSP hash——P4 不动
+  内联脚本即不受影响
+- **前端现状零测试**:app/ 无测试目录,仓库无 Lit 组件测试基建。本方案**不引入**
+  组件测试框架(避免新增重依赖);防漂移靠:类型约束(zh 覆盖全部 en key)+
+  新增 `packages/web-ui/tests/i18n.test.ts`(node:test,校验词表对齐与 t() 形状,
+  node 可直接 import TS 词表)+ P3 扫描
+- **质量门**:`typecheck:app`(tsc -p tsconfig.app.json --noEmit,已存在的
+  script)每阶段必跑;`pnpm test` 在 P4 后全量跑;`vite build` 确认产物正常
+- **文档**:本文件随评审修订;P3 收尾时在项目 AGENTS.md 补一条约定
+  "新增 UI 文案必须走 t(),不得在模板里裸写英文"(后续项,不阻塞)
 
 ## 6. 风险与后续
 
