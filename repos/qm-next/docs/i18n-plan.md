@@ -274,3 +274,26 @@ auth 正则(避免 authorization_pending 误判)。
 已知限制:catch 时即烘进 state 的错误字符串(如 composer 报错)在 locale
 切换后保持原语言,下次同类错误生效;错误对象经 `displayMessage` getter
 的路径不受影响。
+
+### P3 静态文案清扫(进行中——sessions.ts 试点完成)
+
+第一批改:`packages/web-ui/app/src/sessions.ts`(57 行命中估算中
+~30 实际翻译文本,涵盖分组标题/操作菜单/空态/搜索/状态指示/重命名/
+批量操作/颜色/多选;共新增 30 个 ui key,登记于 `ui.en.ts` + `ui.zh.ts`,
+`{name}` / `{n}` / `{c}` 占位走 `t()` 插值,`s.pinned ? t("Unpin") : t("Pin")`
+等三元全部改为 t() 形式)。其余文件(contexts/composer/chat/deploys/
+crons/skills/connectors 等)按相同流程,每文件一提交。
+
+验证:
+
+- `typecheck:app` 绿;`vite build` 通过;i18n 测试 5/5;web-ui 既有测试
+  15/15 全过(共 20/20)
+- 浏览器实测(portal 前门 127.0.0.1:52242,dev 栈):
+  - zh 状态:`region "Personal 项目"` / `button "Personal 的操作"` /
+    `button "在 Personal 中发起新聊天"` / `暂无会话。`
+  - 切 en(无需刷新):`region "Personal project"` / `button "Options for Personal"` /
+    `button "New chat in Personal"` / `No conversations yet.`
+  - 截图:`i18n-p3-sessions-zh.png` / `i18n-p3-sessions-en.png`
+- main.ts onLocaleChange 已挂监听(renderList + conv.redraw +
+  refreshActiveView),新文案由 t() 在 render 时解析,自动响应 locale 切换,
+  sessions.ts 内部无需独立挂监听(本文件 import 已精简为 `t` 单导出)
