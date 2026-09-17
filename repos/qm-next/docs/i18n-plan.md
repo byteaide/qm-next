@@ -527,3 +527,57 @@ P2 已有)/`Refresh`(P3 crons)。
     variable` + `optional` / `Purpose` / `What may the agent use this
     credential for?` / `Cancel` / `Continue`
   - 截图:`i18n-p3-connectors-zh.png` / `i18n-p3-connectors-en.png`
+
+第八批改:`packages/web-ui/app/src/chat.ts`
+(2377 行,P3 最大文件,估 86 命中,实际 ~90 处 + ~112 新 key;P2 已覆盖
+错误通道,本批覆盖其余 UI:8 处 errMessage fallback(无法开始对话/发送
+审批/接续排队/重连任务/重试消息/分叉对话/加载后台活动/加载完整输出)/
+只读横幅(该对话位于 Slack 中…/在 Slack 中打开/此对话在此处只读)/
+Show earlier messages 三处(含 btn.textContent 动态赋值)/空态(此对话
+中没有可读的消息。)/**欢迎语整段**(你好——我是你的 AI 队友 👋…单条
+key 含 \n\n,markdown 渲染)/pane 条(展开此面板/当前/等待你审批/
+思考中…)/拖放覆盖层(拖放文件或文件夹以附加)/顶栏(New chat 复用/
+another conversation/Read-only 复用 P1/刷新对话)/steered 标注/Retry
+复用/Stopped/消息 meta(复制/复制消息/从此处分叉对话)/connector
+widget(已连接 {name}/已授权…/连接 {name}/在新标签页中授权访问/你的
+账号)/playground(预览操作 aria + Source/Open 复用)/Thinking 摘要与
+typing 占位/后台面板(expiring/剩 {n} 分钟/剩 {h} 小时 {m} 分钟/隐藏
+后台活动/工作正在代理的电脑上继续——点击查看/后台活动/这里已经没有在
+运行的任务了。/已退出({code})/隐藏输出/显示实时输出/开始于 {time}/
+(暂无输出)/正在加载输出…/定时任务 — {title}/计划任务/下次触发
+{time}/已暂停/现在到期/{n} 分钟后/{h} 小时 {m} 分钟后/{n} 天后/匹配
+/{pattern}/ 的输出/任何新输出/监视——在{what}时唤醒/布防于 {time}/
+上次触发于 {time})/live work dock(收起/展开更多/思考中(已用 {n} 个
+工具)/{verb}被中断——正在恢复…/已中断——正在恢复…/{label} · {secs} 秒/
+工作中 · {secs} 秒/已完成工作/{n} 次工具调用/{secs} 秒后失败/失败/
+{label}——已中断/{n} 次尝试)/审批卡(需要审批/原因/触发于/显示完整
+命令)/TOOL_META 27 个 active/done/attempted 键(运行命令/读取文件/
+写入文件/发布中/搜索记忆/使用记忆/搜索历史/管理进程 + 未知工具)在
+**用点包 t()**(表格数据保持英文 msgid,locale 切换实时生效)/toolDetail
+计数({n} 个结果/已保存 {n} 条)/exec 输出卡(退出码 {code}/ · 超时/
+显示完整输出))。
+
+复用 key:`New chat` / `Retry` / `Open` / `Source` / `Read-only`(P1)
+/`Loading…`/`Cancel`。
+
+实现要点:
+
+- `TOOL_META`/`UNKNOWN_TOOL` 保持英文数据;`meta.active/done/attempted`
+  在每个用点经 `t()` 解析——与 connectors 的 `CONNECTOR_LABELS` 同一模式。
+- `workedLabel(prefix, secs)` 改为 `t("{label} for {secs}s", …)`——
+  `{label}` 参数值本身已是 t() 结果(如 `t("Worked")`),嵌套插值正常。
+- `usedToolsSuffix` 重构为 `usedToolsLabel`:整句 key
+  `Thinking (used {n} tool(s))`,替代英文后缀拼接。
+- 动态 `btn.textContent = t("Loading earlier messages…")` 在事件回调中
+  求值,locale 实时。
+
+验证:
+
+- `typecheck:app` 绿(1 处 `Read-only` 与 P1 既有条目重复,删除新增后绿);
+  `vite build` 通过;测试 20/20
+- 浏览器实测(portal 前门 127.0.0.1:59185,`/` 聊天视图):
+  - zh:欢迎语三段全部中文(你好——我是你的 AI 队友 👋 / 我在自己的
+    一台电脑上运行任务… / 需要初始设置吗?…),markdown 段落结构保留
+  - en(不刷新,实时切换):Hi — I'm your AI teammate 👋 / I run tasks
+    on a computer of my own… / Want to get set up?…
+  - 截图:`i18n-p3-chat-zh.png` / `i18n-p3-chat-en.png`
