@@ -297,3 +297,25 @@ crons/skills/connectors 等)按相同流程,每文件一提交。
 - main.ts onLocaleChange 已挂监听(renderList + conv.redraw +
   refreshActiveView),新文案由 t() 在 render 时解析,自动响应 locale 切换,
   sessions.ts 内部无需独立挂监听(本文件 import 已精简为 `t` 单导出)
+
+第二批改:`packages/web-ui/app/src/contexts.ts`(原估 52,实 60+ 处命中,
+含上下文元信息/过滤菜单/项目列表/项目详情/项目成员/Slack 链接/
+资源分组/创建项目弹窗/错误提示等;共新增 36 个 ui key,登记于
+`ui.en.ts` + `ui.zh.ts`,复用 P3 sessions 已加的 `Personal` / `Channel` /
+`Group DM` / `New chat` / `Projects` / `Files` / `Skills` / `Crons` /
+`Webhooks` / `Apps` / `Slack` / `Show` / `Search` / `Close` / `Cancel` /
+`Disable` / `Enable` / `New project` / `Owner` / `Read-only` 等 key;
+占位串 `{title}` / `{label}` / `{channel}` / `{q}` 走 `t()` 插值;
+`c.enabled ? t("Disable") : t("Enable")` 三元改为 t() 形式;复用 P1
+view title `Projects` 不重复登记)。
+
+验证:
+
+- `typecheck:app` 绿;`vite build` 通过;i18n 测试 5/5;web-ui 既有测试
+  15/15 全过(共 20/20)
+- 浏览器实测(portal 前门 127.0.0.1:52583,dev 栈 `/contexts` 路由):
+  - zh:`项目` 标题、`刷新项目` / `新建项目` 按钮、`搜索项目` searchbox、
+    `显示` 标签、上下文行 `个人`
+  - en(不刷新):`Projects` / `Refresh projects` / `New project` /
+    `Search projects` / `Show` / `Personal`
+  - 截图:`i18n-p3-contexts-zh.png` / `i18n-p3-contexts-en.png`
