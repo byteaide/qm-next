@@ -319,3 +319,23 @@ view title `Projects` 不重复登记)。
   - en(不刷新):`Projects` / `Refresh projects` / `New project` /
     `Search projects` / `Show` / `Personal`
   - 截图:`i18n-p3-contexts-zh.png` / `i18n-p3-contexts-en.png`
+
+第三批改:`packages/web-ui/app/src/composer.ts`(原估 45,实 52 命中;
+含 Fast mode / placeholder / Settings 面板 / Make default / Upgrade /
+粘贴文本弹窗 / Send / Stop / Queue / 排队列表 / 审批面板 / slash 菜单
+/ 错误文案 等;共新增 60 个 ui key,登记于 `ui.en.ts` + `ui.zh.ts`,
+复用 P3 已加的 `Files` / `Skills` / `Model`(shell 区域仍 zhs="模型"/
+"Harness"="代理" / "Effort"="投入度") / `Close` / `Remove` /
+`New chat` 等;占位串 `{summary}` / `{model}` 走 `t()` 插值,`{summary}`
+例:`Session settings — Opus 5 · Low` zh=`会话设置——Opus 5 · Low` 实测生效)。
+
+验证:
+
+- `typecheck:app` 绿;`vite build` 通过;i18n 测试 5/5;web-ui 既有测试
+  15/15 全过(共 20/20)
+- 浏览器实测(portal 前门 127.0.0.1:52899,主 chat 视图 composer):
+  - zh:placeholder `随便问点啥`、按钮 `附加文件`、`会话设置——Opus 5 · Low`、
+    `发送`
+  - en(不刷新):`Ask anything` / `Attach files` /
+    `Session settings — Opus 5 · Low` / `Send`
+  - 截图:`i18n-p3-composer-zh.png` / `i18n-p3-composer-en.png`
