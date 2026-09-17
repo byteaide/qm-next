@@ -1064,4 +1064,9 @@ export const uiZh = {
   Web: "Web",
   Link: "关联",
   People: "成员",
+  Conversations: "会话",
+  "Signing secret": "签名密钥",
+  "Created here": "此处创建",
+  New: "新",
+  you: "你",
 } satisfies Record<keyof typeof uiEn, string>;

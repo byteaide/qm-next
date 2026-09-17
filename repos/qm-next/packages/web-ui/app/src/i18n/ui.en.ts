@@ -1084,4 +1084,9 @@ export const uiEn = {
   Web: "Web",
   Link: "Link",
   People: "People",
+  Conversations: "Conversations",
+  "Signing secret": "Signing secret",
+  "Created here": "Created here",
+  New: "New",
+  you: "you",
 } as const;

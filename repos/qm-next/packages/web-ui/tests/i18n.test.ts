@@ -5,14 +5,50 @@
  * (no DOM): i18n/index.ts guards its document/navigator access.
  */
 import assert from 'node:assert/strict'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { currentLocale, setLocale, t } from '../app/src/i18n/index'
 import { errorZh, hasZhError, localizeTurnError, localizedError } from '../app/src/i18n/errors'
 import { uiEn } from '../app/src/i18n/ui.en'
 import { uiZh } from '../app/src/i18n/ui.zh'
 
+// Source-level string literals carry TS escapes (\"); evaluate them the way
+// the runtime would so keys compare against parsed vocabulary entries.
+function unescapeLiteral(raw: string): string {
+  try {
+    return JSON.parse(`"${raw}"`) as string
+  } catch {
+    return raw
+  }
+}
+
 test('ui.zh carries exactly the ui.en key set', () => {
   assert.deepEqual(Object.keys(uiZh).sort(), Object.keys(uiEn).sort())
+})
+
+test('every t("...") literal used in app/src is registered in ui.en.ts', () => {
+  // Anti-drift: a template key that misses the vocabulary silently renders
+  // English in zh — walk the sources and demand registration for each literal.
+  const srcDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'app', 'src')
+  const used = new Set<string>()
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name)
+      if (statSync(p).isDirectory()) {
+        if (name !== 'i18n') walk(p)
+        continue
+      }
+      if (!name.endsWith('.ts')) continue
+      const text = readFileSync(p, 'utf8')
+      for (const m of text.matchAll(/\bt\("((?:[^"\\]|\\.)*)"/g)) used.add(unescapeLiteral(m[1]))
+      for (const m of text.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)) used.add(unescapeLiteral(m[1]))
+    }
+  }
+  walk(srcDir)
+  const missing = [...used].filter((key) => !Object.hasOwn(uiEn, key)).sort()
+  assert.deepEqual(missing, [], 't() literals missing from ui.en.ts')
 })
 
 test('error vocab keys are machine codes, not UI strings', () => {
