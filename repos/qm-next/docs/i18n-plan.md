@@ -367,3 +367,48 @@ zh 模式下返回中文,en 模式返回原 key/字符串。
   - 截图:`i18n-p3-deploys-zh.png` / `i18n-p3-deploys-en.png`
 - 已知:侧栏的 "Apps" 链接仍写死英文(在 shell.ts),P1 留的"占位英文",
   下个文件 shell.ts 一起处理。
+
+第五批改:`packages/web-ui/app/src/crons.ts` + `list-page.ts`(共享
+Refresh 按钮;影响 deploys/crons/skills/webhooks/files/memory 等所有
+list-page)
+(估 35 命中,实际 ~50+;含 tabs (Yours/Shared/Archived)/New cron/Search
+crons/Cron view & actions aria/Enable/Disable/Unarchive/Edit/Archive 按钮
+title + aria-label/Run now/Cancel/Save/Edit/Delete/Context/Title/Task/
+Message/Schedule/Owner/Scope/Status/Destination/Next run/Last fired/
+Recent runs/Worklog/Loading/Never/Refresh/无 crons 状态、crons yet
+in this context、active、shared、archived、No runs yet、enabled/disabled/
+completed/Couldn't load run history/Run started.../That cron wasn't
+found.../Failed to load crons/run failed/edit failed/archive failed/
+unarchive failed/enable failed/disable failed/delete failed/Cron updated
+/共享项 Shared from {scope} — you can view it, but not change it./
+Delete {title}?/Delete permanently/This permanently removes the schedule
+and its retained run history.../Edit behavior with agent/Title and
+task are required/Title is required/To change {the schedule|the
+message}, ... use the agent so it can validate the resulting behavior
+and permissions./Edit cron/Edit/New cron/Crons 回链/Describe the cron
+you want/Describe what you want scheduled... (含 example1/example2
+占位)/Every weekday at 9am.../Ask the agent to set it up/
+未命名 (untitled cron) /a Slack channel/org-wide/group;新增 78 个 ui
+key,登记于两表;占位串 `{title}` / `{scope}` / `{example1}` / `{example2}`
+全部走 `t()` 插值)。
+helper(`suggestedCronTitle` / `cronScopeLabel` / `cronStatusText`)内部
+全部 `t()`,zh 模式返回中文。
+`list-page.ts` 的共享 Refresh 按钮 title/aria-label 改用 `t("Refresh")`,
+影响所有 list-page 调用方(deploys/crons/skills/webhooks/files/memory
+等)。这是 P3 deploys/commit 漏掉的边角清理,顺手补上。
+
+验证:
+
+- `typecheck:app` 绿;`vite build` 通过;i18n 测试 5/5;web-ui 既有测试
+  15/15 全过(共 20/20)
+- 浏览器实测(portal 前门 127.0.0.1:53733,`/crons` 路由):
+  - zh:标题 `定时任务`、`按上下文筛选:全部上下文` 按钮、`刷新` 按钮、
+    `新建定时任务` 按钮、`搜索定时任务` searchbox、`暂无定时任务。`
+    空态
+  - en(不刷新):`Crons` / `Refresh` / `New cron` / `Search crons` /
+    `No crons yet.`
+  - 截图:`i18n-p3-crons-zh.png` / `i18n-p3-crons-en.png`
+- Dev 栈资产机制说明:`dev-web-ui.ts` 从 `dist-web/assets/` 服务 prebuilt
+  bundle,**不是** 实时编译 TS;改源后必须 `pnpm --filter @qm/web-ui
+  build` 后浏览器拉取新 hash 才能看到改动;`@qm/web-ui typecheck:app` 与
+  `vite build` 是浏览器验收前的硬前置。

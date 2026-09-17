@@ -3,6 +3,7 @@ import { Archive, Pause, Pencil, Play, Plus, RotateCcw, Trash2 } from "lucide";
 import { api } from "./core-bridge";
 import { errMessage } from "../../chassis/src/errors";
 import { icon } from "./ui";
+import { t } from "./i18n/index";
 import { listBackLink, listPageTpl } from "./list-page";
 import { contextsState, ensureContexts, scopeChip } from "./contexts";
 import { scopedSession, scopedViewTopbar } from "./session-scope";
@@ -48,9 +49,9 @@ interface CronRunView {
 
 type CronTab = "yours" | "shared" | "archived";
 const CRON_TABS: Array<{ value: CronTab; label: string }> = [
-  { value: "yours", label: "Yours" },
-  { value: "shared", label: "Shared" },
-  { value: "archived", label: "Archived" },
+  { value: "yours", label: t("Yours") },
+  { value: "shared", label: t("Shared") },
+  { value: "archived", label: t("Archived") },
 ];
 
 let cronList: CronView[] = [];
@@ -111,7 +112,7 @@ async function refreshCrons(opts: { showLoading?: boolean } = {}): Promise<boole
     return true;
   } catch (e) {
     if (seq !== cronRefreshSeq) return false;
-    cronsNotice = errMessage(e, "Failed to load crons.");
+    cronsNotice = errMessage(e, t("Failed to load crons."));
     return false;
   } finally {
     if (seq === cronRefreshSeq) cronsLoading = false;
@@ -141,7 +142,7 @@ function clipWords(text: string, max = 64): string {
 
 function suggestedCronTitle(text: string): string {
   const clean = cleanCronText(text);
-  if (!clean) return "(untitled cron)";
+  if (!clean) return t("(untitled cron)");
   const candidate = clean
     .replace(/^(please\s+)?(run|generate|create|send|post|deliver|summarize|check)\s+(the\s+)?/i, "")
     .replace(/\s*[:;.!?]\s+.*$/, "")
@@ -163,9 +164,9 @@ function cronPreview(c: CronView): string {
 function cronScopeLabel(c: CronView): string {
   const sep = c.ownerScopeId.indexOf(":");
   const kind = sep === -1 ? c.ownerScopeId : c.ownerScopeId.slice(0, sep);
-  if (kind === "channel") return c.scopeName ? `#${c.scopeName}` : "a Slack channel";
-  if (kind === "org") return "org-wide";
-  if (kind === "group") return "group";
+  if (kind === "channel") return c.scopeName ? `#${c.scopeName}` : t("a Slack channel");
+  if (kind === "org") return t("org-wide");
+  if (kind === "group") return t("group");
   return c.owner;
 }
 
@@ -181,7 +182,9 @@ function cronStatusLabel(c: CronView): "enabled" | "disabled" | "archived" {
 
 function cronStatusText(c: CronView): string {
   const status = cronStatusLabel(c);
-  return status.charAt(0).toUpperCase() + status.slice(1);
+  if (status === "enabled") return t("Enabled");
+  if (status === "disabled") return t("Disabled");
+  return t("Archived");
 }
 
 export async function renderCronsPage(): Promise<void> {
@@ -202,7 +205,7 @@ export async function renderCronsPage(): Promise<void> {
     ? (cronList.find((c) => c.id === wanted) ?? visibleCronList.find((c) => c.id === wanted))
     : undefined;
   if (wanted && !cron) {
-    cronActionNotice = "That cron wasn't found, or you don't have access to it.";
+    cronActionNotice = t("That cron wasn't found, or you don't have access to it.");
   }
   if (cron) openCron(cron);
   else drawCronsPage();
@@ -242,28 +245,28 @@ function drawCronsPage(): void {
   if (cronTab === "yours") {
     rows.push(...yoursEnabled.map(({ c }) => cronPageRow(c, true)));
     if (all.length && !yoursEnabled.length)
-      rows.push(cronEmptyRow(ownsAny ? "No active crons." : "None of your own crons yet."));
+      rows.push(cronEmptyRow(ownsAny ? t("No active crons.") : t("None of your own crons yet.")));
     if (yoursDisabled.length) {
       rows.push(cronDisabledToggle(yoursDisabled.length));
       if (showDisabledCrons) rows.push(...yoursDisabled.map(({ c }) => cronPageRow(c, true)));
     }
   } else if (cronTab === "shared") {
     rows.push(...shared.map(({ c }) => cronPageRow(c, false)));
-    if (!shared.length) rows.push(cronEmptyRow("No crons shared with you."));
+    if (!shared.length) rows.push(cronEmptyRow(t("No crons shared with you.")));
   } else {
     rows.push(...archived.map(({ c, mine }) => cronPageRow(c, mine)));
-    if (!archived.length) rows.push(cronEmptyRow("Nothing archived."));
+    if (!archived.length) rows.push(cronEmptyRow(t("Nothing archived.")));
   }
-  let empty = "No crons yet.";
+  let empty = t("No crons yet.");
   if (cronsNotice) empty = cronsNotice;
-  else if (cronsLoading && cronList.length === 0 && visibleCronList.length === 0) empty = "Loading crons…";
-  else if (cronsScope) empty = "No crons in this context.";
+  else if (cronsLoading && cronList.length === 0 && visibleCronList.length === 0) empty = t("Loading crons…");
+  else if (cronsScope) empty = t("No crons in this context.");
   const scoped = Boolean(scopedSession.active);
   cronsPageHost.classList.toggle("scoped-view", scoped);
   render(
     html`${scopedViewTopbar("crons", drawCronsPage)}
-    ${listPageTpl({
-      title: "Crons",
+    ${    listPageTpl({
+      title: t("Crons"),
       scope: cronsScope,
       onScope: scoped
         ? undefined
@@ -275,10 +278,10 @@ function drawCronsPage(): void {
         cronRuns.clear();
         void renderCronsPage();
       },
-      action: { label: "New cron", onClick: showNewCron },
+      action: { label: t("New cron"), onClick: showNewCron },
       search: {
         value: cronsSearch,
-        placeholder: "Search crons",
+        placeholder: t("Search crons"),
         onInput: (value) => {
           cronsSearch = value;
           drawCronsPage();
@@ -308,7 +311,7 @@ function cronEmptyRow(text: string): TemplateResult {
 function cronTabs(counts: Record<CronTab, number>): TemplateResult {
   const tabs = CRON_TABS.filter((t) => t.value === "yours" || counts[t.value] > 0 || cronTab === t.value);
   return html`
-    <div class="cron-list-controls" role="tablist" aria-label="Cron view">
+    <div class="cron-list-controls" role="tablist" aria-label=${t("Cron view")}>
       ${tabs.map(
         (t) => html`
           <button
@@ -330,7 +333,7 @@ function cronTabs(counts: Record<CronTab, number>): TemplateResult {
 function cronDisabledToggle(count: number): TemplateResult {
   return html`
     <button class="archived-toggle cron-disabled-toggle" type="button" @click=${toggleDisabledCrons}>
-      <span>${showDisabledCrons ? "Hide disabled" : "Show disabled"}</span>
+      <span>${showDisabledCrons ? t("Hide disabled") : t("Show disabled")}</span>
       <span class="archived-count">${count}</span>
     </button>
   `;
@@ -372,8 +375,8 @@ function cronRowActions(c: CronView): TemplateResult {
     <button
       class="icon-btn subtle cron-action-btn"
       type="button"
-      title="Enable"
-      aria-label="Enable cron"
+      title=${t("Enable")}
+      aria-label=${t("Enable cron")}
       @click=${() => void setCronEnabled(c.id, true)}
     >
       ${icon(Play, 14)}
@@ -384,8 +387,8 @@ function cronRowActions(c: CronView): TemplateResult {
       <button
         class="icon-btn subtle cron-action-btn"
         type="button"
-        title="Unarchive"
-        aria-label="Unarchive cron"
+        title=${t("Unarchive")}
+        aria-label=${t("Unarchive cron")}
         @click=${() => void archiveCron(c.id, false)}
       >
         ${icon(RotateCcw, 14)}
@@ -396,8 +399,8 @@ function cronRowActions(c: CronView): TemplateResult {
       <button
         class="icon-btn subtle cron-action-btn"
         type="button"
-        title="Disable"
-        aria-label="Disable cron"
+        title=${t("Disable")}
+        aria-label=${t("Disable cron")}
         @click=${() => void setCronEnabled(c.id, false)}
       >
         ${icon(Pause, 14)}
@@ -405,12 +408,12 @@ function cronRowActions(c: CronView): TemplateResult {
     `;
   }
   return html`
-    <div class="cron-row-actions" aria-label="Cron actions">
+    <div class="cron-row-actions" aria-label=${t("Cron actions")}>
       <button
         class="icon-btn subtle cron-action-btn"
         type="button"
-        title="Edit"
-        aria-label="Edit cron"
+        title=${t("Edit")}
+        aria-label=${t("Edit cron")}
         @click=${() => {
           openCron(c);
           showCronDialog("rename", c);
@@ -426,8 +429,8 @@ function cronRowActions(c: CronView): TemplateResult {
               <button
                 class="icon-btn subtle cron-action-btn"
                 type="button"
-                title="Archive"
-                aria-label="Archive cron"
+                title=${t("Archive")}
+                aria-label=${t("Archive cron")}
                 @click=${() => void archiveCron(c.id, true)}
               >
                 ${icon(Archive, 14)}
@@ -448,20 +451,20 @@ function openCron(c: CronView, opts: { push?: boolean } = {}): void {
   cronActionNotice = "";
   const next = cronNextFire(c);
   let stateActions = html`
-    <button class="btn" @click=${() => void setCronEnabled(c.id, true)}>${icon(Play, 15)}<span>Enable</span></button>
-    <button class="btn" @click=${() => void archiveCron(c.id, true)}>${icon(Archive, 15)}<span>Archive</span></button>
+    <button class="btn" @click=${() => void setCronEnabled(c.id, true)}>${icon(Play, 15)}<span>${t("Enable")}</span></button>
+    <button class="btn" @click=${() => void archiveCron(c.id, true)}>${icon(Archive, 15)}<span>${t("Archive")}</span></button>
   `;
   if (c.archived) {
     stateActions = html`<button class="btn" @click=${() => void archiveCron(c.id, false)}>
-      ${icon(RotateCcw, 15)}<span>Unarchive</span>
+      ${icon(RotateCcw, 15)}<span>${t("Unarchive")}</span>
     </button>`;
   } else if (c.enabled) {
     stateActions = html`
-      <button class="btn" @click=${() => void runCronNow(c.id)}>${icon(Play, 15)}<span>Run now</span></button>
+      <button class="btn" @click=${() => void runCronNow(c.id)}>${icon(Play, 15)}<span>${t("Run now")}</span></button>
       <button class="btn" @click=${() => void setCronEnabled(c.id, false)}>
-        ${icon(Pause, 15)}<span>Disable</span>
+        ${icon(Pause, 15)}<span>${t("Disable")}</span>
       </button>
-      <button class="btn" @click=${() => void archiveCron(c.id, true)}>${icon(Archive, 15)}<span>Archive</span></button>
+      <button class="btn" @click=${() => void archiveCron(c.id, true)}>${icon(Archive, 15)}<span>${t("Archive")}</span></button>
     `;
   }
   const host = document.createElement("div");
@@ -469,37 +472,37 @@ function openCron(c: CronView, opts: { push?: boolean } = {}): void {
   render(
     html`
       <div class="resource-detail">
-        ${listBackLink("Crons", drawCronsPage)}
+        ${listBackLink(t("Crons"), drawCronsPage)}
         <div class="resource-heading">
           <h2>${cronTitle(c)}</h2>
-          <button class="btn" @click=${showNewCron}>${icon(Plus, 15)}<span>New cron</span></button>
+          <button class="btn" @click=${showNewCron}>${icon(Plus, 15)}<span>${t("New cron")}</span></button>
         </div>
         ${notice ? html`<div class="hint">${notice}</div>` : ""}
         <div class="field">
-          <label>Context</label>
+          <label>${t("Context")}</label>
           <div class="value">${scopeChip(c.ownerScopeId, c.scopeName ?? null)}</div>
         </div>
         ${
           c.title
             ? html`<div class="field">
-                <label>Title</label>
+                <label>${t("Title")}</label>
                 <div class="value">${c.title}</div>
               </div>`
             : nothing
         }
         <div class="field">
-          <label>${c.message !== undefined ? "Message" : "Task"}</label>
+          <label>${c.message !== undefined ? t("Message") : t("Task")}</label>
           <div class="value pre">${cronText(c)}</div>
         </div>
         <div class="field">
-          <label>Schedule</label>
+          <label>${t("Schedule")}</label>
           <div class="value">${cronScheduleDetail(c)}</div>
         </div>
         ${
           mine
             ? ""
             : html`<div class="field">
-                <label>Owner</label>
+                <label>${t("Owner")}</label>
                 <div class="value">${c.owner}</div>
               </div>`
         }
@@ -507,29 +510,29 @@ function openCron(c: CronView, opts: { push?: boolean } = {}): void {
           mine
             ? ""
             : html`<div class="field">
-                <label>Scope</label>
+                <label>${t("Scope")}</label>
                 <div class="value">${cronScopeLabel(c)}</div>
               </div>`
         }
         <div class="field">
-          <label>Status</label>
+          <label>${t("Status")}</label>
           <div class="value">${cronStatusText(c)}</div>
         </div>
         ${
           c.destination
             ? html`<div class="field">
-                <label>Destination</label>
+                <label>${t("Destination")}</label>
                 <div class="value">${c.destination.type} → ${c.destination.target}</div>
               </div>`
             : ""
         }
         <div class="field">
-          <label>Next run</label>
+          <label>${t("Next run")}</label>
           <div class="value">${next != null ? new Date(next).toLocaleString() : "—"}</div>
         </div>
         <div class="field">
-          <label>Last fired</label>
-          <div class="value">${c.lastFiredAt ? new Date(c.lastFiredAt).toLocaleString() : "Never"}</div>
+          <label>${t("Last fired")}</label>
+          <div class="value">${c.lastFiredAt ? new Date(c.lastFiredAt).toLocaleString() : t("Never")}</div>
         </div>
         ${manageable ? cronRunHistory(c) : nothing}
         ${
@@ -537,15 +540,15 @@ function openCron(c: CronView, opts: { push?: boolean } = {}): void {
             ? html`
                 <div class="actions">
                   <button class="btn" @click=${() => showCronDialog("rename", c)}>
-                    ${icon(Pencil, 15)}<span>Edit</span>
+                    ${icon(Pencil, 15)}<span>${t("Edit")}</span>
                   </button>
                   ${stateActions}
                   <button class="btn danger" @click=${() => showCronDialog("delete", c)}>
-                    ${icon(Trash2, 15)}<span>Delete</span>
+                    ${icon(Trash2, 15)}<span>${t("Delete")}</span>
                   </button>
                 </div>
               `
-            : html`<div class="hint">Shared from ${cronScopeLabel(c)} — you can view it, but not change it.</div>`
+            : html`<div class="hint">${t("Shared from {scope} — you can view it, but not change it.", { scope: cronScopeLabel(c) })}</div>`
         }
         ${cronDialog?.cron.id === c.id ? cronDialogTpl(cronDialog) : nothing}
       </div>
@@ -559,17 +562,17 @@ function openCron(c: CronView, opts: { push?: boolean } = {}): void {
 function cronRunHistory(c: CronView): TemplateResult {
   const runs = cronRuns.get(c.id);
   const heading = html`<div class="cron-run-heading">
-    <label>Recent runs</label><button class="btn" type="button" @click=${() => refreshCronRuns(c.id)}>Refresh</button>
+    <label>${t("Recent runs")}</label><button class="btn" type="button" @click=${() => refreshCronRuns(c.id)}>${t("Refresh")}</button>
   </div>`;
   if (!runs)
     return html`<div class="field">
       ${heading}
-      <div class="hint">Loading…</div>
+      <div class="hint">${t("Loading…")}</div>
     </div>`;
   if (!runs.length)
     return html`<div class="field">
       ${heading}
-      <div class="hint">No runs yet.</div>
+      <div class="hint">${t("No runs yet.")}</div>
     </div>`;
   return html` <div class="field">
     ${heading}
@@ -577,14 +580,14 @@ function cronRunHistory(c: CronView): TemplateResult {
       ${[...runs].reverse().map((run) => {
         const detail = run.note ?? (run.reply ? clipWords(run.reply, 120) : "");
         return html` <div class="cron-run-row">
-          <span class="badge">${run.status ?? "completed"}</span>
+          <span class="badge">${run.status ?? t("completed")}</span>
           <span class="cron-run-time">${new Date(run.firedAt).toLocaleString()}</span>
           <span class=${run.note ? "cron-run-detail cron-run-error" : "cron-run-detail"} title=${detail}>
             ${detail}
           </span>
           ${
             run.sessionId
-              ? html`<a class="cron-run-link" href=${deepLinkPath(UI_BASE, "chats", run.sessionId)}>Worklog</a>`
+              ? html`<a class="cron-run-link" href=${deepLinkPath(UI_BASE, "chats", run.sessionId)}>${t("Worklog")}</a>`
               : nothing
           }
         </div>`;
@@ -604,7 +607,7 @@ async function loadCronRuns(id: string): Promise<void> {
     const result = await api<{ runs: CronRunView[] }>(`/api/crons/${encodeURIComponent(id)}/runs`);
     cronRuns.set(id, result.runs ?? []);
   } catch (error) {
-    cronActionNotice = errMessage(error, "Couldn't load run history.");
+    cronActionNotice = errMessage(error, t("Couldn't load run history."));
     cronRuns.set(id, []);
   } finally {
     cronRunsLoading.delete(id);
@@ -636,9 +639,9 @@ function runCronNow(id: string): Promise<void> {
   return cronMutate(async () => {
     try {
       await api(`/api/crons/${encodeURIComponent(id)}/run`, { method: "POST" });
-      cronActionNotice = "Run started. Refresh recent runs after it completes.";
+      cronActionNotice = t("Run started. Refresh recent runs after it completes.");
     } catch (e) {
-      cronActionNotice = errMessage(e, "run failed");
+      cronActionNotice = errMessage(e, t("run failed"));
     }
     await reopenCron(id);
   }, undefined);
@@ -681,16 +684,15 @@ function cronDialogTpl(dialog: { kind: "rename" | "delete"; cron: CronView }): T
     >
       <div class="project-dialog cron-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="cron-delete-title">
         <div class="project-dialog-head">
-          <div><h2 id="cron-delete-title">Delete ${cronTitle(c)}?</h2></div>
+          <div><h2 id="cron-delete-title">${t("Delete {title}?", { title: cronTitle(c) })}</h2></div>
         </div>
         <p>
-          This permanently removes the schedule and its retained run history. Archive it instead if you may need it
-          later.
+          ${t("This permanently removes the schedule and its retained run history. Archive it instead if you may need it later.")}
         </p>
         <div class="project-dialog-actions">
-          <button class="btn" type="button" @click=${() => closeCronDialog(c)}>Cancel</button>
+          <button class="btn" type="button" @click=${() => closeCronDialog(c)}>${t("Cancel")}</button>
           <button class="btn danger" type="button" @click=${() => void confirmDeleteCron(c.id)}>
-            Delete permanently
+            ${t("Delete permanently")}
           </button>
         </div>
       </div>
@@ -708,27 +710,25 @@ function cronDialogTpl(dialog: { kind: "rename" | "delete"; cron: CronView }): T
       @submit=${(event: SubmitEvent) => void saveCronEdit(event, c)}
     >
       <div class="project-dialog-head">
-        <div><h2 id="cron-edit-title">Edit cron</h2></div>
+        <div><h2 id="cron-edit-title">${t("Edit cron")}</h2></div>
       </div>
-      <label>Title<input name="title" maxlength="80" value=${c.title ?? cronTitle(c)} required /></label>
+      <label>${t("Title")}<input name="title" maxlength="80" value=${c.title ?? cronTitle(c)} required /></label>
       ${
         c.message === undefined
-          ? html`<label>Task<textarea name="task" rows="5" required>${cronText(c)}</textarea></label>`
+          ? html`<label>${t("Task")}<textarea name="task" rows="5" required>${cronText(c)}</textarea></label>`
           : html`<div class="field">
-              <label>Message</label>
+              <label>${t("Message")}</label>
               <div class="value pre">${c.message}</div>
             </div>`
       }
       <p class="hint">
-        To change
-        ${c.message === undefined ? "the schedule, timezone, destination, or run mode" : "the message, schedule, timezone, destination, or run mode"},
-        use the agent so it can validate the resulting behavior and permissions.
+        ${c.message === undefined ? t("To change the schedule, timezone, destination, or run mode, use the agent so it can validate the resulting behavior and permissions.") : t("To change the message, schedule, timezone, destination, or run mode, use the agent so it can validate the resulting behavior and permissions.")}
       </p>
       <div class="form-error"></div>
       <div class="project-dialog-actions">
-        <button class="btn" type="button" @click=${() => editCronWithAgent(c)}>Edit behavior with agent</button>
-        <button class="btn" type="button" @click=${() => closeCronDialog(c)}>Cancel</button>
-        <button class="btn primary" type="submit">Save</button>
+        <button class="btn" type="button" @click=${() => editCronWithAgent(c)}>${t("Edit behavior with agent")}</button>
+        <button class="btn" type="button" @click=${() => closeCronDialog(c)}>${t("Cancel")}</button>
+        <button class="btn primary" type="submit">${t("Save")}</button>
       </div>
     </form>
   </div>`;
@@ -742,13 +742,13 @@ async function saveCronEdit(event: SubmitEvent, c: CronView): Promise<void> {
   const task = taskControl?.value.trim();
   const error = form.querySelector<HTMLElement>(".form-error");
   if (!title || (taskControl && !task)) {
-    if (error) error.textContent = taskControl ? "Title and task are required." : "Title is required.";
+    if (error) error.textContent = taskControl ? t("Title and task are required.") : t("Title is required.");
     return;
   }
-  const ok = await patchCron(c.id, { title, ...(task ? { task } : {}) }, "edit failed");
+  const ok = await patchCron(c.id, { title, ...(task ? { task } : {}) }, t("edit failed"));
   if (!ok) return;
   cronDialog = null;
-  cronActionNotice = "Cron updated.";
+  cronActionNotice = t("Cron updated.");
   await reopenCron(c.id);
 }
 
@@ -762,7 +762,7 @@ function editCronWithAgent(c: CronView): void {
 }
 
 async function archiveCron(id: string, archived: boolean): Promise<void> {
-  const ok = await patchCron(id, { archived }, archived ? "archive failed" : "unarchive failed");
+  const ok = await patchCron(id, { archived }, archived ? t("archive failed") : t("unarchive failed"));
   if (!ok) return;
   await refreshCrons();
   if (archived) {
@@ -782,7 +782,7 @@ function setCronEnabled(id: string, enabled: boolean): Promise<void> {
       cronTab = "yours";
       if (!enabled) showDisabledCrons = true;
     } catch (e) {
-      cronActionNotice = errMessage(e, enabled ? "enable failed" : "disable failed");
+      cronActionNotice = errMessage(e, enabled ? t("enable failed") : t("disable failed"));
     }
     await reopenCron(id);
   }, undefined);
@@ -794,32 +794,32 @@ async function confirmDeleteCron(id: string): Promise<void> {
     try {
       await api(`/api/crons/${encodeURIComponent(id)}`, { method: "DELETE" });
     } catch (e) {
-      cronActionNotice = errMessage(e, "delete failed");
+      cronActionNotice = errMessage(e, t("delete failed"));
     }
     await reopenCron(id);
   }, undefined);
 }
 
 function cronForm() {
+  const example1 = t("Gmail unread digest");
+  const example2 = t("GitLab CI watch");
   return html`
     <form class="resource-form cron-form" @submit=${onCreateCron}>
-      ${listBackLink("Crons", drawCronsPage)}
-      <h2>New cron</h2>
+      ${listBackLink(t("Crons"), drawCronsPage)}
+      <h2>${t("New cron")}</h2>
       <p class="hint">
-        Describe what you want scheduled — what to do, how often, and where the result should go. The agent sets it up
-        and confirms in chat; it will ask if anything is unclear. It should give the cron a short, distinctive title
-        naming what it is for, like <code>Gmail unread digest</code> or <code>GitLab CI watch</code>.
+        ${t("Describe what you want scheduled — what to do, how often, and where the result should go. The agent sets it up and confirms in chat; it will ask if anything is unclear. It should give the cron a short, distinctive title naming what it is for, like {example1} or {example2}.", { example1, example2 })}
       </p>
       <label>
         <textarea
           name="text"
           rows="4"
-          placeholder="Every weekday at 9am, summarize my unread email and DM me the highlights."
+          placeholder=${t("Every weekday at 9am, summarize my unread email and DM me the highlights.")}
           required
         ></textarea>
       </label>
       <div class="form-error"></div>
-      <div class="actions"><button class="btn primary" type="submit">Ask the agent to set it up</button></div>
+      <div class="actions"><button class="btn primary" type="submit">${t("Ask the agent to set it up")}</button></div>
     </form>
   `;
 }
@@ -839,7 +839,7 @@ function onCreateCron(e: Event): void {
   const errSlot = form.querySelector(".form-error") as HTMLElement | null;
   const text = (form.querySelector('textarea[name="text"]') as HTMLTextAreaElement | null)?.value.trim() ?? "";
   if (!text) {
-    if (errSlot) errSlot.textContent = "Describe the cron you want.";
+    if (errSlot) errSlot.textContent = t("Describe the cron you want.");
     return;
   }
   const conv = mainConversation();
