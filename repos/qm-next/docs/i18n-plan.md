@@ -581,3 +581,72 @@ typing 占位/后台面板(expiring/剩 {n} 分钟/剩 {h} 小时 {m} 分钟/隐
   - en(不刷新,实时切换):Hi — I'm your AI teammate 👋 / I run tasks
     on a computer of my own… / Want to get set up?…
   - 截图:`i18n-p3-chat-zh.png` / `i18n-p3-chat-en.png`
+
+第九批改:`packages/web-ui/app/src/shell.ts`(990 行,侧栏/横幅/认证门/
+共享 chrome;~48 处 + ~47 新 key,其中 9 个视图名 key 复用
+document-title.ts 的 VIEW_TITLES 既有条目):
+
+- 顶栏横幅:身份代看(正在查看助手：{user}，你是 {by}——bold 标记用
+  片段 key 包夹,保持 <b> 结构)/ 退出模拟登录 / 开发模式(——未配置
+  身份提供方,当前以 {user} 登录)/ 退出登录
+- 认证门四态全部 t() 化:portal 待跳转(请通过门户登录 + 长文案)、
+  会话已结束(你已退出登录。重新登录后将回到本页。/登录)、无权限
+  (你没有访问权限 + WEB_UI_PRINCIPALS 提示改 {env} 参数插值,去
+  <b>)、不可达(无法连接到助手/重试/核心服务可能已宕机)、dev 登录
+  (开发模式登录/CORE_SIGNING_SECRET 改 {env} 参数/主体/登录中…/
+  继续,复用 connectors 批既有 `Continue`——本批新增时撞 TS1117,删
+  新留旧)/ Sign-in failed.
+- 侧栏 chrome:navigation aria / 收起侧栏 / 展开侧栏 / 管理 AI 账号 /
+  配色方案:浅色 / 深色 / 跟随系统 / 关闭侧栏 / 调整侧栏宽度 / 拖动
+  调整宽度 · 双击重置 / 选择一个对话,或开始新聊天。
+- 导航区:新聊天(复用)/ 浏览分组(收起{group}/展开{group} 参数
+  插值)/ 9 个视图行复用 VIEW_TITLES key(项目/聊天/文件/定时任务/
+  Webhook/密钥/应用/记忆/技能)/ 管理后台(新增 Admin)/ 会话 /
+  搜索你的聊天(aria + tooltip `搜索你的聊天 · {hotkey}` 参数插值,
+  hotkey 保留系统常量 SEARCH_HOTKEY_LABEL)/ 仅网页 switch(仅显示网
+  页聊天 / 隐藏非网页对话)
+- 共享函数:`updateSidebarToggleLabels` 收起/展开侧栏(调用时求值,
+  locale 实时)/ `renderPane` 的 `Refresh {view}` → 刷新{view}(zh
+  无需 lowercase,传入已译标题直接拼接)
+- boot 路径:app-edit 草稿种子(帮我更新已部署的应用「{slug}」：)/
+  此编辑链接缺少有效的应用名。/ 找不到该对话,或你无权访问。(toast
+  + 空态两处)
+
+实现要点:
+
+- 9 个导航行 label 直接复用 P1 的 VIEW_TITLES key(document-title.ts
+  与 sidebar 本就同源),零新增。
+- navGroup 分组标题 `<span>${t(title)}</span>` + 折叠 title 用
+  `t("Hide {group}", { group: t(title) })` 嵌套插值——首版漏包 span
+  导致浏览器快照暴露英文 "Browse",复验时发现并修复。
+- 横幅 bold 结构用片段 key(`Viewing the assistant as` / `, you are`)
+  包夹 <b> 节点;env 变量名提示改用 {env} 参数插值丢弃 <b>(装饰性)。
+- 顶栏横幅在 mountShell 内渲染一次,locale 切换不重绘横幅(与既有
+  module-level 常量同 trade-off,重载后生效);侧栏/认证门均在调用时
+  求 t(),实时生效。
+
+验证:
+
+- `typecheck:app` 绿(1 处 `Continue` 与 connectors 批既有条目重复,
+  删除新增后绿);`vite build` 通过;i18n parity 测试随全量套件通过
+- 浏览器实测(portal 前门 127.0.0.1:59774,`/` 聊天视图):
+  - zh:侧栏全部中文(浏览/项目/聊天/文件/定时任务/Webhook/密钥/
+    应用/记忆/技能/管理后台/会话/搜索你的聊天/仅网页/收起侧栏/
+    配色方案…/退出登录/调整侧栏宽度),aria 同步翻译
+  - en(不刷新,实时切换):Navigation/Browse/Projects…/Admin/
+    Sessions/Web only/Sign out 全部回退,页面标题 Chats · QM · Web
+  - 截图:`i18n-p3-shell-zh.png` / `i18n-p3-shell-en.png`
+- 全量 `pnpm test`:671/705 通过;i18n 相关 5 用例全绿。2 个失败
+  (packages/api tranche6 connectors token register、tranche7 admin
+  grants)经 stash 复现验证为**预存失败**,与本会话 i18n 改动无关
+  (api 包不依赖 web-ui app src)。
+
+残留扫描(P3 验收要求的"其余"):
+
+- `split.ts`(1282 行)仍有 ~25 处可见 pane chrome:New session/
+  Tools/Split this pane with a new session/Close pane/Archive session/
+  Agent is working/Waiting for your reply/分屏拖放区(Split left/right/
+  up/down/Open here/Show here/Open as tab)/Restore to grid (Esc)/
+  Open full screen/Your keychain 等——下一批处理。
+- 其余文件(session-scope/pane-focus/tooltip 等)命中的均为技术性
+  字符串或无用户可见文案。

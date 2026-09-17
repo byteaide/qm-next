@@ -21,6 +21,63 @@ export const uiEn = {
   Skills: "Skills",
   // chats
   "New chat": "New chat",
+  // shell chrome (P3 shell.ts) — banners, auth gates, sidebar nav
+  "Viewing the assistant as": "Viewing the assistant as",
+  ", you are": ", you are",
+  "Exit impersonation": "Exit impersonation",
+  "Dev mode": "Dev mode",
+  "— no identity provider, signed in as {user}": "— no identity provider, signed in as {user}",
+  "Sign out": "Sign out",
+  "Sign in through the portal":
+    "Sign in through the portal",
+  "This surface is reached through the portal, and signing in there didn't produce a session for it. Open the portal address directly rather than this one.":
+    "This surface is reached through the portal, and signing in there didn't produce a session for it. Open the portal address directly rather than this one.",
+  "If you opened this surface's own address, that's the cause — it can't authenticate anyone on its own.":
+    "If you opened this surface's own address, that's the cause — it can't authenticate anyone on its own.",
+  "Your session ended": "Your session ended",
+  "You've been signed out. Sign in again and you'll come back to this page.":
+    "You've been signed out. Sign in again and you'll come back to this page.",
+  "Sign in": "Sign in",
+  "You don't have access": "You don't have access",
+  "Your account is signed in and verified — it just isn't allowed on this instance. Ask an administrator to add you.":
+    "Your account is signed in and verified — it just isn't allowed on this instance. Ask an administrator to add you.",
+  "This instance lists its principals in {env}.": "This instance lists its principals in {env}.",
+  "We couldn't reach the assistant": "We couldn't reach the assistant",
+  "The service didn't respond. This is usually temporary.":
+    "The service didn't respond. This is usually temporary.",
+  "Try again": "Try again",
+  "If this keeps happening, the core service may be down.":
+    "If this keeps happening, the core service may be down.",
+  "Dev sign-in": "Dev sign-in",
+  "No identity provider is configured, so this instance trusts a local cookie. Set {env} and run the portal to use real sign-in.":
+    "No identity provider is configured, so this instance trusts a local cookie. Set {env} and run the portal to use real sign-in.",
+  Principal: "Principal",
+  "Signing in…": "Signing in…",
+  "Sign-in failed.": "Sign-in failed.",
+  Navigation: "Navigation",
+  "Hide sidebar": "Hide sidebar",
+  "Show sidebar": "Show sidebar",
+  "Manage AI account": "Manage AI account",
+  "Color scheme: light / dark / system": "Color scheme: light / dark / system",
+  "Close sidebar": "Close sidebar",
+  "Resize sidebar": "Resize sidebar",
+  "Drag to resize · double-click to reset": "Drag to resize · double-click to reset",
+  "Pick a conversation, or start a new chat.": "Pick a conversation, or start a new chat.",
+  Browse: "Browse",
+  Admin: "Admin",
+  "Hide {group}": "Hide {group}",
+  "Show {group}": "Show {group}",
+  Sessions: "Sessions",
+  "Search your chats": "Search your chats",
+  "Search your chats · {hotkey}": "Search your chats · {hotkey}",
+  "Showing web chats only": "Showing web chats only",
+  "Hide non-web conversations": "Hide non-web conversations",
+  "Web only": "Web only",
+  "Refresh {view}": "Refresh {view}",
+  'Update my deployed app "{slug}": ': 'Update my deployed app "{slug}": ',
+  "This edit link is missing a valid app name.": "This edit link is missing a valid app name.",
+  "That conversation wasn't found, or you don't have access to it.":
+    "That conversation wasn't found, or you don't have access to it.",
   // sessions sidebar (P3 sessions.ts)
   Pinned: "Pinned",
   Archived: "Archived",
