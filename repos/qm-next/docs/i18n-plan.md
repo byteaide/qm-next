@@ -650,3 +650,54 @@ document-title.ts 的 VIEW_TITLES 既有条目):
   Open full screen/Your keychain 等——下一批处理。
 - 其余文件(session-scope/pane-focus/tooltip 等)命中的均为技术性
   字符串或无用户可见文案。
+
+第十批改:`packages/web-ui/app/src/split.ts`(1282 行,分屏画布;
+~30 处 + 41 新 key,其中 6 个 PANE_TOOLS 视图名复用 VIEW_TITLES 既有
+key——Crons/Files/Apps/Skills/Memory 直接命中,Your keychain 新增):
+
+- 分栏基础:tab/面板标题(New session/Conversation)、空会话兜底
+  New chat、working/awaiting 状态点(Agent is working/Waiting for
+  your reply,复用既有 key)、归档/关闭按钮(Archive session/
+  Close pane)、工具按钮(Tools)
+- 拖放区标签:Split left/right/up/down、Open here、Show here、
+  Open as tab
+- 画布 toast:Already open in a pane;三条容量提示改 {max} 参数
+  插值({max} tiles is the limit — …×2、{max} conversations is all
+  one canvas holds…)
+- 工具菜单:PANE_TOOLS 用点 t() 包裹(map 参数由 t 重命名为 tool
+  消除遮蔽);Restore to grid (Esc)/Focus over the grid/Split this
+  pane with a new session/Open full screen/Close pane
+- dockview 无障碍公告:库默认英文 `${title} opened` 等会进入
+  aria-live 区域(浏览器验证时暴露"新会话 opened"混合文案)。通过
+  createDockview 的 messages 选项全量覆盖 12 条公告(panelOpened/
+  Closed、groupMaximized/Restored/Floated/Docked/PoppedOut、
+  movePickTarget/PickEdge/Committed/Cancelled/NotAllowed),方位词
+  以 Left/Right/Top/Bottom/Center edge 辅助 key 组合;t() 在公告
+  触发时求值,locale 切换实时生效
+
+实现要点:
+
+- PANE_TOOLS 数据表保持英文 label,在菜单渲染点统一 t()——与
+  TOOL_META 同款模式;map 回调参数 t 与 i18n t 同名遮蔽,重命名为
+  tool。
+- 容量常量 MAX_TILES=4/MAX_PANES=12 以 {max} 参数插值,不硬编码进
+  msgid。
+- dockview 公告覆盖函数在每次公告时调用 t(),是本批唯一"实时"路径;
+  其余(pane 标题等)随 draw()/刷新时求值。
+
+验证:
+
+- `typecheck:app` 绿(无重复 key);`vite build` 通过;i18n parity
+  测试含 41 个新 key 全绿
+- 浏览器实测(portal 前门 127.0.0.1:61233,分屏画布已激活):
+  - zh:tab"新会话"、工具菜单(定时任务/文件/应用/技能/记忆/你的
+    密钥)、按钮(用新会话分屏此栏/全屏打开/关闭分栏)、aria-live
+    公告"新会话 已打开"全部中文
+  - en(不刷新,实时切换):New session/Tools/Split this pane with a
+    new session/Open full screen/Close pane 全部回退
+  - 截图:`i18n-p3-split-zh.png` / `i18n-p3-split-en.png`
+- 全量 `pnpm test`:671/705 通过;2 个失败仍是预存的 packages/api
+  tranche6/tranche7(上一批已经 stash 复现验证),与本次改动无关
+- 备注:工具菜单按钮的 document 级 click 关闭监听存在重渲染后
+  contains 判定失效导致菜单即开即关的预存行为(与 i18n 无关,验证
+  时用非冒泡 click 绕过完成菜单项核对;如需修复应另立任务)

@@ -72,6 +72,7 @@ import {
 import { conversationBackground, type RowIndicators } from "./session-list";
 import { setScopedSession, type SessionTool } from "./session-scope";
 import { fetchTranscript, fetchUiState, putUiState, TAIL_TURNS, type CoreSession } from "./core-bridge";
+import { t } from "./i18n/index";
 
 export const splitState = {
   active: false,
@@ -159,6 +160,55 @@ function persistSoon(): void {
   }, 150);
 }
 
+function edgeLabel(position: "left" | "right" | "top" | "bottom" | "center"): string {
+  switch (position) {
+    case "left":
+      return t("Left edge");
+    case "right":
+      return t("Right edge");
+    case "top":
+      return t("Top edge");
+    case "bottom":
+      return t("Bottom edge");
+    default:
+      return t("Center");
+  }
+}
+
+// dockview announces pane/group changes through an aria-live region; its English
+// sentences are overridden here so screen readers hear the UI locale. t() runs at
+// announcement time, so a live locale switch is honoured.
+const dockviewMessages = {
+  panelOpened: (title: string): string => t("{title} opened", { title }),
+  panelClosed: (title: string): string => t("{title} closed", { title }),
+  groupMaximized: (title: string): string => t("{title} maximized", { title }),
+  groupRestored: (title: string): string => t("{title} restored", { title }),
+  groupFloated: (title: string): string => t("{title} floated", { title }),
+  groupDocked: (title: string): string => t("{title} docked", { title }),
+  groupPoppedOut: (title: string): string => t("{title} opened in a new window", { title }),
+  movePickTarget: (source: string, target: string, current: number, total: number): string =>
+    t("Moving {source}. Target {target}, {current} of {total}. Enter to choose where, Escape to cancel.", {
+      source,
+      target,
+      current,
+      total,
+    }),
+  movePickEdge: (position: "left" | "right" | "top" | "bottom" | "center", target: string): string =>
+    t("{where}. Arrows to change, Enter to confirm, Escape to go back.", {
+      where: position === "center" ? t("Tab into {target}", { target }) : t("Split {edge} of {target}", { edge: edgeLabel(position), target }),
+    }),
+  moveCommitted: (source: string, target: string, position: "left" | "right" | "top" | "bottom" | "center"): string =>
+    t("{source} {where}.", {
+      source,
+      where:
+        position === "center"
+          ? t("docked into {target}", { target })
+          : t("split {edge} of {target}", { edge: edgeLabel(position), target }),
+    }),
+  moveCancelled: (): string => t("Move cancelled."),
+  moveNotAllowed: (): string => t("That move is not allowed."),
+};
+
 function buildDock(): DockviewApi {
   const host = canvasHost!;
   const dockEl = document.createElement("div");
@@ -175,6 +225,7 @@ function buildDock(): DockviewApi {
     createPrefixHeaderActionComponent: () => new StripDrop(),
     singleTabMode: "fullwidth",
     disableFloatingGroups: true,
+    messages: dockviewMessages,
   });
   const inner = dockEl.querySelector(":scope > .dv-dockview") as HTMLElement | null;
   const box = (inner ?? dockEl).getBoundingClientRect();
@@ -183,7 +234,9 @@ function buildDock(): DockviewApi {
     if (e.getData() === undefined) return;
     if (api.groups.length >= MAX_TILES && dropAddsTile(nativeDrop(api, e))) {
       e.preventDefault();
-      canvasToast(`${MAX_TILES} tiles is the limit — drop it on a tab strip instead`);
+      canvasToast(
+        t("{max} tiles is the limit — drop it on a tab strip instead", { max: MAX_TILES }),
+      );
     }
   };
   api.onWillDrop(holdTileCap);
@@ -288,7 +341,7 @@ function addPane(
     id: uid(),
     component: "pane",
     tabComponent: "pane",
-    title: params.sessionId ? "Conversation" : "New session",
+    title: params.sessionId ? t("Conversation") : t("New session"),
     params: { ...params },
     ...(position ? { position } : {}),
   });
@@ -468,7 +521,7 @@ function focusExistingPane(sessionId: string, exceptPaneId?: string): boolean {
   if (!dup) return false;
   if (dup.id !== exceptPaneId) {
     activatePanel(dup);
-    canvasToast("Already open in a pane");
+    canvasToast(t("Already open in a pane"));
   }
   return true;
 }
@@ -488,14 +541,14 @@ function openInPane(paneId: string, sessionId: string, threadRef: string, backgr
 
 function roomForAnotherPane(): boolean {
   if ((dockApi?.panels.length ?? 0) < MAX_PANES) return true;
-  canvasToast(`${MAX_PANES} conversations is all one canvas holds — close one first`);
+  canvasToast(t("{max} conversations is all one canvas holds — close one first", { max: MAX_PANES }));
   return false;
 }
 
 function splitPane(paneId: string, edge: SplitEdge, params: PaneParams): void {
   if (!dockApi || !roomForAnotherPane()) return;
   if (dockApi.groups.length >= MAX_TILES) {
-    if (tabIntoPane(paneId, params)) canvasToast(`${MAX_TILES} tiles is the limit — opened as a tab`);
+    if (tabIntoPane(paneId, params)) canvasToast(t("{max} tiles is the limit — opened as a tab", { max: MAX_TILES }));
     return;
   }
   const fresh = addPane(params, { referencePanel: paneId, direction: edgeToDirection(edge) });
@@ -665,8 +718,8 @@ function zoneTpl(edge: DropEdge, label: string, onDrop: () => void): TemplateRes
 
 function splitZonesTpl(act: (edge: DropEdge) => () => void): TemplateResult {
   return html`
-    ${zoneTpl("left", "Split left", act("left"))} ${zoneTpl("right", "Split right", act("right"))}
-    ${zoneTpl("top", "Split up", act("top"))} ${zoneTpl("bottom", "Split down", act("bottom"))}
+    ${zoneTpl("left", t("Split left"), act("left"))} ${zoneTpl("right", t("Split right"), act("right"))}
+    ${zoneTpl("top", t("Split up"), act("top"))} ${zoneTpl("bottom", t("Split down"), act("bottom"))}
   `;
 }
 
@@ -677,13 +730,13 @@ function paneZonesTpl(paneId: string): TemplateResult | typeof nothing {
   const showing = paneShowing(drag.sessionId);
   if (showing)
     return showing.id === paneId
-      ? zoneTpl("center", "Show here", () => {
+      ? zoneTpl("center", t("Show here"), () => {
           endSessionDrag();
           focusPane(paneId);
         })
       : nothing;
   const canSplit = dockApi.panels.length < MAX_PANES && dockApi.groups.length < MAX_TILES;
-  return html`${zoneTpl("center", "Open here", act("center"))} ${canSplit ? splitZonesTpl(act) : nothing}`;
+  return html`${zoneTpl("center", t("Open here"), act("center"))} ${canSplit ? splitZonesTpl(act) : nothing}`;
 }
 
 function paneZoneAct(paneId: string): (edge: DropEdge) => () => void {
@@ -742,8 +795,8 @@ export function focusedPaneSession(): CoreSession | undefined {
 function paneTitle(panel: IDockviewPanel): string {
   const session = paneSession(panel);
   if (session) return sessionTitle(session);
-  if (panelParams(panel).sessionId) return "Conversation";
-  return "New session";
+  if (panelParams(panel).sessionId) return t("Conversation");
+  return t("New session");
 }
 
 function paneScopeId(panel: IDockviewPanel): string | null {
@@ -774,7 +827,7 @@ function openPaneTool(panel: IDockviewPanel, tool: SessionTool): void {
     scopeId: scope,
     sessionId: params.sessionId ?? session?.id ?? null,
     threadRef: params.threadRef ?? null,
-    title: session?.title?.trim() || "New chat",
+    title: session?.title?.trim() || t("New chat"),
     crumb: paneCrumb(panel),
   });
   if (scope && (tool === "crons" || tool === "files" || tool === "apps")) contextsState.selected = scope;
@@ -981,8 +1034,8 @@ class PaneTab implements ITabRenderer {
     this.element.title = crumb ? `${crumb} / ${title}` : title;
     render(
       html`
-        ${working ? html`<span class="working-dot" ${ref(syncWorkingPulse)} title="Agent is working"></span>` : nothing}
-        ${awaiting ? html`<span class="awaiting-dot" title="Waiting for your reply" aria-label="Waiting for your reply"></span>` : nothing}
+        ${working ? html`<span class="working-dot" ${ref(syncWorkingPulse)} title=${t("Agent is working")}></span>` : nothing}
+        ${awaiting ? html`<span class="awaiting-dot" title=${t("Waiting for your reply")} aria-label=${t("Waiting for your reply")}></span>` : nothing}
         ${
           background
             ? html`<span
@@ -1007,8 +1060,8 @@ class PaneTab implements ITabRenderer {
             ? html`<button
                 class="icon-btn subtle split-tab-close split-tab-archive"
                 type="button"
-                title="Archive session"
-                aria-label="Archive session"
+                title=${t("Archive session")}
+                aria-label=${t("Archive session")}
                 @pointerdown=${(e: Event) => e.stopPropagation()}
                 @click=${(e: Event) => {
                   e.stopPropagation();
@@ -1024,8 +1077,8 @@ class PaneTab implements ITabRenderer {
             ? html`<button
                 class="icon-btn subtle split-tab-close"
                 type="button"
-                title="Close pane"
-                aria-label="Close pane"
+                title=${t("Close pane")}
+                aria-label=${t("Close pane")}
                 @click=${(e: Event) => {
                   e.stopPropagation();
                   closePanels([panel]);
@@ -1068,7 +1121,7 @@ class StripDrop implements IHeaderActionsRenderer {
     const group = this.group;
     render(
       group && stripJoinable()
-        ? zoneTpl("center", "Open as tab", () => {
+        ? zoneTpl("center", t("Open as tab"), () => {
             const drag = sessionDrag;
             endSessionDrag();
             const anchor = group.activePanel ?? group.panels[0];
@@ -1143,9 +1196,9 @@ class GroupActions implements IHeaderActionsRenderer {
             @click=${(e: Event) => e.stopPropagation()}
           >
             ${PANE_TOOLS.map(
-              (t) => html`
-                <button class="session-menu-option" type="button" role="menuitem" @click=${() => runTool(t.tool)}>
-                  ${icon(t.glyph, 15)}<span>${t.label}</span>
+              (tool) => html`
+                <button class="session-menu-option" type="button" role="menuitem" @click=${() => runTool(tool.tool)}>
+                  ${icon(tool.glyph, 15)}<span>${t(tool.label)}</span>
                 </button>
               `,
             )}
@@ -1165,7 +1218,7 @@ class GroupActions implements IHeaderActionsRenderer {
                       }}
                     >
                       ${icon(maximized ? Shrink : Expand, 15)}<span
-                        >${maximized ? "Restore to grid (Esc)" : "Focus over the grid"}</span
+                        >${maximized ? t("Restore to grid (Esc)") : t("Focus over the grid")}</span
                       >
                     </button>
                   `
@@ -1176,7 +1229,7 @@ class GroupActions implements IHeaderActionsRenderer {
       : nothing;
     const buttons: { label: string; glyph: TemplateResult | SVGElement; cls?: string; run: () => void }[] = [
       {
-        label: "Split this pane with a new session",
+        label: t("Split this pane with a new session"),
         glyph: icon(Plus, 15),
         run: () => {
           const p = activePanel();
@@ -1187,7 +1240,7 @@ class GroupActions implements IHeaderActionsRenderer {
         ? []
         : [
             {
-              label: "Open full screen",
+              label: t("Open full screen"),
               glyph: icon(Maximize2, 14),
               run: () => {
                 const p = activePanel();
@@ -1196,7 +1249,7 @@ class GroupActions implements IHeaderActionsRenderer {
             },
           ]),
       {
-        label: "Close pane",
+        label: t("Close pane"),
         glyph: icon(X, 15),
         cls: " split-group-close",
         run: () => {
@@ -1210,8 +1263,8 @@ class GroupActions implements IHeaderActionsRenderer {
           <button
             class="icon-btn subtle split-tools-btn ${this.menuOpen ? "active" : ""}"
             type="button"
-            title="Tools"
-            aria-label="Tools"
+            title=${t("Tools")}
+            aria-label=${t("Tools")}
             aria-haspopup="menu"
             aria-expanded=${this.menuOpen ? "true" : "false"}
             @click=${() => {
