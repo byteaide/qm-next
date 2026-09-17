@@ -538,7 +538,7 @@ export function createChatSurface(
         });
     } catch (err) {
       if (agent === chatState.agent) {
-        ctx.composer.state.error = err instanceof Error ? err.message : "Could not send the approval.";
+        ctx.composer.state.error = errMessage(err, "Could not send the approval.");
         drawActiveChat(agent);
       }
     } finally {
@@ -719,7 +719,7 @@ export function createChatSurface(
       await completion;
     } catch (err) {
       if (agent === chatState.agent)
-        ctx.composer.state.error = err instanceof Error ? err.message : "Could not reconnect to the running task.";
+        ctx.composer.state.error = errMessage(err, "Could not reconnect to the running task.");
     } finally {
       if (agent === chatState.agent) {
         agent.streamFn = normalStreamFn;

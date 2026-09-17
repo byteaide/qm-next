@@ -245,3 +245,32 @@ locale)——日期已部分跟随环境,但与应用内切换器不一致。P3 
   (预绘制脚本生效)
 - `typecheck:app` 绿;`vite build` 通过;浏览器 console 0 error
 - 首访无 localStorage 时按 `navigator.language` 检测(zh 浏览器直接得中文界面)
+
+### P2 错误通道(已完成)
+
+改动:新增 `app/src/i18n/errors.ts`(82 码错误词表 + `localizeTurnError`)、
+`tests/i18n.test.ts`(词表对齐 + 行为测试);`core-bridge.ts`(`ApiError`
+增加 `errorCode` 与 `displayMessage` getter,`api()` 挂码)、
+`chassis/src/errors.ts`(`errMessage` 结构性读取 `displayMessage`,~6 行,
+记录在案分叉)、`chat.ts`(3 个渲染点接 `localizeTurnError`)、
+`model-connect.ts`(`friendly()` 三条文案走 t())。
+
+验证:
+
+- `typecheck:app` 绿;i18n 测试 5/5;既有 web-ui 测试 15/15 无回归
+- 浏览器实测(portal 前门):拦截 `/api/crons` 返回 404 `not_found` 后,
+  zh 界面错误横幅显示"资源不存在"(无英文泄漏),console.debug 记录原始
+  消息;切 en 显示原始码;**不刷新**来回切换 locale,横幅即时重绘
+- turn_failure/provider type 映射由单元测试覆盖(rate_limit_error、
+  insufficient_quota、未知 type 透传)
+
+独立评审(fresh-context,§5.2 P2 强制项):**APPROVE**,4 条发现已全部修复
+——chat.ts 两处 `err.message` 改走 `errMessage`(approval/reconnect 错误
+接入本地化)、console.debug 加 zh 条件、补 reach 包 7 个码
+(not_a_member/ambiguous_recipient/channel_not_found/ambiguous_channel/
+group_too_large/group_not_found/group_open_failed)、收紧 provider type
+auth 正则(避免 authorization_pending 误判)。
+
+已知限制:catch 时即烘进 state 的错误字符串(如 composer 报错)在 locale
+切换后保持原语言,下次同类错误生效;错误对象经 `displayMessage` getter
+的路径不受影响。

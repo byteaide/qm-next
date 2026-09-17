@@ -59,6 +59,15 @@ export const errorZh: Record<string, string> = {  // Generic envelope codes (the
   seed_turn_refused: "会话首条消息被拒绝",
   owner_mediation_required: "需要所有者处理",
 
+  // Reach (packages/reach/src/contract.ts, relayed by reach-routes)
+  not_a_member: "你不在该频道或群组中,无法发送",
+  ambiguous_recipient: "该名称匹配到多个联系人,请指定确切的名称或 ID",
+  channel_not_found: "找不到匹配的频道",
+  ambiguous_channel: "该名称匹配到多个频道,请指定确切的名称或 ID",
+  group_too_large: "群组人数超限,请改用频道",
+  group_not_found: "找不到符合条件的群组",
+  group_open_failed: "群组创建失败,请稍后重试",
+
   // Connectors / OAuth / keychain
   oauth_denied: "授权被拒绝",
   oauth_start_failed: "无法发起登录",
@@ -134,7 +143,7 @@ const providerTypeErrorZh: ReadonlyArray<readonly [RegExp, string]> = [
   [/rate.?limit/i, "触发模型服务限流,请稍后重试"],
   [/content.?filter|content.?policy/i, "内容被模型安全策略拦截"],
   [/overload/i, "模型服务过载,请稍后重试"],
-  [/auth|api.?key/i, "模型服务认证失败,请检查模型接入配置"],
+  [/authentication|invalid_api_key|api.?key/i, "模型服务认证失败,请检查模型接入配置"],
   [/permission/i, "模型服务拒绝访问(权限不足)"],
   [/invalid_request/i, "模型服务拒绝了该请求"],
   [/timed?.?out/i, "模型服务响应超时"],

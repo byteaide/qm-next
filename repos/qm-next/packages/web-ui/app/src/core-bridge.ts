@@ -3,6 +3,7 @@ import type { Api, AssistantMessage, AssistantMessageEventStream, Context, Model
 import type { Agent, AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
 import { swallow } from "../../chassis/src/errors.ts";
 import { hasZhError, localizedError } from "./i18n/errors.ts";
+import { currentLocale } from "./i18n/index.ts";
 import { groupDmText } from "./group-dm-label.ts";
 import { base64ToBytes } from "./paste-text.ts";
 import { defaultEffortForModel, harnessSupportsEffort } from "./model-options.ts";
@@ -524,7 +525,9 @@ export async function api<T = unknown>(path: string, init?: RequestInit): Promis
     const error = new ApiError(msg, r.status, body);
     if (code) {
       error.errorCode = code;
-      if (hasZhError(code)) console.debug(`web-ui: api error ${code} (original message): ${msg}`);
+      if (currentLocale() === "zh" && hasZhError(code)) {
+        console.debug(`web-ui: api error ${code} (original message): ${msg}`);
+      }
     }
     throw error;
   }
