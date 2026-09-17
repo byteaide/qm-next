@@ -87,14 +87,17 @@ i18n/
   另有 node:test 对齐测试双保险(P4)
 - 依赖方向:`i18n/` 不导入 `core-bridge.ts` 等上层模块(词表是叶子模块);
   `core-bridge.ts` 可以导入 `i18n/`
-- `LocaleController(host)`:~30 行 ReactiveController,订阅 locale 变更事件触发
-  `host.requestUpdate()` —— Lit 切语言即时重渲染的标准做法
+- 重渲染机制(P1 实现修正):本 app 是 lit-html 命令式 `render()`,**无
+  LitElement 类**,ReactiveController 方案不适用。改为 `onLocaleChange(fn)`
+  订阅 + `main.ts` 注册全量重绘(chrome/会话列表/打开的会话/`refreshActiveView`
+  /`syncDocumentTitle`);文本一律渲染时经 `t()` 求值,重绘即生效
 - 持久化完全照抄 theme.ts:localStorage `qm.locale`;首次默认
   `navigator.language` 以 `zh*` 开头 → `zh`,否则 `en`;切换时同步
   `document.documentElement.lang`;`index.html` 加预绘制内联脚本(对齐 theme 的
   预绘制注释约定)
-- 切换入口:composer 会话设置菜单,紧邻 theme toggle(`shell.ts:472`);
-  `document-title.ts` 的 `VIEW_TITLES`(10 条)改为 t() 求值并监听 locale 变更刷新
+- 切换入口:sidebar footer,紧邻 theme toggle(实测点;原拟 composer 会话菜单,
+  实现取 theme toggle 同排更显眼);`document-title.ts` 的 `VIEW_TITLES`
+  改为渲染时 t() 求值
 
 ### 4.2 错误消息映射(前端拦截,后端零改动)
 
@@ -162,7 +165,7 @@ locale)——日期已部分跟随环境,但与应用内切换器不一致。P3 
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| P1 基建 | i18n/ 目录、t()、LocaleController、qm.locale 持久化、预绘制脚本、设置菜单切换器 | `pnpm --filter @qm/web-ui typecheck:app` 绿;vite dev 手动验证:切换即时生效并持久化、`<html lang>` 跟随、刷新后保持 |
+| P1 基建 | i18n/ 目录、t()、onLocaleChange 重绘、qm.locale 持久化、预绘制脚本、sidebar 切换器 | `pnpm --filter @qm/web-ui typecheck:app` 绿;浏览器实测:切换即时生效并持久化、`<html lang>` 跟随、刷新后保持(P1 已完成,见 §7) |
 | P2 错误通道 | errors 词表(61 码)、api() displayMessage、errMessage 改造(~4 行,结构性检查)、turn_failure/type 映射 | 浏览器验证 401/404/bad_request/业务专属码错误横幅全中文;英文原文仅 console.debug |
 | P3 静态文案清扫 | document-title → 按文件从大到小:chat(86)、contexts(52)、composer(45)、sessions(43)、deploys(41)、crons(35)、skills(33)、connectors(28)、其余;含 aria/placeholder 与日期 locale | `rg '>[A-Z][a-z]+ [a-z]+'` 与 `"(title\|aria-label\|placeholder)="\[A-Z\]` 命中人工核对后无真实文案残留(扫描有误报,如代码示例文本);每文件提交粒度 |
 | P4 Portal + 防漂移 | portal cookie/词表(不动内联脚本);en/zh key 对齐测试;残留英文扫描 | portal 页面跟随语言;`pnpm test` 全绿(含新增 i18n 对齐测试) |
@@ -223,3 +226,22 @@ locale)——日期已部分跟随环境,但与应用内切换器不一致。P3 
   供应商,迁移为机械替换(t() → msg())
 - **agent 输出语言**:与本方案解耦;若需要"agent 跟随界面语言",在 orchestrator
   的 turn 请求附语言提示,另立任务
+
+## 7. 实施记录
+
+### P1 基建(已完成)
+
+改动:`app/src/i18n/`(index.ts / ui.en.ts / ui.zh.ts)、`app/index.html`
+(locale 预绘制脚本)、`shell.ts`(sidebar 切换器 + 导出 refreshActiveView)、
+`main.ts`(applyLocale + onLocaleChange 全量重绘)、`document-title.ts`
+(VIEW_TITLES 渲染时 t())。
+
+验证(浏览器实测,scripts/dev-web-ui.ts 本地栈,portal 前门加载 SPA):
+
+- 切换即时生效:标题双向翻转("聊天 · QM · Web" ⇄ "Chats · QM · Web"),
+  切换器 title/glyph 同步(切换到英文 ⇄ Switch to Chinese,中 ⇄ EN)
+- `<html lang>` 跟随:`zh-CN` ⇄ `en`
+- 持久化:localStorage `qm.locale` 写入正确;刷新后 locale/lang 保持
+  (预绘制脚本生效)
+- `typecheck:app` 绿;`vite build` 通过;浏览器 console 0 error
+- 首访无 localStorage 时按 `navigator.language` 检测(zh 浏览器直接得中文界面)

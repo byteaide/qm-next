@@ -78,6 +78,7 @@ import { contextsState, ensureContexts, renderContexts, resetContextsState, reso
 import { appState, can, isView, type AuthMode, type Me, type View } from "./shell-state";
 import { trapDialogFocus } from "./dialog-focus";
 import { activeSessionForDocumentTitle, updateDocumentTitle } from "./document-title";
+import { currentLocale, t, toggleLocale } from "./i18n/index";
 export { appState, can, type Me, type View } from "./shell-state";
 
 let authMode: AuthMode = "portal";
@@ -470,6 +471,15 @@ export function mountShell(): void {
                 : nothing
             }
             <theme-toggle .includeSystem=${true} title="Color scheme: light / dark / system"></theme-toggle>
+            <button
+              class="icon-btn subtle"
+              type="button"
+              title=${currentLocale() === "zh" ? t("Switch to English") : t("Switch to Chinese")}
+              aria-label=${currentLocale() === "zh" ? t("Switch to English") : t("Switch to Chinese")}
+              @click=${toggleLocale}
+            >
+              <span style="font-size:12px;font-weight:600">${currentLocale() === "zh" ? "中" : "EN"}</span>
+            </button>
             <button class="icon-btn subtle" title="Sign out" aria-label="Sign out" @click=${signOut}>
               ${icon(LogOut, 17)}
             </button>
@@ -684,7 +694,10 @@ export function switchView(v: View): void {
   }
 }
 
-function refreshActiveView(v: View): void {
+// Re-renders whichever view is active. Exported for locale switches: text is
+// resolved at render time via t(), so flipping the locale re-runs this plus
+// the chrome (see the onLocaleChange wiring in main.ts).
+export function refreshActiveView(v: View): void {
   switch (v) {
     case "chats":
       void refreshSessions({ silent: true, refreshContexts: true });

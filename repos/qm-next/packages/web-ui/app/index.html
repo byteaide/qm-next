@@ -22,6 +22,16 @@
           }
         } catch (e) {}
       })();
+      // Pre-paint locale sync — must stay in lockstep with app/src/i18n/index.ts.
+      (function () {
+        try {
+          var l = localStorage.getItem("qm.locale");
+          if (l !== "zh" && l !== "en") {
+            l = (navigator.language || "").toLowerCase().indexOf("zh") === 0 ? "zh" : "en";
+          }
+          document.documentElement.lang = l === "zh" ? "zh-CN" : "en";
+        } catch (e) {}
+      })();
     </script>
   </head>
   <body>

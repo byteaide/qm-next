@@ -1,4 +1,5 @@
 import type { View } from "./shell-state";
+import { t } from "./i18n/index";
 
 interface TitledSession {
   id: string;
@@ -27,7 +28,11 @@ const VIEW_TITLES: Record<View, string> = {
 
 export function documentTitle(view?: View, conversationTitle?: string | null, conversationOpen = false): string {
   const title =
-    view === "chats" && conversationOpen ? conversationTitle?.trim() || "New chat" : view && VIEW_TITLES[view];
+    view === "chats" && conversationOpen
+      ? conversationTitle?.trim() || t("New chat")
+      : view
+        ? t(VIEW_TITLES[view])
+        : undefined;
   return title ? `${title} · ${PRODUCT_TITLE}` : PRODUCT_TITLE;
 }
 
