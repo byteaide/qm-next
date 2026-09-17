@@ -8,6 +8,7 @@
 import { html, nothing, render, type TemplateResult } from "lit";
 import { CornerDownLeft, Search } from "lucide";
 import { api, type CoreSession } from "./core-bridge";
+import { t } from "./i18n/index";
 import { mainConversation } from "./conversations";
 import { recencyGroup } from "./session-list";
 import { openSession, refreshSessions, sessionsState, sessionTitle } from "./sessions";
@@ -287,8 +288,8 @@ function askRow(): TemplateResult {
     >
       <span class="chat-search-who ask">+</span>
       <span class="chat-search-text">
-        <span class="chat-search-snippet">Ask QM to find it: <b>“${searchState.query.trim()}”</b></span>
-        <span class="chat-search-meta">starts a new chat where QM hunts down the matching session and links it</span>
+        <span class="chat-search-snippet">${t("Ask QM to find it:")} <b>“${searchState.query.trim()}”</b></span>
+        <span class="chat-search-meta">${t("starts a new chat where QM hunts down the matching session and links it")}</span>
       </span>
       <span class="chat-search-kbd">${isMac ? "⌘" : "Ctrl"}${icon(CornerDownLeft, 11)}</span>
     </button>
@@ -299,15 +300,15 @@ function paletteTpl(): TemplateResult {
   const q = searchState.query.trim();
   let body: TemplateResult;
   if (q.length < MIN_QUERY_LEN) {
-    body = html`<div class="chat-search-empty">Search every chat you can see — messages, not just titles.</div>`;
+    body = html`<div class="chat-search-empty">${t("Search every chat you can see — messages, not just titles.")}</div>`;
   } else if (searchState.loading && !searchState.hits.length) {
-    body = html`<div class="chat-search-empty">Searching…</div>`;
+    body = html`<div class="chat-search-empty">${t("Searching…")}</div>`;
   } else if (searchState.failed) {
     body = html`<div class="chat-search-empty chat-search-failed">
-      Search failed — check the connection and try again.
+      ${t("Search failed — check the connection and try again.")}
     </div>`;
   } else if (!searchState.hits.length) {
-    body = html`<div class="chat-search-empty">No messages match “${q}”.</div>`;
+    body = html`<div class="chat-search-empty">${t("No messages match “{q}”.", { q })}</div>`;
   } else {
     body = html`${resultRows()}`;
   }
@@ -318,13 +319,13 @@ function paletteTpl(): TemplateResult {
         if (e.target === e.currentTarget) closeChatSearch();
       }}
     >
-      <div class="chat-search-palette" role="dialog" aria-label="Search your chats" @keydown=${onPaletteKeydown}>
+      <div class="chat-search-palette" role="dialog" aria-label=${t("Search your chats")} @keydown=${onPaletteKeydown}>
         <div class="chat-search-inputrow">
           ${icon(Search, 16)}
           <input
             class="chat-search-input"
             type="text"
-            placeholder="Search your chats…"
+            placeholder=${t("Search your chats…")}
             autocomplete="off"
             spellcheck="false"
             .value=${searchState.query}
@@ -335,9 +336,9 @@ function paletteTpl(): TemplateResult {
         <div class="chat-search-results">${body}</div>
         ${askRowShown() ? html`<div class="chat-search-askbar">${askRow()}</div>` : nothing}
         <div class="chat-search-foot">
-          <span><span class="chat-search-kbd">↑↓</span> navigate</span>
-          <span><span class="chat-search-kbd">↵</span> open chat</span>
-          <span><span class="chat-search-kbd">${isMac ? "⌘↵" : "Ctrl+↵"}</span> ask QM in a new chat</span>
+          <span><span class="chat-search-kbd">↑↓</span> ${t("navigate")}</span>
+          <span><span class="chat-search-kbd">↵</span> ${t("open chat")}</span>
+          <span><span class="chat-search-kbd">${isMac ? "⌘↵" : "Ctrl+↵"}</span> ${t("ask QM in a new chat")}</span>
         </div>
       </div>
     </div>
