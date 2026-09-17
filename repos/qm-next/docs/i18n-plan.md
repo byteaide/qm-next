@@ -467,3 +467,63 @@ helper(`scopeLabel` 改写为按 `scope` 值查表返回中文,`editAudience` �
     `Organization` / `Created here` / `Skill packs` / `Overrides` /
     `0 skills in 0 groups` / `No skills available yet.`
   - 截图:`i18n-p3-skills-zh.png` / `i18n-p3-skills-en.png`
+
+第七批改:`packages/web-ui/app/src/connectors.ts`
+(keychain 页,估 28 命中,实际 ~85;含 Keychain hero(标题/副标题/信任
+说明)/刷新 aria + title/添加凭据按钮/概览四项(已连接账号/已存凭据/
+生效中的授权/需要关注)/加载中提示/两个 section(已关联账号/已存凭据
+标题、副标题、空态)/凭据卡(Encrypted at rest/Expires {date}/Added
+{date}/Expired/Last used {date} in {scope} · {status}/No audited use
+yet/Delete/Pending requests/requested {mode} access/expires {date}/
+Active access/Revoke)/连接器卡(Not connected/Reconnect needed/Refresh
+failed: {error}/Reconnect/Connect account/Disconnect + 7 个 provider 的
+hosts/desc 在渲染时经 t() 翻译,品牌名保留英文)/添加凭据表单(New
+credential/Add a credential/长说明/Your one-time page is ready/Open it
+in a new tab…/Open the one-time page/Done/Service/Environment variable
+/optional/Purpose/placeholder/Cancel/Preparing…/Continue)/确认弹窗(
+Check impact/Cancel)/删除凭据弹窗(单复数 grants 句/Delete {service}?/
+Automations…/Delete credential)/撤销授权弹窗(Revoke access for
+{scope}?/This {mode} access…/Revoke access/Access revoked ✓/Could not
+revoke access.)/断开连接弹窗(单复数 credential grant 句/Disconnect
+{name}?/Disconnect account)/错误与通知(Another keychain change…/Could
+not delete the key./Service and purpose are required./No one-time page
+URL was returned./Your one-time page is ready./Could not create the
+one-time page./No authorization URL was returned./Could not start the
+connector./Could not disconnect./Failed to load connectors./Failed to
+load stored keys./{name}: connected./{name}: connection failed.)/
+scopeName 兜底文案(a personal DM/a Slack channel ({ref})/a group DM/
+a team ({ref})/the whole org)+ 新 helper modeLabel(once|standing →
+one-time|standing t() 翻译);新增 ~85 个 ui key,登记于两表;`CONNECTOR_LABELS`
+保持英文数据,`hosts`/`desc` 在渲染点经 `t()` 解析,locale 切换实时生效
+(规避 module-level t() 锁定问题))。
+
+复用 key:`Keychain`(P1 zh="密钥")/`Cancel` / `Done` / `Delete`(均 P1/
+P2 已有)/`Refresh`(P3 crons)。
+
+术语统一:P1 已定 `Keychain → 密钥`,本批新 key 全部跟随(刷新密钥/
+密钥概览/正在加载密钥/密钥库),避免"钥匙串"混用。
+
+验证:
+
+- `typecheck:app` 绿(1 处重复键 `a Slack channel` 与既有条目冲突,删除
+  新增重复后绿);`vite build` 通过;i18n 测试 5/5;web-ui 既有测试 15/15
+  全过(共 20/20)
+- 浏览器实测(portal 前门 127.0.0.1:55576,`/keychain` 路由):
+  - zh:标题 `密钥`、`代理可以代表你使用的账号与凭据。`、信任说明、
+    `刷新密钥` / `添加凭据` 按钮、`密钥概览` aria(已连接账号/已存凭据/
+    生效中的授权/需要关注)、`已关联账号` section(`代理可以你的身份
+    使用的服务商 API。`、空态 `没有可用账号` + `你的工作区尚未配置任何
+    账号服务商。`)、`已存凭据` section(`你通过一次性页面添加的 API
+    密钥、令牌和文件。`、空态 `暂无已存凭据` + `添加凭据,无需把密钥
+    粘贴到聊天中。` + `添加凭据` 按钮);点击 `添加凭据` 后表单全 zh:
+    `新凭据` / `添加凭据` / 长说明 / `服务` / `环境变量` + `可选` /
+    `用途` / placeholder `代理可以用这个凭据做什么?` / `取消` / `继续`
+  - en(不刷新):`Keychain` / `Accounts and credentials your agent may
+    use on your behalf.` / `Refresh keychain` / `Add credential` /
+    `Connected accounts` / `Stored credentials` / `Active grants` /
+    `Need attention` / `Linked accounts` / `Provider APIs the agent can
+    use as you.` / `No accounts available` / `Stored credentials` /
+    `New credential` / `Add a credential` / `Service` / `Environment
+    variable` + `optional` / `Purpose` / `What may the agent use this
+    credential for?` / `Cancel` / `Continue`
+  - 截图:`i18n-p3-connectors-zh.png` / `i18n-p3-connectors-en.png`
