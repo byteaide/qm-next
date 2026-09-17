@@ -1005,4 +1005,60 @@ export const uiZh = {
   "Couldn't update the pinned header setting.": "无法更新钉选头部设置。",
   "Turning it on posts and pins the header; turning it off unpins and removes it. Default follows the org-wide setting. Model changes edit the pinned message in place.":
     "开启后会发布并钉选该头部;关闭则会取消钉选并移除。默认跟随组织级设置。模型变更会原地编辑钉选消息。",
+
+  // --- P4 残留清扫:模型连接 / 派生来源 / 会话顶栏 / 上下文页漏网 ---
+  "That code expired — start the sign-in again.": "验证码已过期——请重新开始登录。",
+  "Open claude.ai and approve ↗": "打开 claude.ai 并完成授权 ↗",
+  "Paste the code Claude shows you": "粘贴 Claude 显示的验证码",
+  "Code from claude.ai": "claude.ai 的验证码",
+  "Connecting…": "连接中…",
+  Finish: "完成",
+  "Copy code to clipboard": "复制验证码到剪贴板",
+  "Copied ✓": "已复制 ✓",
+  "Click to copy": "点击复制",
+  "Open chatgpt.com and paste it ↗": "打开 chatgpt.com 并粘贴 ↗",
+  "Waiting for your approval…": "等待你授权…",
+  "API key · from": "API 密钥 · 来自",
+  "Checking…": "校验中…",
+  Connect: "连接",
+  "Sign in with {name}": "使用 {name} 登录",
+  "Uses your {plan} subscription — nothing extra to pay.": "使用你的 {plan} 订阅——无需额外付费。",
+  "Use an API key": "使用 API 密钥",
+  "Paste a key from {console} — usage is billed to the key.":
+    "粘贴来自 {console} 的密钥——用量会计入该密钥。",
+  "Chat with {name} on your own account": "用你自己的账号与 {name} 聊天",
+  "Connected with your {name} subscription": "已通过你的 {name} 订阅连接",
+  "Connected with your API key": "已通过你的 API 密钥连接",
+  "Start chatting": "开始聊天",
+  "Chats run on the account you connect here, billed to you — not the organization.":
+    "聊天运行在你在此连接的账号上,费用由你承担——不走组织。",
+  "Your organization has each person chat on their own AI account. Connect one to get started — you can switch any time.":
+    "你的组织要求每人在自己的 AI 账号上聊天。连接一个即可开始——随时可以切换。",
+  "Chats run on the account you connect here, billed to you — not the organization. Connect at least one to keep using the assistant.":
+    "聊天运行在你在此连接的账号上,费用由你承担——不走组织。至少连接一个才能继续使用助手。",
+  "Connect your AI account": "连接你的 AI 账号",
+  "Your AI account": "你的 AI 账号",
+  "Couldn't load the original conversation's history.": "无法加载原会话的历史记录。",
+  "Forked from {title}": "派生自 {title}",
+  "Forked from {title} — open the original": "派生自 {title}——打开原会话",
+  "{n} messages": "{n} 条消息",
+  hide: "收起",
+  show: "展开",
+  fork: "派生",
+  "Open the {name} project": "打开 {name} 项目",
+  "This chat runs in the {name} context — the agent works with that context's files and memory, separate from your personal context.":
+    "此会话运行在 {name} 上下文中——智能体使用该上下文的文件与记忆,与你的个人上下文相互隔离。",
+  "Back to this chat": "返回此会话",
+  "Active only": "仅活跃",
+  Everything: "全部",
+  "1 conversation": "1 个会话",
+  "{n} conversations": "{n} 个会话",
+  "active {time}": "{time} 活跃",
+  "This project is ready for work": "该项目已准备就绪",
+  "Start a conversation with New chat. Files, automations, and other work created there will stay scoped to this project.":
+    "用“新聊天”开启会话。在那里创建的文件、自动化与其他工作都将限定在此项目内。",
+  "Slack channel": "Slack 频道",
+  "Loading this context's files, webhooks, crons, apps and skills…":
+    "正在加载此上下文的文件、Webhook、定时任务、应用与技能…",
+  "No models found": "未找到模型",
 } satisfies Record<keyof typeof uiEn, string>;

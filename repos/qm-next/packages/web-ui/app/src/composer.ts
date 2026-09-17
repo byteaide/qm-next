@@ -1005,7 +1005,7 @@ export function createComposerSurface(ctx: ConvCtx): ComposerSurface {
                             )}
                           `,
                         )
-                      : html`<div class="menu-empty">No models found</div>`
+                      : html`<div class="menu-empty">${t("No models found")}</div>`
                   }
                 </div>
               `

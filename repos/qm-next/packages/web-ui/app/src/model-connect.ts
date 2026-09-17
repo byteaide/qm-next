@@ -245,7 +245,7 @@ async function pollChatGPT(): Promise<void> {
   if (Date.now() > device.expiresAt) {
     deviceCache = null;
     resetFlow();
-    s.error = "That code expired — start the sign-in again.";
+    s.error = t("That code expired — start the sign-in again.");
     paint();
     return;
   }
@@ -317,14 +317,14 @@ function claudeSteps(): TemplateResult {
   return html`
     <ol class="mc-steps">
       <li>
-        <a class="btn" href=${flow.authorizeUrl} target="_blank" rel="noopener">Open claude.ai and approve ↗</a>
+        <a class="btn" href=${flow.authorizeUrl} target="_blank" rel="noopener">${t("Open claude.ai and approve ↗")}</a>
       </li>
       <li>
         <label class="mc-field">
-          <span>Paste the code Claude shows you</span>
+          <span>${t("Paste the code Claude shows you")}</span>
           <input
             .value=${flow.code}
-            placeholder="Code from claude.ai"
+            placeholder=${t("Code from claude.ai")}
             autocomplete="off"
             spellcheck="false"
             @input=${(e: Event) => {
@@ -337,7 +337,7 @@ function claudeSteps(): TemplateResult {
       </li>
       <li>
         <button class="btn primary" ?disabled=${!flow.code.trim() || s.busy} @click=${finishClaude}>
-          ${s.busy ? "Connecting…" : "Finish"}
+          ${s.busy ? t("Connecting…") : t("Finish")}
         </button>
       </li>
     </ol>
@@ -353,18 +353,18 @@ function chatgptSteps(): TemplateResult {
         <button
           type="button"
           class="mc-code-btn ${s.copied ? "copied" : ""}"
-          title="Copy code to clipboard"
+          title=${t("Copy code to clipboard")}
           @click=${() => copyCode(device.userCode)}
         >
           <span class="mc-code">${device.userCode}</span>
-          <span class="mc-copy-hint">${s.copied ? "Copied ✓" : "Click to copy"}</span>
+          <span class="mc-copy-hint">${s.copied ? t("Copied ✓") : t("Click to copy")}</span>
         </button>
       </li>
       <li>
-        <a class="btn" href=${device.verificationUrl} target="_blank" rel="noopener">Open chatgpt.com and paste it ↗</a>
+        <a class="btn" href=${device.verificationUrl} target="_blank" rel="noopener">${t("Open chatgpt.com and paste it ↗")}</a>
       </li>
       <li>
-        <span class="mc-waiting"><span class="mc-spinner" aria-hidden="true"></span>Waiting for your approval…</span>
+        <span class="mc-waiting"><span class="mc-spinner" aria-hidden="true"></span>${t("Waiting for your approval…")}</span>
       </li>
     </ol>
   `;
@@ -376,7 +376,7 @@ function apikeySteps(p: ProviderMeta): TemplateResult {
   return html`
     <div class="mc-keyform">
       <label class="mc-field">
-        <span>API key · from <a href=${p.keyConsoleUrl} target="_blank" rel="noopener">${p.keyConsole}</a></span>
+        <span>${t("API key · from")} <a href=${p.keyConsoleUrl} target="_blank" rel="noopener">${p.keyConsole}</a></span>
         <input
           type="password"
           .value=${flow.value}
@@ -390,7 +390,7 @@ function apikeySteps(p: ProviderMeta): TemplateResult {
         />
       </label>
       <button class="btn primary" ?disabled=${!flow.value.trim() || s.busy} @click=${() => saveKey(p)}>
-        ${s.busy ? "Checking…" : "Connect"}
+        ${s.busy ? t("Checking…") : t("Connect")}
       </button>
     </div>
   `;
@@ -402,15 +402,15 @@ function connectBody(p: ProviderMeta): TemplateResult {
   return html`
     <div class="mc-connect">
       ${methodRow(
-        `Sign in with ${p.name}`,
-        `Uses your ${p.subscription} subscription — nothing extra to pay.`,
+        t("Sign in with {name}", { name: p.name }),
+        t("Uses your {plan} subscription — nothing extra to pay.", { plan: p.subscription }),
         s.method === "subscription",
         () => void pickSubscription(p),
       )}
       ${subscriptionSteps}
       ${methodRow(
-        "Use an API key",
-        `Paste a key from ${p.keyConsole} — usage is billed to the key.`,
+        t("Use an API key"),
+        t("Paste a key from {console} — usage is billed to the key.", { console: p.keyConsole }),
         s.method === "apikey",
         pickApiKey,
       )}
@@ -422,13 +422,13 @@ function connectBody(p: ProviderMeta): TemplateResult {
 function providerRow(p: ProviderMeta): TemplateResult {
   const kind = s.connections[p.key];
   const open = s.open === p.key;
-  let statusLine = `Chat with ${p.name} on your own account`;
-  if (kind === "oauth") statusLine = `Connected with your ${p.name} subscription`;
-  else if (kind === "apikey") statusLine = "Connected with your API key";
+  let statusLine = t("Chat with {name} on your own account", { name: p.name });
+  if (kind === "oauth") statusLine = t("Connected with your {name} subscription", { name: p.name });
+  else if (kind === "apikey") statusLine = t("Connected with your API key");
   let action: TemplateResult | typeof nothing = nothing;
   if (kind) {
     action = html`<button class="btn mc-quiet-danger" ?disabled=${s.busy} @click=${() => disconnect(p)}>
-      ${s.busy ? "…" : "Disconnect"}
+      ${s.busy ? "…" : t("Disconnect")}
     </button>`;
   } else if (!open) {
     action = html`<button
@@ -440,7 +440,7 @@ function providerRow(p: ProviderMeta): TemplateResult {
         paint();
       }}
     >
-      Connect
+      ${t("Connect")}
     </button>`;
   }
   return html`
@@ -464,36 +464,38 @@ function view(): TemplateResult {
   if (anyConnected) {
     cta =
       s.mode === "gate"
-        ? html`<button class="btn primary mc-cta" @click=${() => location.reload()}>Start chatting</button>`
-        : html`<button class="btn primary mc-cta" @click=${closeManager}>Done</button>`;
+        ? html`<button class="btn primary mc-cta" @click=${() => location.reload()}>${t("Start chatting")}</button>`
+        : html`<button class="btn primary mc-cta" @click=${closeManager}>${t("Done")}</button>`;
   }
   const body = s.loading
-    ? html`<div class="mc-waiting"><span class="mc-spinner" aria-hidden="true"></span>Loading…</div>`
+    ? html`<div class="mc-waiting"><span class="mc-spinner" aria-hidden="true"></span>${t("Loading…")}</div>`
     : html`
         ${s.error ? html`<div class="mc-error" role="alert">${s.error}</div>` : nothing}
         <div class="mc-providers">${PROVIDERS.map((p) => providerRow(p))}</div>
         ${cta}
       `;
-  let subCopy = "Chats run on the account you connect here, billed to you — not the organization.";
+  let subCopy = t("Chats run on the account you connect here, billed to you — not the organization.");
   if (s.mode === "gate") {
-    subCopy =
-      "Your organization has each person chat on their own AI account. Connect one to get started — you can switch any time.";
+    subCopy = t(
+      "Your organization has each person chat on their own AI account. Connect one to get started — you can switch any time.",
+    );
   } else if (s.required && !s.loading && !anyConnected) {
-    subCopy =
-      "Chats run on the account you connect here, billed to you — not the organization. Connect at least one to keep using the assistant.";
+    subCopy = t(
+      "Chats run on the account you connect here, billed to you — not the organization. Connect at least one to keep using the assistant.",
+    );
   }
   return html`
     <div class="signin">
       <div class="signin-panel mc-panel">
         ${
           s.mode === "manager" && !anyConnected && !s.loading
-            ? html`<button type="button" class="mc-close" aria-label="Close" title="Close" @click=${closeManager}>
+            ? html`<button type="button" class="mc-close" aria-label=${t("Close")} title=${t("Close")} @click=${closeManager}>
                 ×
               </button>`
             : nothing
         }
         ${s.mode === "gate" ? html`<div class="signin-brand">${brandMark()}<span>${brandName()}</span></div>` : nothing}
-        <h1>${s.mode === "gate" ? "Connect your AI account" : "Your AI account"}</h1>
+        <h1>${s.mode === "gate" ? t("Connect your AI account") : t("Your AI account")}</h1>
         <p class="signin-body">${subCopy}</p>
         ${body}
       </div>

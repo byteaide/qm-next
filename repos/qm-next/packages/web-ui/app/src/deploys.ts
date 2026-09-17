@@ -429,7 +429,7 @@ function drawDeployDetail(d: DeploymentView, loading = false): void {
           ${
             d.createdBy
               ? html`<div class="field">
-                  <label>Created by</label>
+                  <label>${t("Created by")}</label>
                   <div class="value">${friendlyPrincipal(d.createdBy)}</div>
                 </div>`
               : nothing

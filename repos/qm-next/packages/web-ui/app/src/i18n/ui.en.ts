@@ -1025,4 +1025,60 @@ export const uiEn = {
   "Couldn't update the pinned header setting.": "Couldn't update the pinned header setting.",
   "Turning it on posts and pins the header; turning it off unpins and removes it. Default follows the org-wide setting. Model changes edit the pinned message in place.":
     "Turning it on posts and pins the header; turning it off unpins and removes it. Default follows the org-wide setting. Model changes edit the pinned message in place.",
+
+  // --- P4 residual sweep: model connect / fork origin / session scope / contexts leftovers ---
+  "That code expired — start the sign-in again.": "That code expired — start the sign-in again.",
+  "Open claude.ai and approve ↗": "Open claude.ai and approve ↗",
+  "Paste the code Claude shows you": "Paste the code Claude shows you",
+  "Code from claude.ai": "Code from claude.ai",
+  "Connecting…": "Connecting…",
+  Finish: "Finish",
+  "Copy code to clipboard": "Copy code to clipboard",
+  "Copied ✓": "Copied ✓",
+  "Click to copy": "Click to copy",
+  "Open chatgpt.com and paste it ↗": "Open chatgpt.com and paste it ↗",
+  "Waiting for your approval…": "Waiting for your approval…",
+  "API key · from": "API key · from",
+  "Checking…": "Checking…",
+  Connect: "Connect",
+  "Sign in with {name}": "Sign in with {name}",
+  "Uses your {plan} subscription — nothing extra to pay.": "Uses your {plan} subscription — nothing extra to pay.",
+  "Use an API key": "Use an API key",
+  "Paste a key from {console} — usage is billed to the key.":
+    "Paste a key from {console} — usage is billed to the key.",
+  "Chat with {name} on your own account": "Chat with {name} on your own account",
+  "Connected with your {name} subscription": "Connected with your {name} subscription",
+  "Connected with your API key": "Connected with your API key",
+  "Start chatting": "Start chatting",
+  "Chats run on the account you connect here, billed to you — not the organization.":
+    "Chats run on the account you connect here, billed to you — not the organization.",
+  "Your organization has each person chat on their own AI account. Connect one to get started — you can switch any time.":
+    "Your organization has each person chat on their own AI account. Connect one to get started — you can switch any time.",
+  "Chats run on the account you connect here, billed to you — not the organization. Connect at least one to keep using the assistant.":
+    "Chats run on the account you connect here, billed to you — not the organization. Connect at least one to keep using the assistant.",
+  "Connect your AI account": "Connect your AI account",
+  "Your AI account": "Your AI account",
+  "Couldn't load the original conversation's history.": "Couldn't load the original conversation's history.",
+  "Forked from {title}": "Forked from {title}",
+  "Forked from {title} — open the original": "Forked from {title} — open the original",
+  "{n} messages": "{n} messages",
+  hide: "hide",
+  show: "show",
+  fork: "fork",
+  "Open the {name} project": "Open the {name} project",
+  "This chat runs in the {name} context — the agent works with that context's files and memory, separate from your personal context.":
+    "This chat runs in the {name} context — the agent works with that context's files and memory, separate from your personal context.",
+  "Back to this chat": "Back to this chat",
+  "Active only": "Active only",
+  Everything: "Everything",
+  "1 conversation": "1 conversation",
+  "{n} conversations": "{n} conversations",
+  "active {time}": "active {time}",
+  "This project is ready for work": "This project is ready for work",
+  "Start a conversation with New chat. Files, automations, and other work created there will stay scoped to this project.":
+    "Start a conversation with New chat. Files, automations, and other work created there will stay scoped to this project.",
+  "Slack channel": "Slack channel",
+  "Loading this context's files, webhooks, crons, apps and skills…":
+    "Loading this context's files, webhooks, crons, apps and skills…",
+  "No models found": "No models found",
 } as const;

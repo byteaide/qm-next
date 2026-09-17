@@ -420,7 +420,7 @@ function gridTpl(): TemplateResult {
               contextsWorkspaceFilter = value as typeof contextsWorkspaceFilter;
               drawContexts();
             },
-            options: [html`<option value="active">Active only</option>`, html`<option value="all">Everything</option>`],
+            options: [html`<option value="active">${t("Active only")}</option>`, html`<option value="all">${t("Everything")}</option>`],
           })}</label
         >
       </div>
@@ -432,8 +432,8 @@ function gridTpl(): TemplateResult {
 
 function contextRow(c: CoreContext): TemplateResult {
   const { title, sub, glyph } = contextMeta(c);
-  const count = c.sessionCount === 1 ? "1 conversation" : `${c.sessionCount} conversations`;
-  const meta = [c.project ? sub : "", count, c.lastActivityAt ? `active ${relTime(c.lastActivityAt)}` : ""]
+  const count = c.sessionCount === 1 ? t("1 conversation") : t("{n} conversations", { n: c.sessionCount });
+  const meta = [c.project ? sub : "", count, c.lastActivityAt ? t("active {time}", { time: relTime(c.lastActivityAt) }) : ""]
     .filter(Boolean)
     .join(" · ");
   return html`
@@ -486,23 +486,24 @@ function detailTpl(c: CoreContext): TemplateResult {
               ? html`
                   <section class="context-panel context-project-empty">
                     <span class="context-glyph large" aria-hidden="true">${icon(glyph, 22)}</span>
-                    <h2>This project is ready for work</h2>
+                    <h2>${t("This project is ready for work")}</h2>
                     <p>
-                      Start a conversation with New chat. Files, automations, and other work created there will stay
-                      scoped to this project.
+                      ${t(
+                        "Start a conversation with New chat. Files, automations, and other work created there will stay scoped to this project.",
+                      )}
                     </p>
                   </section>
                 `
               : html`
                   <section class="context-panel context-conversations" aria-labelledby="context-conversations-title">
                     <div class="context-panel-heading">
-                      <h2 class="context-panel-title" id="context-conversations-title">Conversations</h2>
+                      <h2 class="context-panel-title" id="context-conversations-title">${t("Conversations")}</h2>
                       ${sessions.length ? html`<span class="context-panel-count">${sessions.length}</span>` : nothing}
                     </div>
                     ${
                       sessions.length
                         ? html`<div class="context-session-list">${sessions.map((s) => contextSessionRow(s))}</div>`
-                        : html`<div class="context-inline-empty">No conversations yet.</div>`
+                        : html`<div class="context-inline-empty">${t("No conversations yet.")}</div>`
                     }
                   </section>
                   ${resourceSections(c.scopeId)}
@@ -712,7 +713,7 @@ function projectSlackSection(context: CoreContext): TemplateResult {
   return html`
     <section class="context-panel project-slack" aria-labelledby="project-slack-title">
       <div class="context-panel-heading">
-        <h2 class="context-panel-title" id="project-slack-title">Slack channel</h2>
+        <h2 class="context-panel-title" id="project-slack-title">${t("Slack channel")}</h2>
       </div>
       ${body}
       ${contextsState.slackError ? html`<div class="project-member-status error" aria-live="polite">${contextsState.slackError}</div>` : nothing}
@@ -849,7 +850,7 @@ function resourceSections(scopeId: string): TemplateResult | typeof nothing {
   const r = contextsState.resources;
   if (!r) {
     return contextsState.resourcesLoading
-      ? html`<div class="empty compact">Loading this context's files, webhooks, crons, apps and skills…</div>`
+      ? html`<div class="empty compact">${t("Loading this context's files, webhooks, crons, apps and skills…")}</div>`
       : html``;
   }
   if (
