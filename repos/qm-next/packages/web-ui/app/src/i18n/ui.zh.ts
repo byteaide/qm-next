@@ -1061,4 +1061,7 @@ export const uiZh = {
   "Loading this context's files, webhooks, crons, apps and skills…":
     "正在加载此上下文的文件、Webhook、定时任务、应用与技能…",
   "No models found": "未找到模型",
+  Web: "Web",
+  Link: "关联",
+  People: "成员",
 } satisfies Record<keyof typeof uiEn, string>;

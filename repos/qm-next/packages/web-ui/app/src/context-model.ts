@@ -139,13 +139,13 @@ export function contextModelSection(scopeId: string): TemplateResult | typeof no
   if (contextModelState.scope !== scopeId) return nothing;
   if (contextModelState.loading)
     return html`<section class="context-panel context-model" aria-labelledby="context-model-title">
-      <h2 class="context-panel-title" id="context-model-title">Model</h2>
-      <div class="context-panel-loading">Loading…</div>
+      <h2 class="context-panel-title" id="context-model-title">${t("Model")}</h2>
+      <div class="context-panel-loading">${t("Loading…")}</div>
     </section>`;
   const config = contextModelState.config;
   if (!config)
     return html`<section class="context-panel context-model" aria-labelledby="context-model-title">
-      <h2 class="context-panel-title" id="context-model-title">Model</h2>
+      <h2 class="context-panel-title" id="context-model-title">${t("Model")}</h2>
       <span class="context-model-status error" aria-live="polite">${contextModelState.notice}</span>
     </section>`;
   const options = optionsFor(config);

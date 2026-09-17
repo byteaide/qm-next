@@ -238,7 +238,7 @@ function resultRows(): TemplateResult[] {
       rows.push(
         html`<div class="chat-search-group ${hit.archived ? "archived" : ""}">
           <b>${hitTitle(hit)}</b
-          >${hit.archived ? html`<em class="chat-search-archived-tag">Archived</em>` : nothing}<span
+          >${hit.archived ? html`<em class="chat-search-archived-tag">${t("Archived")}</em>` : nothing}<span
             >${recencyGroup(hit.createdAt)}</span
           >
         </div>`,

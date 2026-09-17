@@ -586,7 +586,7 @@ export function drawChatsPage(): void {
             },
             options: [
               html`<option value="all">${t("All surfaces")}</option>`,
-              html`<option value="web">Web</option>`,
+              html`<option value="web">${t("Web")}</option>`,
               html`<option value="slack">${t("Slack")}</option>`,
             ],
           })}</label

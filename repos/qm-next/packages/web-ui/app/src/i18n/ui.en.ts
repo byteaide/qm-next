@@ -1081,4 +1081,7 @@ export const uiEn = {
   "Loading this context's files, webhooks, crons, apps and skills…":
     "Loading this context's files, webhooks, crons, apps and skills…",
   "No models found": "No models found",
+  Web: "Web",
+  Link: "Link",
+  People: "People",
 } as const;

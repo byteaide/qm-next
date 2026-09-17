@@ -349,7 +349,7 @@ function gridTpl(): TemplateResult {
   };
   const groups = [
     { key: "personal", label: t("Personal") },
-    { key: "web", label: "Web" },
+    { key: "web", label: t("Web") },
     { key: "slack", label: t("Slack") },
   ]
     .map((g) => ({ ...g, items: projects.filter((context) => groupOf(context) === g.key) }))
@@ -664,7 +664,7 @@ function projectSlackEditor(context: CoreContext): TemplateResult {
       </div>
       <datalist id="project-slack-channels">${options.map((name) => html`<option value=${name}></option>`)}</datalist>
       <div class="project-slack-actions">
-        <button class="btn primary" type="submit" ?disabled=${contextsState.slackBusy}>Link</button>
+        <button class="btn primary" type="submit" ?disabled=${contextsState.slackBusy}>${t("Link")}</button>
         <button
           class="btn"
           type="button"
@@ -727,7 +727,7 @@ function projectMembersSection(context: CoreContext): TemplateResult {
   return html`
     <section class="context-panel project-members" aria-labelledby="project-people-title">
       <div class="context-panel-heading">
-        <h2 class="context-panel-title" id="project-people-title">People</h2>
+        <h2 class="context-panel-title" id="project-people-title">${t("People")}</h2>
         <span class="context-panel-count">${projectPeople(context).length}</span>
       </div>
       <div class="project-member-list">
@@ -955,7 +955,7 @@ function fileRow(f: ScopeFile): TemplateResult {
                 href=${withBase(`/api/files/${encodeURIComponent(f.id)}/content`)}
                 target="_blank"
                 rel="noreferrer"
-                >Open</a
+                >${t("Open")}</a
               >`
             : nothing
         }
