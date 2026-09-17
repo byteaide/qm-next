@@ -6,6 +6,7 @@ import { actionSnippet, closeFormMenus, copyText, icon, relTime, setFormMenuValu
 import { listBackLink, listPageTpl } from "./list-page";
 import { ensureContexts, scopeChip } from "./contexts";
 import { appState } from "./shell";
+import { t } from "./i18n/index";
 import { deepLinkPath, isPlainLeftClick, UI_BASE } from "./deep-link";
 
 export interface WebhookView {
@@ -96,7 +97,7 @@ async function refreshWebhooks(opts: { showLoading?: boolean } = {}): Promise<bo
     return true;
   } catch (e) {
     if (seq !== webhookRefreshSeq) return false;
-    webhooksNotice = errMessage(e, "Failed to load webhooks.");
+    webhooksNotice = errMessage(e, t("Failed to load webhooks."));
     return false;
   } finally {
     if (seq === webhookRefreshSeq) webhooksLoading = false;
@@ -114,7 +115,7 @@ export async function renderWebhooksPage(): Promise<void> {
   if (!loaded) return drawWebhooksPage();
   const webhook = wanted ? webhookList.find((w) => w.id === wanted) : undefined;
   if (wanted && !webhook) {
-    webhooksNoticeSticky = "That webhook wasn't found, or you don't have access to it.";
+    webhooksNoticeSticky = t("That webhook wasn't found, or you don't have access to it.");
   }
   if (webhook) openWebhook(webhook);
   else drawWebhooksPage();
@@ -137,25 +138,25 @@ function drawWebhooksPage(): void {
     )
     .sort((a, b) => b.createdAt - a.createdAt)
     .map((w) => webhookPageRow(w));
-  let empty = "No webhooks yet.";
+  let empty = t("No webhooks yet.");
   if (webhooksNotice) empty = webhooksNotice;
-  else if (webhooksLoading && webhookList.length === 0) empty = "Loading webhooks…";
-  else if (webhooksScope) empty = "No webhooks in this context.";
+  else if (webhooksLoading && webhookList.length === 0) empty = t("Loading webhooks…");
+  else if (webhooksScope) empty = t("No webhooks in this context.");
   const noticeRow = webhooksNoticeSticky ? [html`<div class="action-notice">${webhooksNoticeSticky}</div>`] : [];
   webhooksNoticeSticky = "";
   render(
     listPageTpl({
-      title: "Webhooks",
+      title: t("Webhooks"),
       scope: webhooksScope,
       onScope: (s) => {
         webhooksScope = s;
         drawWebhooksPage();
       },
       onRefresh: () => void renderWebhooksPage(),
-      action: { label: "New webhook", onClick: showNewWebhook },
+      action: { label: t("New webhook"), onClick: showNewWebhook },
       search: {
         value: webhooksSearch,
-        placeholder: "Search webhooks",
+        placeholder: t("Search webhooks"),
         onInput: (value) => {
           webhooksSearch = value;
           drawWebhooksPage();
@@ -169,8 +170,8 @@ function drawWebhooksPage(): void {
 }
 
 function webhookPageRow(w: WebhookView): TemplateResult {
-  let lastRun = "never fired";
-  if (w.lastError) lastRun = "error";
+  let lastRun = t("never fired");
+  if (w.lastError) lastRun = t("error");
   else if (w.lastFiredAt) lastRun = relTime(w.lastFiredAt);
   return html`
     <a
@@ -186,7 +187,7 @@ function webhookPageRow(w: WebhookView): TemplateResult {
       <span class="list-row-meta">
         ${scopeChip(w.ownerScopeId)}
         <span class="badge">${w.verification.scheme}</span>
-        <span class="badge">${w.enabled ? "enabled" : "disabled"}</span>
+        <span class="badge">${w.enabled ? t("enabled") : t("disabled")}</span>
         <span class="list-row-date">${lastRun}</span>
       </span>
     </a>
@@ -198,7 +199,7 @@ function copyRow(text: string) {
     <div class="copyrow">
       <code class="mono">${text}</code>
       <button class="btn" @click=${(e: Event) => void copyText(text, e.currentTarget as HTMLButtonElement)}>
-        Copy
+        ${t("Copy")}
       </button>
     </div>
   `;
@@ -215,37 +216,37 @@ function openWebhook(w: WebhookView, opts: { push?: boolean } = {}): void {
   render(
     html`
       <div class="resource-detail">
-        ${listBackLink("Webhooks", drawWebhooksPage)}
+        ${listBackLink(t("Webhooks"), drawWebhooksPage)}
         <div class="resource-heading">
-          <h2>Webhook</h2>
-          <button class="btn" @click=${showNewWebhook}>${icon(Plus, 15)}<span>New webhook</span></button>
+          <h2>${t("Webhook")}</h2>
+          <button class="btn" @click=${showNewWebhook}>${icon(Plus, 15)}<span>${t("New webhook")}</span></button>
         </div>
         ${notice ? html`<div class="action-notice">${notice}</div>` : nothing}
         <div class="field">
-          <label>Context</label>
+          <label>${t("Context")}</label>
           <div class="value">${scopeChip(w.ownerScopeId)}</div>
         </div>
         <div class="field">
-          <label>Action</label>
+          <label>${t("Action")}</label>
           <div class="value pre">${w.action}</div>
         </div>
         <div class="field">
-          <label>Verification</label>
+          <label>${t("Verification")}</label>
           <div class="value">${w.verification.scheme}</div>
         </div>
         <div class="field">
-          <label>Status</label>
-          <div class="value">${w.enabled ? "Enabled" : "Disabled"}</div>
+          <label>${t("Status")}</label>
+          <div class="value">${w.enabled ? t("Enabled") : t("Disabled")}</div>
         </div>
         <div class="field">
-          <label>Inbound URL</label>
+          <label>${t("Inbound URL")}</label>
           ${copyRow(w.url)}
-          <div class="hint">Configure your sender (GitHub / Stripe / Slack / …) to POST events here.</div>
+          <div class="hint">${t("Configure your sender (GitHub / Stripe / Slack / …) to POST events here.")}</div>
         </div>
         ${
           w.filters?.length
             ? html`<div class="field">
-                <label>Filters</label>
+                <label>${t("Filters")}</label>
                 <div class="value pre">${w.filters.map((f) => `${f.path} ∈ [${f.in.join(", ")}]`).join("\n")}</div>
               </div>`
             : ""
@@ -253,19 +254,19 @@ function openWebhook(w: WebhookView, opts: { push?: boolean } = {}): void {
         ${
           w.destination
             ? html`<div class="field">
-                <label>Destination</label>
+                <label>${t("Destination")}</label>
                 <div class="value">${w.destination.type} → ${w.destination.target}</div>
               </div>`
             : ""
         }
         <div class="field">
-          <label>Last fired</label>
-          <div class="value">${w.lastFiredAt ? new Date(w.lastFiredAt).toLocaleString() : "Never"}</div>
+          <label>${t("Last fired")}</label>
+          <div class="value">${w.lastFiredAt ? new Date(w.lastFiredAt).toLocaleString() : t("Never")}</div>
         </div>
         ${
           w.lastDeliveryId
             ? html`<div class="field">
-                <label>Last delivery ID</label>
+                <label>${t("Last delivery ID")}</label>
                 <div class="value mono">${w.lastDeliveryId}</div>
               </div>`
             : nothing
@@ -273,7 +274,7 @@ function openWebhook(w: WebhookView, opts: { push?: boolean } = {}): void {
         ${
           w.lastError
             ? html`<div class="field">
-                <label>Last error</label>
+                <label>${t("Last error")}</label>
                 <div class="value" style="color:var(--destructive,#c00)">${w.lastError}</div>
               </div>`
             : ""
@@ -281,8 +282,8 @@ function openWebhook(w: WebhookView, opts: { push?: boolean } = {}): void {
         <div class="actions">
           ${
             w.enabled
-              ? html`<button class="btn danger" @click=${() => void setWebhookEnabled(w.id, false)}>Disable</button>`
-              : html`<button class="btn" @click=${() => void setWebhookEnabled(w.id, true)}>Re-enable</button>`
+              ? html`<button class="btn danger" @click=${() => void setWebhookEnabled(w.id, false)}>${t("Disable")}</button>`
+              : html`<button class="btn" @click=${() => void setWebhookEnabled(w.id, true)}>${t("Re-enable")}</button>`
           }
         </div>
       </div>
@@ -296,9 +297,9 @@ async function setWebhookEnabled(id: string, enabled: boolean): Promise<void> {
   let notice: string;
   try {
     await api(`/api/webhooks/${encodeURIComponent(id)}/${enabled ? "enable" : "disable"}`, { method: "POST" });
-    notice = enabled ? "Webhook re-enabled." : "Webhook disabled.";
+    notice = enabled ? t("Webhook re-enabled.") : t("Webhook disabled.");
   } catch (e) {
-    notice = errMessage(e, enabled ? "Couldn't re-enable webhook." : "Couldn't disable webhook.");
+    notice = errMessage(e, enabled ? t("Couldn't re-enable webhook.") : t("Couldn't disable webhook."));
   }
   await refreshWebhooks();
   webhooksNotice = notice;
@@ -316,19 +317,19 @@ function randomHex(bytes: number): string {
 function webhookForm() {
   return html`
     <form class="resource-form" @submit=${onCreateWebhook}>
-      ${listBackLink("Webhooks", drawWebhooksPage)}
-      <h2>New webhook</h2>
+      ${listBackLink(t("Webhooks"), drawWebhooksPage)}
+      <h2>${t("New webhook")}</h2>
       <label
-        >Action <span class="hint">— what the agent should do for each event</span>
+        >${t("Action")} <span class="hint">${t("— what the agent should do for each event")}</span>
         <textarea
           name="action"
           rows="4"
-          placeholder="When a GitHub issue is opened, triage it and post a one-paragraph summary."
+          placeholder=${t("When a GitHub issue is opened, triage it and post a one-paragraph summary.")}
           required
         ></textarea>
       </label>
       <label>
-        Verification scheme
+        ${t("Verification scheme")}
         <div class="menu-control form-menu-control scheme-control">
           <input type="hidden" name="scheme" value="hmac-sha256" />
           <button class="menu-button" type="button" aria-haspopup="menu" aria-expanded="false" @click=${toggleFormMenu}>
@@ -336,7 +337,7 @@ function webhookForm() {
             ${icon(ChevronDown, 14)}
           </button>
           <div class="menu-popover" role="menu" hidden>
-            <div class="menu-title">Verification</div>
+            <div class="menu-title">${t("Verification")}</div>
             ${WEBHOOK_SCHEMES.map(
               (scheme) => html`
                 <button
@@ -354,25 +355,26 @@ function webhookForm() {
             )}
           </div>
         </div>
-        <span class="hint webhook-scheme-guidance">${WEBHOOK_SCHEMES[0]!.guidance}</span>
+        <span class="hint webhook-scheme-guidance">${t(WEBHOOK_SCHEMES[0]!.guidance)}</span>
       </label>
       <label
-        >Signing secret <span class="hint">— leave blank to auto-generate</span>
+        >${t("Signing secret")} <span class="hint">${t("— leave blank to auto-generate")}</span>
         <div class="copyrow">
-          <input type="text" name="secret" placeholder="auto-generated if blank" />
-          <button type="button" class="btn" @click=${fillGeneratedSecret}>Generate</button>
+          <input type="text" name="secret" placeholder=${t("auto-generated if blank")} />
+          <button type="button" class="btn" @click=${fillGeneratedSecret}>${t("Generate")}</button>
         </div>
       </label>
       <label
-        >Filters <span class="hint">— optional; one per line as <code>path: value1, value2</code></span>
+        >${t("Filters")} <span class="hint">${t("— optional; one per line as")} <code>path: value1, value2</code></span>
         <textarea name="filters" rows="2" placeholder="action: opened, reopened"></textarea>
       </label>
       <p class="hint">
-        The event runs in your personal context. After creation, ask the agent to route notable results to a teammate or
-        channel by name.
+        ${t(
+          "The event runs in your personal context. After creation, ask the agent to route notable results to a teammate or channel by name.",
+        )}
       </p>
       <div class="form-error"></div>
-      <div class="actions"><button class="btn primary" type="submit">Create webhook</button></div>
+      <div class="actions"><button class="btn primary" type="submit">${t("Create webhook")}</button></div>
     </form>
   `;
 }
@@ -396,7 +398,8 @@ function selectWebhookScheme(e: Event, scheme: WebhookScheme): void {
 
 function applyWebhookScheme(form: Element | null | undefined, scheme: string): void {
   const guidance = form?.querySelector(".webhook-scheme-guidance");
-  if (guidance) guidance.textContent = WEBHOOK_SCHEMES.find((candidate) => candidate.value === scheme)?.guidance ?? "";
+  const text = WEBHOOK_SCHEMES.find((candidate) => candidate.value === scheme)?.guidance;
+  if (guidance) guidance.textContent = text ? t(text) : "";
 }
 
 function fillGeneratedSecret(e: Event): void {
@@ -410,14 +413,14 @@ function parseWebhookFilters(text: string): Array<{ path: string; in: string[] }
   for (const line of text.split("\n")) {
     const idx = line.indexOf(":");
     if (!line.trim()) continue;
-    if (idx < 1) throw new Error(`Invalid filter: "${line}". Use path: value1, value2.`);
+    if (idx < 1) throw new Error(t("Invalid filter: \"{line}\". Use path: value1, value2.", { line }));
     const path = line.slice(0, idx).trim();
     const values = line
       .slice(idx + 1)
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    if (!path || values.length === 0) throw new Error(`Invalid filter: "${line}". Both path and value are required.`);
+    if (!path || values.length === 0) throw new Error(t("Invalid filter: \"{line}\". Both path and value are required.", { line }));
     out.push({ path, in: values });
   }
   return out;
@@ -436,13 +439,13 @@ async function onCreateWebhook(e: Event): Promise<void> {
   let filters: Array<{ path: string; in: string[] }>;
   if (errSlot) errSlot.textContent = "";
   if (!action) {
-    if (errSlot) errSlot.textContent = "An action is required.";
+    if (errSlot) errSlot.textContent = t("An action is required.");
     return;
   }
   try {
     filters = parseWebhookFilters(field("filters"));
   } catch (err) {
-    if (errSlot) errSlot.textContent = errMessage(err, "Invalid filters.");
+    if (errSlot) errSlot.textContent = errMessage(err, t("Invalid filters."));
     return;
   }
   const payload: Record<string, unknown> = {
@@ -458,7 +461,7 @@ async function onCreateWebhook(e: Event): Promise<void> {
     await refreshWebhooks();
     showWebhookCreated(r.webhook, r.url);
   } catch (err) {
-    if (errSlot) errSlot.textContent = errMessage(err, "create failed");
+    if (errSlot) errSlot.textContent = errMessage(err, t("create failed"));
   }
 }
 
@@ -470,29 +473,29 @@ function showWebhookCreated(w: WebhookView, url: string): void {
   render(
     html`
       <div class="resource-detail">
-        ${listBackLink("Webhooks", drawWebhooksPage)}
-        <h2>Webhook created ✓</h2>
-        <div class="warn">Copy the secret now — it won't be shown again.</div>
+        ${listBackLink(t("Webhooks"), drawWebhooksPage)}
+        <h2>${t("Webhook created ✓")}</h2>
+        <div class="warn">${t("Copy the secret now — it won't be shown again.")}</div>
         <div class="field">
-          <label>Inbound URL</label>
+          <label>${t("Inbound URL")}</label>
           ${copyRow(url)}
-          <div class="hint">Point your sender at this URL.</div>
+          <div class="hint">${t("Point your sender at this URL.")}</div>
         </div>
         ${
           secret && secret !== "***"
             ? html`<div class="field">
-                <label>Signing secret</label>
+                <label>${t("Signing secret")}</label>
                 ${copyRow(secret)}
                 <div class="hint">
-                  Configure your sender to sign requests with this secret (scheme: ${w.verification.scheme}).
+                  ${t("Configure your sender to sign requests with this secret (scheme: {scheme}).", { scheme: w.verification.scheme })}
                 </div>
               </div>`
             : html`<div class="field">
-                <div class="hint">No signing secret for scheme <code>${w.verification.scheme}</code>.</div>
+                <div class="hint">${t("No signing secret for scheme {scheme}.", { scheme: w.verification.scheme })}</div>
               </div>`
         }
         <div class="actions">
-          <button class="btn" @click=${() => openWebhook(webhookList.find((x) => x.id === w.id) ?? w)}>Done</button>
+          <button class="btn" @click=${() => openWebhook(webhookList.find((x) => x.id === w.id) ?? w)}>${t("Done")}</button>
         </div>
       </div>
     `,

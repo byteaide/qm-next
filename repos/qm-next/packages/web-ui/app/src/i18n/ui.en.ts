@@ -817,4 +817,62 @@ export const uiEn = {
   "Managing process": "Managing process",
   "Managed process": "Managed process",
   "Tried managing process": "Tried managing process",
+
+  // --- P4 residual sweep: webhooks page ---
+  "Failed to load webhooks.": "Failed to load webhooks.",
+  "That webhook wasn't found, or you don't have access to it.": "That webhook wasn't found, or you don't have access to it.",
+  "No webhooks yet.": "No webhooks yet.",
+  "Loading webhooks…": "Loading webhooks…",
+  "No webhooks in this context.": "No webhooks in this context.",
+  "New webhook": "New webhook",
+  "Search webhooks": "Search webhooks",
+  "never fired": "never fired",
+  error: "error",
+  enabled: "enabled",
+  disabled: "disabled",
+  Webhook: "Webhook",
+  Action: "Action",
+  Verification: "Verification",
+  "Inbound URL": "Inbound URL",
+  "Configure your sender (GitHub / Stripe / Slack / …) to POST events here.":
+    "Configure your sender (GitHub / Stripe / Slack / …) to POST events here.",
+  Filters: "Filters",
+  "Last delivery ID": "Last delivery ID",
+  "Last error": "Last error",
+  "Re-enable": "Re-enable",
+  "Webhook re-enabled.": "Webhook re-enabled.",
+  "Webhook disabled.": "Webhook disabled.",
+  "Couldn't re-enable webhook.": "Couldn't re-enable webhook.",
+  "Couldn't disable webhook.": "Couldn't disable webhook.",
+  "— what the agent should do for each event": "— what the agent should do for each event",
+  "When a GitHub issue is opened, triage it and post a one-paragraph summary.":
+    "When a GitHub issue is opened, triage it and post a one-paragraph summary.",
+  "Verification scheme": "Verification scheme",
+  "— leave blank to auto-generate": "— leave blank to auto-generate",
+  "auto-generated if blank": "auto-generated if blank",
+  Generate: "Generate",
+  "— optional; one per line as": "— optional; one per line as",
+  "The event runs in your personal context. After creation, ask the agent to route notable results to a teammate or channel by name.":
+    "The event runs in your personal context. After creation, ask the agent to route notable results to a teammate or channel by name.",
+  "Create webhook": "Create webhook",
+  "Send the digest in X-Signature as hex or sha256=<hex>.":
+    "Send the digest in X-Signature as hex or sha256=<hex>.",
+  "Use this URL as the payload URL and the signing secret as GitHub's webhook secret.":
+    "Use this URL as the payload URL and the signing secret as GitHub's webhook secret.",
+  "Use the Slack app signing secret. Requests older than five minutes are rejected.":
+    "Use the Slack app signing secret. Requests older than five minutes are rejected.",
+  "Use the endpoint signing secret shown by Stripe for this destination.":
+    "Use the endpoint signing secret shown by Stripe for this destination.",
+  "Invalid filter: \"{line}\". Use path: value1, value2.": "Invalid filter: \"{line}\". Use path: value1, value2.",
+  "Invalid filter: \"{line}\". Both path and value are required.":
+    "Invalid filter: \"{line}\". Both path and value are required.",
+  "An action is required.": "An action is required.",
+  "Invalid filters.": "Invalid filters.",
+  "create failed": "create failed",
+  "Webhook created ✓": "Webhook created ✓",
+  "Copy the secret now — it won't be shown again.": "Copy the secret now — it won't be shown again.",
+  "Point your sender at this URL.": "Point your sender at this URL.",
+  "Configure your sender to sign requests with this secret (scheme: {scheme}).":
+    "Configure your sender to sign requests with this secret (scheme: {scheme}).",
+  "No signing secret for scheme {scheme}.": "No signing secret for scheme {scheme}.",
 } as const;

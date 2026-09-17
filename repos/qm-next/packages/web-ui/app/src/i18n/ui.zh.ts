@@ -797,4 +797,62 @@ export const uiZh = {
   "Managing process": "管理进程",
   "Managed process": "已管理进程",
   "Tried managing process": "尝试管理进程",
+
+  // --- P4 残留清扫:webhooks 页 ---
+  "Failed to load webhooks.": "Webhook 列表加载失败。",
+  "That webhook wasn't found, or you don't have access to it.": "未找到该 Webhook,或你没有访问权限。",
+  "No webhooks yet.": "暂无 Webhook。",
+  "Loading webhooks…": "正在加载 Webhook…",
+  "No webhooks in this context.": "该上下文中暂无 Webhook。",
+  "New webhook": "新建 Webhook",
+  "Search webhooks": "搜索 Webhook",
+  "never fired": "从未触发",
+  error: "出错",
+  enabled: "已启用",
+  disabled: "已停用",
+  Webhook: "Webhook",
+  Action: "动作",
+  Verification: "验证方式",
+  "Inbound URL": "入站 URL",
+  "Configure your sender (GitHub / Stripe / Slack / …) to POST events here.":
+    "在你的发送方(GitHub / Stripe / Slack / …)中配置向此地址推送事件。",
+  Filters: "过滤器",
+  "Last delivery ID": "最近投递 ID",
+  "Last error": "最近错误",
+  "Re-enable": "重新启用",
+  "Webhook re-enabled.": "Webhook 已重新启用。",
+  "Webhook disabled.": "Webhook 已停用。",
+  "Couldn't re-enable webhook.": "无法重新启用 Webhook。",
+  "Couldn't disable webhook.": "无法停用 Webhook。",
+  "— what the agent should do for each event": "——智能体收到每个事件时应执行的动作",
+  "When a GitHub issue is opened, triage it and post a one-paragraph summary.":
+    "例如:GitHub issue 被打开时,先分诊并发布一段摘要。",
+  "Verification scheme": "验证方案",
+  "— leave blank to auto-generate": "——留空则自动生成",
+  "auto-generated if blank": "留空时自动生成",
+  Generate: "生成",
+  "— optional; one per line as": "——可选,每行一条,格式为",
+  "The event runs in your personal context. After creation, ask the agent to route notable results to a teammate or channel by name.":
+    "事件将在你的个人上下文中运行。创建后,可让智能体把值得关注的结果按姓名转发给队友或频道。",
+  "Create webhook": "创建 Webhook",
+  "Send the digest in X-Signature as hex or sha256=<hex>.":
+    "将摘要以十六进制或 sha256=<hex> 形式放入 X-Signature 头发送。",
+  "Use this URL as the payload URL and the signing secret as GitHub's webhook secret.":
+    "将此地址用作 payload URL,并把签名密钥配置为 GitHub 的 webhook secret。",
+  "Use the Slack app signing secret. Requests older than five minutes are rejected.":
+    "使用 Slack 应用的签名密钥。超过五分钟的请求会被拒绝。",
+  "Use the endpoint signing secret shown by Stripe for this destination.":
+    "使用 Stripe 为该目的地展示的端点签名密钥。",
+  "Invalid filter: \"{line}\". Use path: value1, value2.": "无效的过滤器:\"{line}\"。请使用 path: value1, value2 格式。",
+  "Invalid filter: \"{line}\". Both path and value are required.":
+    "无效的过滤器:\"{line}\"。path 与 value 均为必填。",
+  "An action is required.": "动作内容不能为空。",
+  "Invalid filters.": "过滤器无效。",
+  "create failed": "创建失败",
+  "Webhook created ✓": "Webhook 已创建 ✓",
+  "Copy the secret now — it won't be shown again.": "请立即复制签名密钥——之后不会再显示。",
+  "Point your sender at this URL.": "让你的发送方指向此地址。",
+  "Configure your sender to sign requests with this secret (scheme: {scheme}).":
+    "在你的发送方中配置使用此签名密钥对请求签名(方案:{scheme})。",
+  "No signing secret for scheme {scheme}.": "方案 {scheme} 无需签名密钥。",
 } satisfies Record<keyof typeof uiEn, string>;
