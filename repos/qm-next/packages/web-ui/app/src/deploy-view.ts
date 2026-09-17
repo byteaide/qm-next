@@ -91,10 +91,12 @@ export function deploymentTab(d: DeploymentView, viewer: string | undefined): De
   return !d.ownerScopeId?.startsWith("personal:") && d.createdBy === viewer ? "yours" : "shared";
 }
 
+import { t } from "./i18n/index";
+
 export function deploymentTabEmptyMessage(tab: DeploymentTab): string {
-  if (tab === "shared") return "No apps shared with you.";
-  if (tab === "archived") return "Nothing archived.";
-  return "No apps of your own yet.";
+  if (tab === "shared") return t("No apps shared with you.");
+  if (tab === "archived") return t("Nothing archived.");
+  return t("No apps of your own yet.");
 }
 
 export function filterDeployments(

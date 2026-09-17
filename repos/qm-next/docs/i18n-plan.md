@@ -339,3 +339,31 @@ view title `Projects` 不重复登记)。
   - en(不刷新):`Ask anything` / `Attach files` /
     `Session settings — Opus 5 · Low` / `Send`
   - 截图:`i18n-p3-composer-zh.png` / `i18n-p3-composer-en.png`
+
+第四批改:`packages/web-ui/app/src/deploys.ts` + `deploy-view.ts`
+(原估 41,实 59 命中;含 Yours/Shared/Archived tabs、Deploying、permission
+badge、版本标签、Owner 标签、App view/actions、Copy app URL、Restore/
+Edit display name/Change URL slug/Archive 菜单、Sort、Search apps、空态、
+Deploy with Agent、Edit live/Copy URL、Overview/Status/Live version/
+Latest version/Access、Ownership and access、Settings、Display name/URL
+slug/Change、Git remote、Clone 描述、Restore/Archive deployment、Version
+history/Live/Latest、Archive 对话框、Archiving/Restoring deployment、
+Undo/Dismiss、Could not load/save/archive/restore/open live editing、
+Failed to load apps;新增 70 个 ui key,登记于两表;占位串 `{title}` /
+`{when}` / `{name}` / `{current}` / `{applied}` / `{creator}` 走 `t()` 插值)。
+helper(`versionLabel` / `deployedLabel` / `ownerLabel` / `statusLabel` /
+`permissionBadge` / `deploymentTabEmptyMessage`)内部全用 `t()`,在
+zh 模式下返回中文,en 模式返回原 key/字符串。
+
+验证:
+
+- `typecheck:app` 绿;`vite build` 通过;i18n 测试 5/5;web-ui 既有测试
+  15/15 全过(共 20/20)
+- 浏览器实测(portal 前门 127.0.0.1:53248,`/deploys` 路由):
+  - zh:标题 `应用`、`排序` / `应用排序` / `最新/名称/状态` 排序选项、
+    `搜索应用` searchbox、`你还没创建过应用。` 空态、`让 Agent 部署` 按钮
+  - en(不刷新):`Apps` / `Sort` / `Sort apps` / `Newest/Name/Status` /
+    `Search apps` / `No apps of your own yet.` / `Deploy with Agent`
+  - 截图:`i18n-p3-deploys-zh.png` / `i18n-p3-deploys-en.png`
+- 已知:侧栏的 "Apps" 链接仍写死英文(在 shell.ts),P1 留的"占位英文",
+  下个文件 shell.ts 一起处理。
