@@ -143,8 +143,20 @@ message 两类来源(pi-harness.ts:808-828):
 
 ### 4.6 日期/数字
 
-`cron-format.ts`、`toLocaleString` 调用点传入已解析 locale;随 Phase 3 各文件
-清扫顺带处理,不单独立项。
+`cron-format.ts:87,97` 现用 `toLocaleDateString([])`(空数组 = 浏览器默认
+locale)——日期已部分跟随环境,但与应用内切换器不一致。P3 统一改为传入
+已解析的应用 locale;随清扫顺带处理,不单独立项。
+
+### 4.7 前端 UI 影响评估(逐项实测)
+
+| 检查项 | 实测结果 | 结论 |
+|---|---|---|
+| 字体栈 | index.html `14.5px/1.6 ui-sans-serif, system-ui, …`,无显式 CJK 字体 | `system-ui` 自动回退系统中文字体(macOS PingFang SC / Windows 微软雅黑 / Linux Noto CJK);line-height 1.6 对 CJK 足够。**不改字体栈**,P1 演示确认粗体/中英混排渲染 |
+| 文本溢出 | chat/shell/sessions/contexts/deploys 五个最大文件 **0 处** `nowrap/ellipsis/text-transform`(grep 验证;chat.ts 的 "truncated" 命中均为 JS 变量名非 CSS) | 布局全弹性、无硬截断装饰;中英互切宽度变化由 flex 吸收,**低风险** |
+| 中文输入(IME) | `composer.ts:1223` 已正确处理组合键(`isComposing \|\| keyCode===229` 不发送) | 现有中文输入路径完好且已被考虑过(Safari 特例有注释),i18n 改造不触碰输入逻辑 |
+| 无障碍 | ~145 处 aria-label/title/placeholder 与可见文案同源翻译;`<html lang>` 随 locale 切换 | 屏幕阅读器发音随 lang 正确;翻译与视觉文案同批进行,无额外风险 |
+| 混排(UI 中文 + agent 英文输出) | agent 输出语言独立于 UI locale(§1 非目标) | 预期行为,不做混排排版优化 |
+| 主题 | 词表为纯文案,不涉 CSS 变量;预绘制脚本同时处理 theme+locale | 深/浅主题 × 中/英四组合纳入演示矩阵 |
 
 ## 5. 实施阶段
 
@@ -173,6 +185,35 @@ message 两类来源(pi-harness.ts:808-828):
   script)每阶段必跑;`pnpm test` 在 P4 后全量跑;`vite build` 确认产物正常
 - **文档**:本文件随评审修订;P3 收尾时在项目 AGENTS.md 补一条约定
   "新增 UI 文案必须走 t(),不得在模板里裸写英文"(后续项,不阻塞)
+
+## 5.2 评审规范(每阶段强制)
+
+**自检清单(每个提交批次,提交前逐项勾)**
+
+1. 模板内无新增裸英文:改动文件的 html`` 模板经 `rg '>[A-Z][a-z]+ [a-z]+'`
+   与 `"(title|aria-label|placeholder)="\[A-Z\]` 复扫,命中逐条核对
+2. 每个新 key 同时登记于 `ui.en.ts` 与 `ui.zh.ts`(类型约束兜底,但人工确认
+   中文是翻译不是复制);插值 key 与模板调用处参数一一对应
+3. `pnpm --filter @qm/web-ui typecheck:app` 绿
+4. 改动不触碰:后端包、`vite.config.ts`、`index.html` 预绘制脚本语义
+   (只允许追加 locale 分支)、portal 内联脚本
+
+**独立评审(P2 必须,P3 抽查)**
+
+- P2 改 `chassis/errors.ts` + `core-bridge.ts`(行为变更、68 个调用点波及),
+  按仓库规范**不得自审**:须派未参与实现的独立 review agent 审 diff,
+  重点:结构性检查不破坏非 ApiError 错误路径、console.debug 不泄敏感信息、
+  词表查不到码时的回退正确
+- P3 机械清扫按文件批次抽查 ≥20%(review agent 或人工),核对:key 语义、
+  插值完整性、误翻译(如把代码/命令文本当文案)
+
+**UI 演示证据(每阶段,参照上游"Demo every front-end change"规范)**
+
+- 演示矩阵:中/英 × 浅/深主题,关键视图 = chat(含转录)、composer、
+  sessions 列表、设置菜单(切换器)、P2 另加错误横幅(401/404/业务码)
+- 证据形式:vite dev 实操说明 + 截图(最长边 ≤1568px);截图先经文件名
+  清洗(macOS U+202F 问题)
+- 验收分工:UI 呈现由用户拍板;代码正确性由独立评审把关;两关都过才算阶段完成
 
 ## 6. 风险与后续
 
