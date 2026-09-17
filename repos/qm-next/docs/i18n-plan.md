@@ -701,3 +701,84 @@ key——Crons/Files/Apps/Skills/Memory 直接命中,Your keychain 新增):
 - 备注:工具菜单按钮的 document 级 click 关闭监听存在重渲染后
   contains 判定失效导致菜单即开即关的预存行为(与 i18n 无关,验证
   时用非冒泡 click 绕过完成菜单项核对;如需修复应另立任务)
+
+## 7.11 P4(收尾):Portal 词表 + cookie 跟随 + 残留清扫 + 防漂移
+
+P1/P2/P3 之后本阶段四件事全部落地:
+
+**1. Portal 页面词表(§4.4)**:
+
+- 新增 `packages/portal/src/i18n.ts`:31 key 的 en/zh 双表
+  (portalEn/portalZh)+ `resolvePortalLocale(cookie, acceptLanguage)`
+  三级回退(qm.locale cookie → Accept-Language → en)+ `{param}`
+  插值 `portalText()` + `portalLang()`(zh → `zh-CN`)
+- `portal-routes.ts` 全面接客:cardPage 增加 `lang` 字段输出
+  `<html lang>`;signInErrorHtml/nonAdminDeniedHtml/admin-login GET
+  三类卡片页与 /auth/callback 四处 fail() 细节、admin-login POST
+  三处失败页全部走词表;新增 `localeOf(req)` 请求级求值
+- **内联脚本一字未动**(ADMIN_LOGIN_SCRIPT 字节不变,CSP hash
+  自动一致);脚本内一条英文提示属 §4.5 已知不可译范围
+- 白名单:GitHub/Slack/Stripe 等 scheme 标签为产品名,不译
+
+**2. SPA 写 qm.locale cookie(§4.4 前置)**:
+
+- `web-ui/app/src/i18n/index.ts` 的 `applyLocale()` 增加
+  `syncLocaleCookie()`:`qm.locale=<l>; path=/; max-age=1y;
+  samesite=lax`(host-only,qm-next 单进程同源拓扑够用)。启动
+  (main.ts:55 applyLocale)与每次切换都会镜像 localStorage 选择
+  到 cookie,portal 即可跟随
+- 顺手修复 t() 的两处预存 root-typecheck 错误(noUncheckedIndexedAccess
+  下 `table[key]` 可能为 undefined;root `pnpm typecheck` 现仅剩
+  packages/api tranche6/7 的 8 个预存错误)
+
+**3. 残留英文清扫(P3 十批未覆盖的 ~16 个文件)**:
+
+P3 验收时"其余文件均为技术性字符串"的判断有漏网,本阶段复扫
+(`>[A-Z][a-z]+ [a-z]+`、`(aria-label|placeholder|title)="[A-Z]`、
+单词级 `>[A-Z][a-z]+[ <]` 等模式)后逐文件 t() 化,~230 新 key:
+
+- 零覆盖文件:webhooks(45)、memory(30)、ambient-policy(24)、
+  context-model(21)、channel-header(10)、model-connect(28)、
+  search(11)、files(30)、fork-origin(5)、session-scope(5)
+- 已做文件漏网:contexts(Active only/Everything/conversations
+  计数/ready for work/Slack channel/People/Link/Open/Web)、
+  composer(No models found)、deploys(Created by)、
+  sessions(Web 选项)
+- 白名单(确认保留英文):模型名(Opus 5/GPT-5.6 等产品名)、
+  webhook scheme 值(hmac-sha256 等)、代码示例 placeholder
+  (`action: opened, reopened`)、`STRIPE_API_KEY` 类 key 示例、
+  admin-login 内联脚本内嵌文案
+
+**4. 防漂移加固**:
+
+- portal 侧新增 `packages/portal/tests/i18n.test.ts`(5 测试):
+  zh/en key 集合 deepEqual 对齐、三级回退解析、q-value 排序、
+  插值、渲染页 `<html lang>` 与中文文案断言
+- web-ui 侧 `tests/i18n.test.ts` 新增"**使用即登记**"测试:遍历
+  app/src 全部 `t("...")` 字面量(含 `\"` 反转义求值),逐一断言
+  已在 ui.en.ts 登记——漏登记 key 在 zh 下会静默透传英文,此测试
+  使该类漂移直接红
+- 该测试立即可用:首次运行即抓出 Signing secret/Conversations/
+  Created here/New/you 5 个真实漏网(全部补齐)
+
+**验证**:
+
+- `typecheck:app` 绿;`vite build` 通过;`pnpm test` 710 tests
+  676 pass / 2 fail / 32 skip——2 个失败为预存 tranche6
+  (connectors token register)/tranche7(admin grants),经本阶段
+  stash 复现确认与 i18n 无关;32 skip 为 QM_NEXT_PG_URL 未设
+- curl 实测(portal 前门 127.0.0.1:63080,/auth/admin-login):
+  - 默认 → `<html lang="en">` + Admin sign-in(保护既有英文断言
+    测试 portal-web-path.test.ts:236)
+  - `Cookie: qm.locale=zh` → `<html lang="zh-CN">` + 管理员登录/
+    以管理员身份登录/按钮"登录"/此链接五分钟后失效
+  - `Accept-Language: zh-CN` → zh;cookie(en)压过 AL(zh)→
+    en;非法 cookie 值回退 AL/en
+- 浏览器实测(63080 前门):SPA 首次加载即写 `qm.locale=zh`
+  cookie(navigator zh 路径),`<html lang=zh-CN>`;侧栏切换
+  zh/en cookie 实时跟随(qm.locale=en);webhooks 列表/表单、
+  files 列表/筛选、⌘K 搜索面板 zh 全中文、en 全回退
+  (截图 i18n-p4-webhooks-form-zh-fixed.png /
+  i18n-p4-files-zh.png / i18n-p4-search-zh.png)
+- 提交:portal 词表 90ff295 前(见各清扫提交)、防漂移测试
+  a208f35、残留清扫 6329f5b/36e46e7/2ad7610/282f205/18fb303
