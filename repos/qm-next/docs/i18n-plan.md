@@ -412,3 +412,58 @@ helper(`suggestedCronTitle` / `cronScopeLabel` / `cronStatusText`)内部
   bundle,**不是** 实时编译 TS;改源后必须 `pnpm --filter @qm/web-ui
   build` 后浏览器拉取新 hash 才能看到改动;`@qm/web-ui typecheck:app` 与
   `vite build` 是浏览器验收前的硬前置。
+
+第六批改:`packages/web-ui/app/src/skills.ts`
+(估 33 命中,实际 ~60;含 New skill/Search skills/Back to skills/状态
+筛选 aria + 三个 tab(Active/Archived/All)/Scope + Source 下拉(范围/
+来源 + All scopes/sources + Personal/Channel/Project group/Team/Org/
+Created here/Skill packs/Overrides)/Description/Instructions/Name/Available
+to/Editing/New 徽章/Active/Scope variant/Working…/Saving…/Archiving…/
+Restore/Archive/Cancel/Save/Edit/Clear filters/Loading skills…/Details/
+Capabilities/Scope/None required/Loading skill instructions…/Loading
+instructions…/Instructions unavailable./Failed to load skill details/
+save/create/restore/archive skill/load skills/未 skills in this context/未
+skills available yet/未 skills match these filters/Name, description,
+and instructions are all required./Edit /{name} 与 Edit /{name}? 与
+Edit /skill/Create skill/Publish skill/Publish change/Review again/Publish
+/{name} to {scope}?/Publish this change to {scope}?/Create a reusable
+procedure for yourself or a shared context./Everyone in a shared context
+can invoke and edit this skill./Everyone in this context can invoke and
+edit these instructions./watch-pipeline/One line: what it does.../The
+SKILL.md contents.../Personal — only you/only you/this context/Archive
+/{name}?/Archive skill/Archiving…/This version will stop being
+available to {audience}. ... /Narrower scope takes precedence where
+both apply/variants/Description {state}/Instructions {state}/
+unchanged/changed/skill/skills/asset/assets/variant/variants/group/groups/
+source/Pack {name};新增 60 个 ui key,登记于两表;占位串 `{name}` / `{scope}` /
+`{audience}` / `{state}` 全部走 `t()` 插值)。
+helper(`scopeLabel` 改写为按 `scope` 值查表返回中文,`editAudience` 内部
+`only you` / `this context` 走 `t()`)。
+
+复用 key:`Skills` / `Archived` / `Archive` / `Cancel` / `Save` / `Edit` /
+`Personal` / `Channel` / `Project` / `Organization` / `Name` / `Owner` /
+`Restore` / `Active`(复用 P1 zh="进行中")/`Loading…` / `Loading skills…`
+/ `Scope` (P3 crons)/`Source` (P3 skills)/`group` (P3 crons)/`Edit` 等。
+
+已知:`Active` 在 crons 是"已启用"语义(用 t("Enabled")),在 skills 是
+"技能启用中"语义(用 t("Active") zh="进行中")。两者不冲突,后续用户反馈
+可统一。
+
+验证:
+
+- `typecheck:app` 绿;`vite build` 通过;i18n 测试 5/5;web-ui 既有测试
+  15/15 全过(共 20/20)
+- 浏览器实测(portal 前门 127.0.0.1:54223,`/skills` 路由):
+  - zh:标题 `技能`、`刷新` 按钮、`新建技能` 按钮、`搜索技能` searchbox、
+    `进行中 0` / `已归档 0` / `全部 0` 三个 tab、`按状态筛选技能` group
+    aria、`范围` 标签 + combobox `按范围筛选技能`(选项:所有范围 / 个人 /
+    频道 / 项目 / 群组 / 团队 / 组织)、`来源` 标签 + combobox `按来源
+    筛选技能`(选项:所有来源 / Created here / 技能包 / 覆盖)、
+    `0 个技能 in 0 组` 计数、`暂无可用技能。` 空态
+  - en(不刷新):`Skills` / `Refresh` / `New skill` / `Search skills` /
+    `Active` / `Archived` / `All` / `Filter by skill status` /
+    `Filter skills by scope` / `Filter skills by source` / `All scopes` /
+    `All sources` / `Personal` / `Channel` / `Project / group` / `Team` /
+    `Organization` / `Created here` / `Skill packs` / `Overrides` /
+    `0 skills in 0 groups` / `No skills available yet.`
+  - 截图:`i18n-p3-skills-zh.png` / `i18n-p3-skills-en.png`
