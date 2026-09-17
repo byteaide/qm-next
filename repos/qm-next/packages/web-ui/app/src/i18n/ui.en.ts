@@ -875,4 +875,44 @@ export const uiEn = {
   "Configure your sender to sign requests with this secret (scheme: {scheme}).":
     "Configure your sender to sign requests with this secret (scheme: {scheme}).",
   "No signing secret for scheme {scheme}.": "No signing secret for scheme {scheme}.",
+
+  // --- P4 residual sweep: memory page ---
+  "Facts the agent carries into your conversations.": "Facts the agent carries into your conversations.",
+  "Facts view": "Facts view",
+  "Edit notebook": "Edit notebook",
+  History: "History",
+  "Refresh memory": "Refresh memory",
+  "Edit the notebook directly. Switch to Facts view to search or remove individual facts. Saves are protected if the agent remembers something new while this page is open.":
+    "Edit the notebook directly. Switch to Facts view to search or remove individual facts. Saves are protected if the agent remembers something new while this page is open.",
+  "Search memory": "Search memory",
+  "Search remembered facts": "Search remembered facts",
+  "Captured {date}": "Captured {date}",
+  "Forget this fact": "Forget this fact",
+  "No remembered facts match this search.": "No remembered facts match this search.",
+  "The agent hasn’t noted any facts yet.": "The agent hasn’t noted any facts yet.",
+  "Save changes": "Save changes",
+  "Unsaved changes": "Unsaved changes",
+  "Revision history": "Revision history",
+  Current: "Current",
+  "Revision {n}": "Revision {n}",
+  "automatic capture": "automatic capture",
+  "Revision history is unavailable for this memory store.": "Revision history is unavailable for this memory store.",
+  "Discard unsaved memory changes?": "Discard unsaved memory changes?",
+  "Refreshing will replace this draft with the latest memory. Copy anything you want to keep before continuing.":
+    "Refreshing will replace this draft with the latest memory. Copy anything you want to keep before continuing.",
+  "Discard and refresh": "Discard and refresh",
+  "Failed to load memory.": "Failed to load memory.",
+  "Saved ✓": "Saved ✓",
+  "Saved ✓ History could not refresh.": "Saved ✓ History could not refresh.",
+  "Memory changed in another conversation. Your draft is still here; copy it if needed, then refresh to merge with the latest version.":
+    "Memory changed in another conversation. Your draft is still here; copy it if needed, then refresh to merge with the latest version.",
+  "Failed to save memory.": "Failed to save memory.",
+  "Failed to load memory history.": "Failed to load memory history.",
+  "Restore memory from {date}?": "Restore memory from {date}?",
+  "The selected notebook will become current. The version you have now remains available in history.":
+    "The selected notebook will become current. The version you have now remains available in history.",
+  "Restore revision": "Restore revision",
+  "Revision restored ✓": "Revision restored ✓",
+  "Revision restored ✓ History could not refresh.": "Revision restored ✓ History could not refresh.",
+  "Could not restore that revision.": "Could not restore that revision.",
 } as const;

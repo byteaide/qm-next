@@ -855,4 +855,44 @@ export const uiZh = {
   "Configure your sender to sign requests with this secret (scheme: {scheme}).":
     "在你的发送方中配置使用此签名密钥对请求签名(方案:{scheme})。",
   "No signing secret for scheme {scheme}.": "方案 {scheme} 无需签名密钥。",
+
+  // --- P4 残留清扫:memory 页 ---
+  "Facts the agent carries into your conversations.": "智能体带入你对话中的事实。",
+  "Facts view": "事实视图",
+  "Edit notebook": "编辑笔记本",
+  History: "历史",
+  "Refresh memory": "刷新记忆",
+  "Edit the notebook directly. Switch to Facts view to search or remove individual facts. Saves are protected if the agent remembers something new while this page is open.":
+    "直接编辑笔记本。切换到事实视图可搜索单条事实。若智能体在本页打开期间记住了新内容,保存会受到保护。",
+  "Search memory": "搜索记忆",
+  "Search remembered facts": "搜索已记住的事实",
+  "Captured {date}": "记录于 {date}",
+  "Forget this fact": "忘记这条事实",
+  "No remembered facts match this search.": "没有符合此搜索的已记住事实。",
+  "The agent hasn’t noted any facts yet.": "智能体还没有记录任何事实。",
+  "Save changes": "保存更改",
+  "Unsaved changes": "有未保存的更改",
+  "Revision history": "修订历史",
+  Current: "当前版本",
+  "Revision {n}": "修订 {n}",
+  "automatic capture": "自动记录",
+  "Revision history is unavailable for this memory store.": "该记忆存储不支持修订历史。",
+  "Discard unsaved memory changes?": "放弃未保存的记忆更改?",
+  "Refreshing will replace this draft with the latest memory. Copy anything you want to keep before continuing.":
+    "刷新将用最新记忆替换此草稿。如需保留内容,请先复制。",
+  "Discard and refresh": "放弃并刷新",
+  "Failed to load memory.": "记忆加载失败。",
+  "Saved ✓": "已保存 ✓",
+  "Saved ✓ History could not refresh.": "已保存 ✓ 但历史刷新失败。",
+  "Memory changed in another conversation. Your draft is still here; copy it if needed, then refresh to merge with the latest version.":
+    "记忆已在另一个会话中被修改。你的草稿仍保留在此;如有需要请先复制,然后刷新以与最新版本合并。",
+  "Failed to save memory.": "记忆保存失败。",
+  "Failed to load memory history.": "记忆历史加载失败。",
+  "Restore memory from {date}?": "恢复到 {date} 的记忆?",
+  "The selected notebook will become current. The version you have now remains available in history.":
+    "所选笔记本将成为当前版本。你现在的版本仍保留在历史中。",
+  "Restore revision": "恢复此修订",
+  "Revision restored ✓": "已恢复修订 ✓",
+  "Revision restored ✓ History could not refresh.": "已恢复修订 ✓ 但历史刷新失败。",
+  "Could not restore that revision.": "无法恢复该修订。",
 } satisfies Record<keyof typeof uiEn, string>;
