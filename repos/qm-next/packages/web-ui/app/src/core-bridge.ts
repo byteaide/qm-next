@@ -2,6 +2,7 @@ import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { Api, AssistantMessage, AssistantMessageEventStream, Context, Model, Usage } from "@earendil-works/pi-ai";
 import type { Agent, AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
 import { swallow } from "../../chassis/src/errors.ts";
+import { hasZhError, localizedError } from "./i18n/errors.ts";
 import { groupDmText } from "./group-dm-label.ts";
 import { base64ToBytes } from "./paste-text.ts";
 import { defaultEffortForModel, harnessSupportsEffort } from "./model-options.ts";
@@ -458,6 +459,16 @@ async function toCoreAttachment(a: PiAttachment): Promise<CoreAttachment> {
 export class ApiError extends Error {
   status: number;
   body: unknown;
+  /** Machine error code from the API envelope (`body.error`), when present. */
+  errorCode?: string;
+  /**
+   * Locale-resolved display text for coded errors; falls back to the raw
+   * message for uncoded errors, unknown codes, and the en locale. chassis's
+   * errMessage() reads this structurally — it must not import us.
+   */
+  get displayMessage(): string {
+    return localizedError(this.errorCode ?? "") ?? this.message;
+  }
   constructor(message: string, status: number, body?: unknown) {
     super(message);
     this.name = "ApiError";
@@ -505,11 +516,17 @@ export async function api<T = unknown>(path: string, init?: RequestInit): Promis
   }
   if (!r.ok) {
     if (r.status === 401 && path !== "/signin") reportSigninRequired(body as SigninRequired);
+    const code = (body as { error?: string })?.error;
     const msg =
       (body as { error?: string; message?: string })?.message ??
-      (body as { error?: string })?.error ??
+      code ??
       `HTTP ${r.status}`;
-    throw new ApiError(msg, r.status, body);
+    const error = new ApiError(msg, r.status, body);
+    if (code) {
+      error.errorCode = code;
+      if (hasZhError(code)) console.debug(`web-ui: api error ${code} (original message): ${msg}`);
+    }
+    throw error;
   }
   return body as T;
 }

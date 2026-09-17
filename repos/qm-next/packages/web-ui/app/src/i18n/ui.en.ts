@@ -21,4 +21,11 @@ export const uiEn = {
   Skills: "Skills",
   // chats
   "New chat": "New chat",
+  // model sign-in errors (model-connect friendly())
+  "That API key was rejected — check it and try again.":
+    "That API key was rejected — check it and try again.",
+  "Sign-in didn't complete. Try again — the code may have expired.":
+    "Sign-in didn't complete. Try again — the code may have expired.",
+  "Couldn't reach the sign-in service. Check your connection and try again.":
+    "Couldn't reach the sign-in service. Check your connection and try again.",
 } as const;

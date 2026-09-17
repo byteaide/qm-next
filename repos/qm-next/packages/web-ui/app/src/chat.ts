@@ -73,6 +73,7 @@ import { deepLinkPath, UI_BASE } from "./deep-link";
 import type { ChatSurface, ConvCtx } from "./conv-types";
 import { errMessage, swallow } from "../../chassis/src/errors";
 import { showStateError } from "./error-banner";
+import { localizeTurnError } from "./i18n/errors";
 import { escapeLoneDollars } from "./markdown-dollars";
 import { splitStreamingMarkdown } from "./streaming-markdown";
 import { installMarkdownSanitizer } from "./markdown-sanitize";
@@ -1103,7 +1104,7 @@ export function createChatSurface(
           <section class="chat-scroll" @scroll=${onTranscriptScroll}>
             <div class="message-stack ${messages.length || chatState.forkSession ? "" : "empty-stack"}">
               ${inheritedHeader()} ${chatState.earlierCount > 0 ? earlierNotice(agent) : nothing} ${messageContent}
-              ${showStateError(messages, agent.state.errorMessage) ? html`<div class="composer-error inline">${agent.state.errorMessage}</div>` : nothing}
+              ${showStateError(messages, agent.state.errorMessage) ? html`<div class="composer-error inline">${localizeTurnError(agent.state.errorMessage ?? "")}</div>` : nothing}
             </div>
           </section>
           <div class="chat-bottom-dock">
@@ -1305,7 +1306,7 @@ export function createChatSurface(
           ${
             sendFailure
               ? html`<div class="send-failure">
-                  <span>${sendFailure}</span>
+                  <span>${localizeTurnError(sendFailure)}</span>
                   <button class="btn compact" type="button" @click=${() => void retryFailedSend(message, index)}>
                     ${icon(RefreshCw, 12)} Retry
                   </button>
@@ -1332,7 +1333,7 @@ export function createChatSurface(
       if (!hasVisibleContent && msg.stopReason !== "error" && msg.stopReason !== "aborted") return nothing;
       const errorTpl =
         msg.stopReason === "error" && msg.errorMessage
-          ? html`<div class="composer-error inline">${msg.errorMessage}</div>`
+          ? html`<div class="composer-error inline">${localizeTurnError(msg.errorMessage)}</div>`
           : nothing;
       return html`
         <article class="message-row assistant-row ${isStreaming ? "streaming" : ""}" data-index=${index}>

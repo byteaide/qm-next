@@ -26,13 +26,15 @@ export function currentLocale(): Locale {
       return cached;
     }
   } catch {
-    // storage unavailable (private mode etc.) — fall through to detection
+    // storage unavailable (private mode, plain node, etc.) — fall through
   }
-  cached = (navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en";
+  const nav = typeof navigator !== "undefined" ? navigator.language : "";
+  cached = (nav || "").toLowerCase().startsWith("zh") ? "zh" : "en";
   return cached;
 }
 
 export function applyLocale(): void {
+  if (typeof document === "undefined") return; // plain node / SSR
   document.documentElement.lang = currentLocale() === "zh" ? "zh-CN" : "en";
 }
 

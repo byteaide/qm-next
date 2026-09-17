@@ -20,4 +20,9 @@ export const uiZh = {
   Skills: "技能",
   // chats
   "New chat": "新聊天",
+  // model sign-in errors (model-connect friendly())
+  "That API key was rejected — check it and try again.": "API 密钥被拒绝,请检查后重试。",
+  "Sign-in didn't complete. Try again — the code may have expired.": "登录未完成,请重试——验证码可能已过期。",
+  "Couldn't reach the sign-in service. Check your connection and try again.":
+    "无法连接登录服务,请检查网络后重试。",
 } satisfies Record<keyof typeof uiEn, string>;
