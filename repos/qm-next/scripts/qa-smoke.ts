@@ -47,6 +47,7 @@
 
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createHmac } from 'node:crypto'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const QM_NEXT_ROOT = join(__dirname, '..')
@@ -1351,7 +1352,7 @@ await scenario('S21', 'POST /v1/webhooks (create)', async () => {
     owner: 'qa-smoke',
     createdBy: 'qa-smoke',
     action: 'turn.completed',
-    verification: { scheme: 'hmac-sha256', secret: 'phase2-fake-secret-not-real' },
+    verification: { scheme: 'hmac-sha256', secret: 'wh-secret-2025' },
     filters: [{ path: '/v1/turns', in: ['POST'] }],
   })
   if (status !== 200 && status !== 201) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
@@ -1389,6 +1390,117 @@ await scenario('S21', 'POST /v1/webhooks/:id/enable', async () => {
 })
 
 // ════════════════════════════════════════════════════════════════════════
+// §S34. Webhooks raw incoming HMAC 验证（6 用例 — hmac-sha256 正反 + github/slack handshake）
+//   §S21 创建的 webhook scheme 是 'hmac-sha256'，secret 是 webhook secret
+//   用例覆盖：✓ 正确签名 → 202 / ✗ 错误签名 → 401 / ✗ 缺签头 → 401 / ✗ scheme 错位 → 401
+//   handshake（github ping / slack url_verification）通过临时注册对应 scheme webhook 验证
+// ════════════════════════════════════════════════════════════════════════
+console.log('\n§S34 Webhooks raw incoming HMAC 验证')
+
+// S34 用例的 webhook 共享 §S21 的 secret 字符串（必须是同一字符串才能算"正确签名"）
+const S34_WEBHOOK_SECRET = 'wh-secret-2025'
+
+await scenario('S34', 'POST /v1/webhooks/incoming/:id (hmac-sha256 + 正确 x-signature → 202 accepted)', async () => {
+  if (!webhookId) throw new Error('no webhook id from §S21')
+  const body = JSON.stringify({ event: 'push', ref: 'refs/heads/main' })
+  const sig = 'sha256=' + createHmac('sha256', S34_WEBHOOK_SECRET).update(body).digest('hex')
+  const res = await fetch(`${baseUrl}/v1/webhooks/incoming/${webhookId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-signature': sig },
+    body,
+  })
+  if (res.status !== 202) throw new Error(`status=${res.status} body=${await res.text()}`)
+  return { status: res.status, scheme: 'hmac-sha256' }
+})
+
+await scenario('S34', 'POST /v1/webhooks/incoming/:id (错误 x-signature → 401)', async () => {
+  if (!webhookId) throw new Error('no webhook id from §S21')
+  const body = JSON.stringify({ event: 'push' })
+  const res = await fetch(`${baseUrl}/v1/webhooks/incoming/${webhookId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-signature': 'sha256=' + '0'.repeat(64) },
+    body,
+  })
+  if (res.status !== 401) throw new Error(`status=${res.status} body=${await res.text()}`)
+  return { status: res.status, expect: 401 }
+})
+
+await scenario('S34', 'POST /v1/webhooks/incoming/:id (缺 x-signature 头 → 401)', async () => {
+  if (!webhookId) throw new Error('no webhook id from §S21')
+  const body = JSON.stringify({ event: 'push' })
+  const res = await fetch(`${baseUrl}/v1/webhooks/incoming/${webhookId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body,
+  })
+  if (res.status !== 401) throw new Error(`status=${res.status} body=${await res.text()}`)
+  return { status: res.status, expect: 401 }
+})
+
+await scenario('S34', 'POST /v1/webhooks/incoming/:id (slack scheme header 但 webhook 是 hmac-sha256 → 401)', async () => {
+  // scheme 错位：slack 头格式但 scheme 不匹配 → verify 失败 → 401
+  if (!webhookId) throw new Error('no webhook id from §S21')
+  const body = '{"type":"event_callback"}'
+  const ts = String(Math.floor(Date.now() / 1000))
+  const res = await fetch(`${baseUrl}/v1/webhooks/incoming/${webhookId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-slack-request-timestamp': ts, 'x-slack-signature': 'v0=' + '0'.repeat(64) },
+    body,
+  })
+  if (res.status !== 401) throw new Error(`status=${res.status} body=${await res.text()}`)
+  return { status: res.status, schemeMismatch: 'slack-vs-hmac-sha256' }
+})
+
+// handshake 测试需要 github/slack scheme 的 webhook；临时创建一个用完即弃
+await scenario('S34', '临时创建 github scheme webhook → handshake ping → 200 pong', async () => {
+  const { status, body } = await req('POST', '/v1/webhooks', {
+    ownerScopeId: DEFAULT_ADMIN_SCOPE,
+    owner: 'qa-smoke',
+    createdBy: 'qa-smoke',
+    action: 'turn.completed',
+    verification: { scheme: 'github', secret: 'webhook-secret' },
+  })
+  if (status !== 200 && status !== 201) throw new Error(`create failed status=${status} body=${JSON.stringify(body)}`)
+  const ghId = body?.webhook?.id ?? body?.id
+  if (!ghId) throw new Error(`no webhook id from create`)
+  // handshake：x-github-event: ping → github.verifier.handshake → 'pong' body, 200
+  // 不需要带有效签名（handshake 在 verify 之前返回）
+  const res = await fetch(`${baseUrl}/v1/webhooks/incoming/${ghId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-github-event': 'ping' },
+    body: '{"zen":"Speak like a human"}',
+  })
+  if (res.status !== 200) throw new Error(`handshake status=${res.status} body=${await res.text()}`)
+  const text = await res.text()
+  if (text !== 'pong') throw new Error(`expected handshake 'pong', got '${text}'`)
+  return { status: res.status, handshake: text, scheme: 'github' }
+})
+
+await scenario('S34', '临时创建 slack scheme webhook → url_verification handshake → 200 echo challenge', async () => {
+  const { status, body } = await req('POST', '/v1/webhooks', {
+    ownerScopeId: DEFAULT_ADMIN_SCOPE,
+    owner: 'qa-smoke',
+    createdBy: 'qa-smoke',
+    action: 'turn.completed',
+    verification: { scheme: 'slack', secret: 'webhook-secret' },
+  })
+  if (status !== 200 && status !== 201) throw new Error(`create failed status=${status} body=${JSON.stringify(body)}`)
+  const slId = body?.webhook?.id ?? body?.id
+  if (!slId) throw new Error(`no webhook id from create`)
+  // slack url_verification: type=url_verification + challenge → 回原 challenge 200
+  const challenge = 'a'.repeat(20)
+  const res = await fetch(`${baseUrl}/v1/webhooks/incoming/${slId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'url_verification', challenge }),
+  })
+  if (res.status !== 200) throw new Error(`handshake status=${res.status} body=${await res.text()}`)
+  const text = await res.text()
+  if (text !== challenge) throw new Error(`expected echo '${challenge}', got '${text}'`)
+  return { status: res.status, handshake: 'url_verification', scheme: 'slack' }
+})
+
+// ════════════════════════════════════════════════════════════════════════
 // §S22. 用户 - Keychain（5 用例）
 // ════════════════════════════════════════════════════════════════════════
 console.log('\n§S22 用户 - Keychain')
@@ -1404,7 +1516,7 @@ await scenario('S22', 'POST /v1/keychain/credentials (写入 fake cred)', async 
   // service 名要作为 envKey（不允许以数字开头）。用纯字母数字下划线名
   const { status, body } = await req('POST', '/v1/keychain/credentials', {
     service: 'phase2_test_service',
-    secret: 'phase2-fake-secret-not-real',
+    secret: 'wh-secret-2025',
   })
   if (status !== 200 && status !== 201) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
   credId = body?.credential?.id ?? body?.id
@@ -2174,6 +2286,7 @@ const sectionTitles: Record<string, string> = {
   S31: 'User misc (Surface-config/Pin/Soul/Grants revoke)',
   S32: 'Connectors OAuth Mock (Phase 3C)',
   S33: 'Keychain drops 完整链路 (Phase 3D · capability mint → form → redeem)',
+  S34: 'Webhooks raw incoming HMAC + handshake (Phase 3D · hmac-sha256 正反 + github/slack handshake)',
 }
 
 console.log('')
