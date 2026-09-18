@@ -53,6 +53,7 @@ const QM_NEXT_ROOT = join(__dirname, '..')
 
 const { Context } = await import(`${QM_NEXT_ROOT}/vendor/cordis/src/index.ts`)
 const { ApiService, mintSignedPayload } = await import(`${QM_NEXT_ROOT}/packages/api/src/index.ts`)
+const { mintCapabilityToken, SECRET_DROP_AUD } = await import(`${QM_NEXT_ROOT}/packages/auth/src/index.ts`)
 
 // ════════════════════════════════════════════════════════════════════════
 // 配置
@@ -1625,6 +1626,72 @@ await scenario('S26', 'POST /v1/keychain/drops (需要 agent capability token)',
   })
   if (status !== 401) throw new Error(`expected 401 got ${status} body=${JSON.stringify(body)}`)
   return { status, error: body?.error }
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// §S33. Phase 3D — Keychain drops 完整链路（3 用例 · §7.2 🥇）
+// ═══════════════════════════════════════════════════════════════════════
+console.log('\n§S33 Phase 3D - Keychain drops 完整链路 (capability mint → form → redeem)')
+
+let dropId: string | undefined
+
+await scenario('S33', 'POST /v1/keychain/drops (agent capability token mint → dropId + formPath)', async () => {
+  // Phase 3D: 完整链路第一步——agent 用 cap token mint 一个 secret-drop,
+  // 拿到 dropId + formPath。错误路径已在 S26.5 覆盖 (bearer → 401)。
+  const dropCap = await mintCapabilityToken({
+    actorId: 'qa-smoke',
+    scopeId: 'personal:qa-smoke',
+    aud: SECRET_DROP_AUD,
+    exp: Date.now() + 60_000,
+  }, SECRET, 'default')
+  const res = await fetch(`${baseUrl}/v1/keychain/drops`, {
+    method: 'POST',
+    headers: { 'x-agent-capability': dropCap, 'content-type': 'application/json' },
+    body: JSON.stringify({ title: 'github', purpose: `phase3d drops test ${RUN_TAG}` }),
+  })
+  const parsed = await res.json().catch(() => ({}))
+  if (res.status !== 200) throw new Error(`expected 200 got ${res.status} body=${JSON.stringify(parsed)}`)
+  if (typeof parsed?.dropId !== 'string' || !parsed.dropId) throw new Error(`expected dropId string got ${JSON.stringify(parsed)}`)
+  if (parsed?.formPath !== `/v1/keychain/drops/${parsed.dropId}/form`) {
+    throw new Error(`expected formPath=/v1/keychain/drops/${parsed.dropId}/form got ${parsed?.formPath}`)
+  }
+  dropId = parsed.dropId
+  return { status: res.status, dropId, formPath: parsed.formPath }
+})
+
+await scenario('S33', 'GET /v1/keychain/drops/:id/form (返回 form HTML · 含 POST action 到 redeem 路由)', async () => {
+  // Phase 3D: 完整链路第二步——user 在浏览器 GET form 拿到 HTML（含
+  // <form method="POST" action="/v1/keychain/drops/:id"> + submit 按钮）。
+  if (!dropId) throw new Error('no dropId from S33.1')
+  const res = await fetch(`${baseUrl}/v1/keychain/drops/${dropId}/form`, {
+    headers: { authorization: authHeaders.authorization },
+  })
+  const text = await res.text()
+  if (res.status !== 200) throw new Error(`expected 200 got ${res.status} body=${text.slice(0, 200)}`)
+  if (!text.includes(`<form method="POST" action="/v1/keychain/drops/${dropId}">`)) {
+    throw new Error(`form HTML missing POST action to /v1/keychain/drops/${dropId}; got: ${text.slice(0, 300)}`)
+  }
+  if (!text.includes('Submit securely')) throw new Error(`form HTML missing submit button`)
+  if (!text.includes(`phase3d drops test ${RUN_TAG}`)) throw new Error(`form HTML missing purpose text`)
+  return { status: res.status, htmlLen: text.length }
+})
+
+await scenario('S33', 'POST /v1/keychain/drops/:id (redeem secret → 200 + credential.service)', async () => {
+  // Phase 3D: 完整链路第三步——user 提交表单 secret → drop 标记 consumed,
+  // 返回 { ok:true, credential:{ service, ownerId, ... } }。
+  if (!dropId) throw new Error('no dropId from S33.1')
+  const dropSecret = `phase3d-secret-${RUN_TAG}`
+  const res = await fetch(`${baseUrl}/v1/keychain/drops/${dropId}`, {
+    method: 'POST',
+    headers: { authorization: authHeaders.authorization, 'content-type': 'application/json' },
+    body: JSON.stringify({ secret: dropSecret }),
+  })
+  const parsed = await res.json().catch(() => ({}))
+  if (res.status !== 200) throw new Error(`expected 200 got ${res.status} body=${JSON.stringify(parsed)}`)
+  if (parsed?.ok !== true) throw new Error(`expected ok=true got ${JSON.stringify(parsed)}`)
+  if (parsed?.credential?.service !== 'github') throw new Error(`expected credential.service=github got ${parsed?.credential?.service}`)
+  if (parsed?.credential?.ownerId !== 'qa-smoke') throw new Error(`expected credential.ownerId=qa-smoke got ${parsed?.credential?.ownerId}`)
+  return { status: res.status, service: parsed.credential.service, fields: parsed.credential.fields }
 })
 
 // ═══════════════════════════════════════════════════════════════════════

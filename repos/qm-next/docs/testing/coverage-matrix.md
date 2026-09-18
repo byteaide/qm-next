@@ -99,8 +99,8 @@ qm-next 通过 `/v1/*` 暴露给最终用户的入口。共扫描到约 35 条�
 | 43 | `/v1/keychain/asks/:id/decline` | POST | either | ✅ 已覆盖（验证 404） | S26.3 |
 | 44 | `/v1/keychain/use` | POST | either | ✅ 已覆盖（验证 400） | S26.4 |
 | 45 | `/v1/keychain/drops` | POST | either | ✅ 已覆盖（验证 cap 需求 401） | S26.5 |
-| 46 | `/v1/keychain/drops/:id/form` | GET | source | ❌ 未覆盖 | — |
-| 47 | `/v1/keychain/drops/:id` | POST | source | ❌ 未覆盖 | — |
+| 46 | `/v1/keychain/drops/:id/form` | GET | source | ✅ 已覆盖（**Phase 3D**：form HTML 含 POST action 到 redeem 路由 + 提交按钮 + purpose 文本） | S33.2 |
+| 47 | `/v1/keychain/drops/:id` | POST | source | ✅ 已覆盖（**Phase 3D**：redeem secret → 200 + credential.service/ownerId 校验） | S33.3 |
 | **Connectors（OAuth mock · Phase 3C）** ||||||
 | 48 | `/v1/connectors/oauth/consent/mint` | POST | source (Phase 3C 由 `aud: oauth-consent` 改为 source 以便 lane A 测试) | ✅ 已覆盖（**Phase 3C**：mock mint + state 生成） | S32.2 |
 | 49 | `/v1/connectors/oauth/consent/redeem/:linkId` | GET | source | ✅ 已覆盖（**Phase 3C**：mock code 签发 + 防双花 410） | S32.5, S32.6, S32.7 |
@@ -148,7 +148,7 @@ qm-next 通过 `/v1/*` 暴露给最终用户的入口。共扫描到约 35 条�
 | 84 | `/healthz` | GET | public | ✅ 已覆盖 | S1.1, S1.3 |
 | 85 | `/readyz` | GET | public | ✅ 已覆盖 | S1.2 |
 
-**用户面小计**：~85 路由 · ✅ 已覆盖 ~53 / ❌ 未覆盖 ~14（计划外 14）/ 🚫 排除 ~18
+**用户面小计**：~85 路由 · ✅ 已覆盖 ~55 / ❌ 未覆盖 ~12（计划外 12）/ 🚫 排除 ~18
 （覆盖数包括 happy-path + 部分 error path；每个动词未必都覆盖）
 
 ---
@@ -290,8 +290,9 @@ qm-next 的 admin 入口全部在 `/v1/admin/*`，共 63 条路由。**当前覆
 | **S30** | Sessions 详情 (Fork/Entries) | 3 | POST fork / GET entries/:seq | ✅ 完成（**D1 修复**） |
 | **S31** | User misc | 5 | surface-config / channel-header-pin GET+PUT / soul / grants revoke | ✅ 完成 (Phase 3A) |
 | **S32** | Connectors OAuth mock | 16 | catalog / consent mint+redeem / provider start+callback / token / status / revoke（mock OAuth provider，闭环 8 条 Connectors 路由） | ✅ **全部 PASS（Phase 3C · 184/184 总数起点）** |
+| **S33** | Keychain drops 完整链路 | 3 | cap token mint → form GET → redeem POST（`mintCapabilityToken` + `SECRET_DROP_AUD` 第一次接入 qa-smoke；闭合 drops form/redeem 链路） | ✅ **全部 PASS（Phase 3D · 187/187 总数起点）** |
 
-**总计**：184 用例（Phase 3C +16 Connectors）· **12 次模型调用 · 实际耗时 ~3.5 分钟**
+**总计**：187 用例（Phase 3D +3 drops 链路）· **12 次模型调用 · 实际耗时 ~3.5 分钟**
 
 ---
 
@@ -299,11 +300,11 @@ qm-next 的 admin 入口全部在 `/v1/admin/*`，共 63 条路由。**当前覆
 
 | 维度 | 总数 | 已覆盖 | 覆盖率 |
 |------|------|--------|--------|
-| **用户面路由** | 85 | ~53 | **~62%** |
+| **用户面路由** | 85 | ~55 | **~65%** |
 | **管理员面路由** | 63 | ~39 | **~62%** |
-| **合计** | 148 | ~92 | **~65%** |
+| **合计** | 148 | ~94 | **~65%** |
 
-> **Phase 3C 现状（184/184 PASS）**：用户面 + 管理员面加权约 ~62%；Connectors OAuth（用户面内 8 条路由）100% 拉高整体 5pp → **~65%**。11 个真实代码缺陷（D1-D11）全部修复，commit 记录见 `baseline-smoke.md` 末尾。Phase 3A 的 S29 回归测试套件已全部自动转 PASS。
+> **Phase 3D 进行中（187/187 PASS · S33 完成）**：用户面 + 管理员面加权约 ~63%；Connectors OAuth 100% + drops form/redeem 链路闭合 → **~65%**。11 个真实代码缺陷（D1-D11）全部修复，commit 记录见 `baseline-smoke.md` 末尾。Phase 3A 的 S29 回归测试套件已全部自动转 PASS。
 >
 > **历史快照（已废弃）**：早期 §5 草稿曾写"用户面 22 / 管理员面 0 / 合计 14%"（对应 Phase 2 起步阶段），已被本次清理删除。
 
@@ -332,13 +333,13 @@ qm-next 的 admin 入口全部在 `/v1/admin/*`，共 63 条路由。**当前覆
 
 所有 Phase 1 标 🥇 / 🥈 的扩展均已在 Phase 2 中实现。具体见 §4 测试执行节状态表。
 
-### 7.2 下一轮可加（Phase 3D/3E 候选 · Phase 3C 已完成）
+### 7.2 下一轮可加（Phase 3E/3F 候选 · Phase 3D 进行中 · S33 已完成）
 
 | 优先级 | 待扩展内容 | 工作量估计 | 价值 |
 |--------|-----------|-----------|------|
 | 🥇 | ~~**修 D1-D11 缺陷**~~ **（Phase 3B 已完成 — 100% pass rate）** | — | — |
 | 🥇 | ~~**加 Connectors OAuth mock**（Phase 3C）~~ **（已完成 — 16 用例 · 8 路由 100% 覆盖）** | — | — |
-| 🥇 | **补 keychain drops form/redeem**（POST drops 已过；form+redeem 验证完整链路） | ~3 用例 · 30 分钟 | 补 keychain drops 完整面 |
+| 🥇 | ~~**补 keychain drops form/redeem**~~ **（Phase 3D 已完成 — 3 用例 · drops 链路闭合）** | — | — |
 | 🥈 中 | **补 webhooks raw incoming**（HMAC 签名构造） | ~3 用例 · 30 分钟 | 补 webhook 完整面 |
 | 🥈 中 | **补 admin grant 域**：/v1/admin/users/:id/reset + onboarding PUT | ~3 用例 · 30 分钟 | 补 admin 完整面 |
 | 🥈 中 | **补 crons + triggers**：短间隔 cron + consent + run | ~5 用例 · 1 小时 | 补 trigger 用户面 |
