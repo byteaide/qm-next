@@ -10,6 +10,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { LRUCache } from 'lru-cache'
 import { PORTAL_IDENTITY_HEADER, mintPortalIdentity, type ReplayDedupe } from '@qm/auth'
 import { ADMIN_LOGIN_SCRIPT, ADMIN_LOGIN_SCRIPT_HASH, openAdminLogin } from './admin-login.ts'
+import { portalLang, portalText, resolvePortalLocale, type PortalLocale } from './i18n.ts'
 import {
   clearCookie,
   deriveKey,
@@ -216,9 +217,9 @@ const CARD_STYLE = `<style>
 const ALERT_ICON = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5M12 16h.01"/></svg>`
 const LOCK_ICON = `<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>`
 
-function cardPage(o: { title: string; heading: string; msg: string; icon: string; warn?: boolean; wide?: boolean; extra?: string; actions: string; help: string }): string {
+function cardPage(o: { lang: string; title: string; heading: string; msg: string; icon: string; warn?: boolean; wide?: boolean; extra?: string; actions: string; help: string }): string {
   return `<!doctype html>
-<html lang="en">
+<html lang="${o.lang}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -244,34 +245,41 @@ ${CARD_STYLE}
 </html>`
 }
 
-export function signInErrorHtml(detail: string): string {
+/** Request locale: `qm.locale` cookie → Accept-Language → en (plan §4.4). */
+function localeOf(req: FastifyRequest): PortalLocale {
+  return resolvePortalLocale(req.headers.cookie, req.headers['accept-language'])
+}
+
+export function signInErrorHtml(locale: PortalLocale, detail: string): string {
   return cardPage({
-    title: 'Sign-in failed',
-    heading: "We couldn't sign you in",
-    msg: "Your sign-in didn't complete. This is usually temporary — trying again resolves most cases.",
+    lang: portalLang(locale),
+    title: portalText(locale, 'signInFailedTitle'),
+    heading: portalText(locale, 'signInFailedHeading'),
+    msg: portalText(locale, 'signInFailedMsg'),
     icon: ALERT_ICON,
     warn: true,
-    extra: `<p class="reason"><strong>Details</strong>${escapeHtml(detail)}</p>`,
-    actions: `<a class="btn primary" href="/auth/login">Try signing in again</a>
-        <a class="btn ghost" href="/">Back to start</a>`,
-    help: "Still stuck? Make sure you're a member of the approved workspace, then contact your admin.",
+    extra: `<p class="reason"><strong>${portalText(locale, 'details')}</strong>${escapeHtml(detail)}</p>`,
+    actions: `<a class="btn primary" href="/auth/login">${portalText(locale, 'trySigningInAgain')}</a>
+        <a class="btn ghost" href="/">${portalText(locale, 'backToStart')}</a>`,
+    help: portalText(locale, 'signInFailedHelp'),
   })
 }
 
-export function nonAdminDeniedHtml(o: { sub: string; org: string }): string {
+export function nonAdminDeniedHtml(locale: PortalLocale, o: { sub: string; org: string }): string {
   return cardPage({
-    title: 'No admin access',
-    heading: "You don't have admin access",
-    msg: "The Admin area is limited to governance admins. Your account is signed in and verified — it just isn't granted admin rights.",
+    lang: portalLang(locale),
+    title: portalText(locale, 'noAdminTitle'),
+    heading: portalText(locale, 'noAdminHeading'),
+    msg: portalText(locale, 'noAdminMsg'),
     icon: LOCK_ICON,
     wide: true,
     extra: `<div class="note">
-        <span class="who">Signed in as <b>${escapeHtml(o.sub)}</b> &middot; ${escapeHtml(o.org)}</span>
-        <p>Admin rights come from your organization's admin grants. If you need access, ask an existing admin to grant it.</p>
+        <span class="who">${portalText(locale, 'signedInAs')} <b>${escapeHtml(o.sub)}</b> &middot; ${escapeHtml(o.org)}</span>
+        <p>${portalText(locale, 'noAdminGrantsNote')}</p>
       </div>`,
-    actions: `<a class="btn primary" href="/">Back to your surfaces</a>
-        <a class="btn ghost" href="/admin/ui/">Try again</a>`,
-    help: 'You can keep using every surface available to your account.',
+    actions: `<a class="btn primary" href="/">${portalText(locale, 'backToSurfaces')}</a>
+        <a class="btn ghost" href="/admin/ui/">${portalText(locale, 'tryAgain')}</a>`,
+    help: portalText(locale, 'noAdminHelp'),
   })
 }
 
@@ -400,7 +408,7 @@ export function registerPortal(app: FastifyInstance, deps: PortalDeps): void {
     if (!deps.adminStatusOf) return reply.code(404).send({ error: 'not_found' })
     if (!(await deps.adminStatusOf(session.sub))) {
       if (wantsHtml(req)) {
-        return reply.code(403).header('content-type', 'text/html; charset=utf-8').send(nonAdminDeniedHtml({ sub: session.sub, org: session.org }))
+        return reply.code(403).header('content-type', 'text/html; charset=utf-8').send(nonAdminDeniedHtml(localeOf(req), { sub: session.sub, org: session.org }))
       }
       return reply.code(403).send({ error: 'forbidden', message: 'admin access required' })
     }
@@ -444,19 +452,22 @@ export function registerPortal(app: FastifyInstance, deps: PortalDeps): void {
 
   app.get('/auth/callback', async (req, reply) => {
     if (!deps.oidc) return reply.code(503).send({ error: 'not_configured' })
+    const locale = localeOf(req)
+    const failLocalized = (key: Parameters<typeof portalText>[1], params?: Record<string, string>): FastifyReply =>
+      fail(portalText(locale, key, params))
     const url = new URL(req.raw.url ?? '/', 'http://portal.local')
     const fail = (detail: string): FastifyReply => {
       setSessionCookies(reply, [clearCookie('portal_oidc_tmp', '/auth', state.secureCookies)])
-      return reply.code(400).header('content-type', 'text/html; charset=utf-8').send(signInErrorHtml(detail))
+      return reply.code(400).header('content-type', 'text/html; charset=utf-8').send(signInErrorHtml(locale, detail))
     }
-    if (url.searchParams.get('error')) return fail(`identity provider returned: ${url.searchParams.get('error') ?? ''}`)
+    if (url.searchParams.get('error')) return failLocalized('idpReturned', { detail: url.searchParams.get('error') ?? '' })
     const code = url.searchParams.get('code') ?? ''
     const stateParam = url.searchParams.get('state') ?? ''
 
     const tmp = openTmp(readCookie(req.headers.cookie, 'portal_oidc_tmp'), state.tmpKey, nowMs())
-    if (!tmp) return fail('login session expired — please try again')
-    if (!code || !stateParam || !safeEqual(stateParam, tmp.state)) return fail('invalid login state')
-    if (!consumeState(state, tmp.state)) return fail('login already used — please try again')
+    if (!tmp) return failLocalized('loginSessionExpired')
+    if (!code || !stateParam || !safeEqual(stateParam, tmp.state)) return failLocalized('invalidLoginState')
+    if (!consumeState(state, tmp.state)) return failLocalized('loginAlreadyUsed')
 
     let sub: string
     let name = ''
@@ -475,7 +486,7 @@ export function registerPortal(app: FastifyInstance, deps: PortalDeps): void {
       const rawName = info.name ?? claims.name
       if (typeof rawName === 'string') name = rawName.trim().slice(0, 200)
     } catch (e) {
-      return fail(e instanceof Error ? e.message : 'sign-in failed')
+      return fail(e instanceof Error ? e.message : portalText(locale, 'signInFailedGeneric'))
     }
 
     setAuthenticatedSession(state, reply, sub, name)
@@ -489,6 +500,7 @@ export function registerPortal(app: FastifyInstance, deps: PortalDeps): void {
     handler: async (req, reply) => {
       if (deps.sessionSecret.trim().length < 32) return reply.code(503).send({ error: 'not_configured' })
       if (req.method === 'GET') {
+        const locale = localeOf(req)
         return reply
           .code(200)
           .header('content-type', 'text/html; charset=utf-8')
@@ -497,27 +509,29 @@ export function registerPortal(app: FastifyInstance, deps: PortalDeps): void {
           .header('cache-control', 'no-store')
           .send(
             cardPage({
-              title: 'Admin sign-in',
-              heading: 'Sign in as an administrator',
-              msg: 'Only continue if you generated this link for your own admin account.',
+              lang: portalLang(locale),
+              title: portalText(locale, 'adminLoginTitle'),
+              heading: portalText(locale, 'adminLoginHeading'),
+              msg: portalText(locale, 'adminLoginMsg'),
               icon: LOCK_ICON,
-              extra: '<p id="admin-email"></p><noscript>JavaScript is required to open this login link.</noscript>',
-              actions: `<form method="post" action="/auth/admin-login"><input id="admin-token" name="token" type="hidden"><button id="admin-confirm" class="btn primary" style="width:100%" type="submit" disabled>Sign in</button></form><script>${ADMIN_LOGIN_SCRIPT}</script>`,
-              help: 'This link expires after five minutes and can be used once. Generate another with qm admin-login.',
+              extra: `<p id="admin-email"></p><noscript>${portalText(locale, 'jsRequired')}</noscript>`,
+              actions: `<form method="post" action="/auth/admin-login"><input id="admin-token" name="token" type="hidden"><button id="admin-confirm" class="btn primary" style="width:100%" type="submit" disabled>${portalText(locale, 'signIn')}</button></form><script>${ADMIN_LOGIN_SCRIPT}</script>`,
+              help: portalText(locale, 'adminLoginHelp'),
             }),
           )
       }
       if (!sameOriginRequest(req, state.origin)) return reply.code(403).send({ error: 'forbidden' })
+      const locale = localeOf(req)
       const token = typeof req.body === 'string' ? (new URLSearchParams(req.body).get('token') ?? '') : ''
       const failPage = (): FastifyReply =>
-        reply.code(400).header('content-type', 'text/html; charset=utf-8').send(signInErrorHtml('This admin link is invalid, expired, or already used. Generate a new link with qm admin-login.'))
+        reply.code(400).header('content-type', 'text/html; charset=utf-8').send(signInErrorHtml(locale, portalText(locale, 'adminLinkInvalid')))
       const claims = openAdminLogin(token, deps.sessionSecret, state.origin, nowMs())
       if (!claims) return failPage()
       const allowed = deps.adminStatusOf ? await deps.adminStatusOf(claims.email) : null
       if (allowed === null || allowed === undefined) {
-        return reply.code(503).header('content-type', 'text/html; charset=utf-8').send(signInErrorHtml('Admin access could not be checked. Please try again.'))
+        return reply.code(503).header('content-type', 'text/html; charset=utf-8').send(signInErrorHtml(locale, portalText(locale, 'adminCheckFailed')))
       }
-      if (!allowed) return reply.code(403).header('content-type', 'text/html; charset=utf-8').send(signInErrorHtml('This account does not have admin access.'))
+      if (!allowed) return reply.code(403).header('content-type', 'text/html; charset=utf-8').send(signInErrorHtml(locale, portalText(locale, 'accountNotAdmin')))
       if (deps.replayDedupe && !(await deps.replayDedupe.claim(`portal-admin-login:${claims.jti}`, claims.expiresAtMs))) return failPage()
       setAuthenticatedSession(state, reply, claims.email)
       return reply.code(303).header('location', '/admin/ui/').header('cache-control', 'no-store').send()
