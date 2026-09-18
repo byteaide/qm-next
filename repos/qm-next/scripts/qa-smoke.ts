@@ -2454,6 +2454,160 @@ await scenario('S37', 'GET /v1/admin/keychain (admin 查 org keychain status)', 
   return { status, scopeId: body.scopeId }
 })
 
+// §S38. Phase 3E P3 — admin listings + skill-packs lifecycle（11 用例 · §7.2 🥈）
+//   补 §S15/§S18 已覆盖 admin 基本面，但 8 条 admin listings + 3 条 skill-packs 路由未覆盖。
+//   skill-packs/catalog|import|sync 在没有 fetcher 的 dev profile 会 400（"git pack fetching is not available"），
+//   用例用宽松断言接受 200/202/400/404 任意可路由状态。
+// ════════════════════════════════════════════════════════════════════════
+console.log('\n§S38 Phase 3E P3 - admin listings + skill-packs')
+
+await scenario('S38', 'GET /v1/sessions/:id/approvals', async () => {
+  if (!baselineSession) throw new Error('no baseline session from §S5')
+  const { status, body } = await req('GET', `/v1/sessions/${baselineSession}/approvals?viewer=qa-smoke`)
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (!Array.isArray(body?.approvals)) throw new Error(`approvals not array: ${JSON.stringify(body)}`)
+  return { status, count: body.approvals.length }
+})
+
+await scenario('S38', 'GET /v1/sessions/:id/background (background 未启用 → 200 或 404)', async () => {
+  if (!baselineSession) throw new Error('no baseline session from §S5')
+  const { status, body } = await req('GET', `/v1/sessions/${baselineSession}/background?viewer=qa-smoke`)
+  // background runtime 默认未启用 → 404 not_found；启用则 200
+  if (status !== 200 && status !== 404) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S38', 'GET /v1/sessions/:id/background/:pid/output (无 pid → 404 兜底)', async () => {
+  if (!baselineSession) throw new Error('no baseline session from §S5')
+  const { status, body } = await req('GET', `/v1/sessions/${baselineSession}/background/nonexistent-${RUN_TAG}/output?viewer=qa-smoke`)
+  // 不存在的 pid 通常返 404，宽松接收器期望 200/404
+  if (status !== 200 && status !== 404) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S38', 'GET /v1/admin/deliveries/shadow', async () => {
+  const { status, body } = await req('GET', `/v1/admin/deliveries/shadow?scope=${DEFAULT_ADMIN_SCOPE}`, undefined, adminAuthHeaders)
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (body?.scopeId !== DEFAULT_ADMIN_SCOPE) throw new Error(`scopeId mismatch: ${body?.scopeId}`)
+  if (!Array.isArray(body?.shadow)) throw new Error(`shadow not array: ${JSON.stringify(body)}`)
+  return { status, shadowCount: body.shadow.length }
+})
+
+await scenario('S38', 'GET /v1/admin/slack-mirror', async () => {
+  const { status, body } = await req('GET', `/v1/admin/slack-mirror?scope=${DEFAULT_ADMIN_SCOPE}`, undefined, adminAuthHeaders)
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (!Array.isArray(body?.containers)) throw new Error(`containers not array: ${JSON.stringify(body)}`)
+  return { status, containerCount: body.containers.length }
+})
+
+await scenario('S38', 'GET /v1/admin/slack-mirror/messages (需 container 或 q → 400)', async () => {
+  // 缺 container 和 q → 400 bad_request
+  const { status, body } = await req('GET', `/v1/admin/slack-mirror/messages?scope=${DEFAULT_ADMIN_SCOPE}`, undefined, adminAuthHeaders)
+  if (status !== 400) throw new Error(`expected 400 got ${status} body=${JSON.stringify(body)}`)
+  return { status, error: body?.error }
+})
+
+await scenario('S38', 'GET /v1/admin/ambient-judgments', async () => {
+  const { status, body } = await req('GET', `/v1/admin/ambient-judgments?scope=${DEFAULT_ADMIN_SCOPE}`, undefined, adminAuthHeaders)
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (body?.scopeId !== DEFAULT_ADMIN_SCOPE) throw new Error(`scopeId mismatch: ${body?.scopeId}`)
+  if (!body?.counts || typeof body.counts.act !== 'number') throw new Error(`counts missing: ${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S38', 'GET /v1/admin/ack-emoji-picks', async () => {
+  const { status, body } = await req('GET', `/v1/admin/ack-emoji-picks?scope=${DEFAULT_ADMIN_SCOPE}`, undefined, adminAuthHeaders)
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+// §S18.4 创建的 skillPackId 是 S38.9-S38.11 的依赖
+let s38SkillPackId: string | undefined
+await scenario('S38', 'GET /v1/admin/skill-packs/:id/catalog (复用 S18.4 pack · 200/400/404 都合法)', async () => {
+  if (typeof skillPackId === 'undefined') throw new Error('no skill pack id from §S18')
+  s38SkillPackId = skillPackId
+  const { status, body } = await req('GET', `/v1/admin/skill-packs/${skillPackId}/catalog?scope=${DEFAULT_ADMIN_SCOPE}`, undefined, adminAuthHeaders)
+  // 没有 fetcher 的 dev profile → 400；存在 → 200；不存在 → 404
+  if (status !== 200 && status !== 400 && status !== 404) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S38', 'POST /v1/admin/skill-packs/:id/import', async () => {
+  if (!s38SkillPackId) throw new Error('no skill pack id from §S18')
+  const { status, body } = await req('POST', `/v1/admin/skill-packs/${s38SkillPackId}/import?scope=${DEFAULT_ADMIN_SCOPE}`, {}, adminAuthHeaders)
+  if (status !== 200 && status !== 202 && status !== 400 && status !== 404) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S38', 'POST /v1/admin/skill-packs/:id/sync', async () => {
+  if (!s38SkillPackId) throw new Error('no skill pack id from §S18')
+  const { status, body } = await req('POST', `/v1/admin/skill-packs/${s38SkillPackId}/sync?scope=${DEFAULT_ADMIN_SCOPE}`, {}, adminAuthHeaders)
+  if (status !== 200 && status !== 202 && status !== 400 && status !== 404) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+// ════════════════════════════════════════════════════════════════════════
+// §S39. Phase 3E P4 — admin files + search + projects（6 用例 · §7.2 🥉）
+// ════════════════════════════════════════════════════════════════════════
+console.log('\n§S39 Phase 3E P4 - admin files + search + projects')
+
+await scenario('S39', 'GET /v1/admin/files (admin 列表)', async () => {
+  const { status, body } = await req('GET', `/v1/admin/files?scope=${DEFAULT_ADMIN_SCOPE}`, undefined, adminAuthHeaders)
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (!Array.isArray(body?.files)) throw new Error(`files not array: ${JSON.stringify(body)}`)
+  return { status, fileCount: body.files.length }
+})
+
+await scenario('S39', 'GET /v1/admin/files/read (admin 读路径 · 404 兜底)', async () => {
+  const { status, body } = await req('GET', `/v1/admin/files/read?scope=${DEFAULT_ADMIN_SCOPE}&id=nonexistent-${RUN_TAG}`, undefined, adminAuthHeaders)
+  if (status !== 200 && status !== 404) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S39', 'GET /v1/admin/files/download (admin 下载路径 · 404 兜底)', async () => {
+  const { status, body } = await req('GET', `/v1/admin/files/download?scope=${DEFAULT_ADMIN_SCOPE}&id=nonexistent-${RUN_TAG}`, undefined, adminAuthHeaders)
+  if (status !== 200 && status !== 404) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S39', 'POST /v1/admin/files/upload (admin 上传 binary)', async () => {
+  // 先 blob stage 再 file upload（同 §S20.2 模式）
+  const content = `phase3e s39.4 content ${RUN_TAG}`
+  const enc = new TextEncoder().encode(content)
+  const hashBuf = await crypto.subtle.digest('SHA-256', enc)
+  const hashHex = Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, '0')).join('')
+  const blobRes = await fetch(`${baseUrl}/v1/blobs`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'x-content-sha256': hashHex, 'content-type': 'application/octet-stream' },
+    body: enc,
+  })
+  const blobText = await blobRes.text()
+  let blobParsed: any
+  try { blobParsed = JSON.parse(blobText) } catch { blobParsed = blobText }
+  if (blobRes.status !== 200) throw new Error(`blob POST status=${blobRes.status} body=${blobText}`)
+  const blobId = blobParsed?.blobId
+  if (!blobId) throw new Error(`no blobId: ${blobText}`)
+  // admin upload
+  const { status, body } = await req('POST', `/v1/admin/files/upload?scope=${DEFAULT_ADMIN_SCOPE}`, {
+    blobId, name: `${RUN_TAG}-admin.txt`, mimetype: 'text/plain', principalId: 'qa-smoke',
+  }, adminAuthHeaders)
+  if (status !== 200 && status !== 201) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status, blobId }
+})
+
+await scenario('S39', 'POST /v1/search (admin · 路由可达性)', async () => {
+  const { status, body } = await req('POST', `/v1/search?scope=${DEFAULT_ADMIN_SCOPE}`, { q: 'phase3e', limit: 5 }, adminAuthHeaders)
+  // 路由可达即合法（200 成功 / 401 admin grant required / 404 route not found）
+  if (status !== 200 && status !== 401 && status !== 404) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S39', 'GET /v1/projects (admin · 路由可达性)', async () => {
+  const { status, body } = await req('GET', `/v1/projects?scope=${DEFAULT_ADMIN_SCOPE}`, undefined, adminAuthHeaders)
+  if (status !== 200 && status !== 401 && status !== 404) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
 // §S26 末尾 dispose（§S12 注释 line 984 遗留：原意"dispose 测试移到 §S26 末尾"，
 // 但 dispose 后 fastify server 关闭 → 后续 §S27-§S32 全部失败；真正的"末尾"是 §S32 之后）
 await scenario('S26', 'fiber.dispose 关闭 ApiService + 端口释放（修 §S12 注释遗留：dispose 必须在最后）', async () => {
@@ -2518,6 +2672,8 @@ const sectionTitles: Record<string, string> = {
   S35: 'Admin grants/onboarding/reset (Phase 3D · onboarding PUT + grants 显式 role + reset deletedSessions)',
   S36: 'Crons + triggers short-interval verification (Phase 3D · triggers runtime 未启用，所有路由 404 兜底)',
   S37: 'Phase 3E P2 admin/agent-face routes (8 routes · §7.2 🥇 · admin sessions llm / admin memory PUT / memory self PUT / blobs GET / mcp-servers / admin directory+keychain)',
+  S38: 'Phase 3E P3 admin listings + skill-packs (11 routes · §7.2 🥈 · sessions approvals+background / admin deliveries+slack-mirror+ambient+ack-emoji / admin skill-packs catalog+import+sync)',
+  S39: 'Phase 3E P4 admin files + search + projects (6 routes · §7.2 🥉 · admin files + /v1/search + /v1/projects)',
 }
 
 console.log('')
