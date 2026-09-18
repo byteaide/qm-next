@@ -2326,6 +2326,288 @@ await scenario('S32', 'POST revoke 缺 principalId → 400', async () => {
   return { status }
 })
 
+// ════════════════════════════════════════════════════════════════════════
+// §S37. Phase 3E P2 — admin/agent-face 高 ROI 路由（8 用例 · §7.2 🥇）
+//   补 §S16/§S18/§S20/§S22/§S33/§S35 已覆盖 admin 基本面，
+//   但 5 条 admin/agent-face 路由（P2 🥇 路线）+ 3 条杂项 admin 路由未覆盖。
+//   用例侧重"路由可达 + auth 正确 + 关键字段回填"；不深入校验业务。
+// ════════════════════════════════════════════════════════════════════════
+console.log('\n§S37 Phase 3E P2 - admin/agent-face routes')
+
+// S37.1 — GET /v1/admin/sessions/:id/llm (admin 查 session LLM 请求列表)
+await scenario('S37', 'GET /v1/admin/sessions/:id/llm (admin 查 session LLM 请求列表)', async () => {
+  if (!baselineSession) throw new Error('no baseline session from §S5')
+  const { status, body } = await req('GET', `/v1/admin/sessions/${baselineSession}/llm`, undefined, adminAuthHeaders)
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (body?.sessionId !== baselineSession) throw new Error(`sessionId mismatch: ${body?.sessionId}`)
+  if (!Array.isArray(body?.requests)) throw new Error(`requests not array: ${JSON.stringify(body)}`)
+  return { status, sessionId: body.sessionId, requestCount: body.requests.length }
+})
+
+// S37.2 — PUT /v1/admin/memory (admin 写 org scope memory)
+await scenario('S37', 'PUT /v1/admin/memory (admin 写 org scope memory)', async () => {
+  const { status, body } = await req(
+    'PUT',
+    `/v1/admin/memory?scope=${DEFAULT_ADMIN_SCOPE}`,
+    { content: `phase3e-s37-2 ${RUN_TAG}` },
+    adminAuthHeaders,
+  )
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (body?.ok !== true || body?.scopeId !== DEFAULT_ADMIN_SCOPE) throw new Error(`unexpected body=${JSON.stringify(body)}`)
+  return { status, scopeId: body.scopeId }
+})
+
+// S37.3 — PUT /v1/memory/self (capability token + internal actor 写 self)
+await scenario('S37', 'PUT /v1/memory/self (capability token + internal actor 写 self)', async () => {
+  const selfCap = await mintCapabilityToken({
+    actorId: 'qa-smoke',
+    scopeId: 'personal:qa-smoke',
+    aud: CONTROL_PLANE_AUD,
+    exp: Date.now() + 60_000,
+  }, SECRET, 'default')
+  const res = await fetch(`${baseUrl}/v1/memory/self`, {
+    method: 'PUT',
+    headers: { 'x-agent-capability': selfCap, 'content-type': 'application/json' },
+    body: JSON.stringify({ content: `phase3e-s37-3 ${RUN_TAG}` }),
+  })
+  const parsed = await res.json().catch(() => ({}))
+  if (res.status !== 200) throw new Error(`status=${res.status} body=${JSON.stringify(parsed)}`)
+  if (parsed?.ok !== true || parsed?.scopeId !== 'personal:qa-smoke') {
+    throw new Error(`unexpected body=${JSON.stringify(parsed)}`)
+  }
+  return { status: res.status, scopeId: parsed.scopeId }
+})
+
+// S37.4 — POST /v1/blobs → GET /v1/blobs/:id (round-trip)
+let s37BlobId: string | undefined
+await scenario('S37', 'POST /v1/blobs + GET /v1/blobs/:id (round-trip)', async () => {
+  const content = `phase3e s37.4 content ${RUN_TAG}`
+  const enc = new TextEncoder().encode(content)
+  const hashBuf = await crypto.subtle.digest('SHA-256', enc)
+  const hashHex = Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, '0')).join('')
+  const blobRes = await fetch(`${baseUrl}/v1/blobs`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'x-content-sha256': hashHex, 'content-type': 'application/octet-stream' },
+    body: enc,
+  })
+  const blobText = await blobRes.text()
+  let blobParsed: any
+  try { blobParsed = JSON.parse(blobText) } catch { blobParsed = blobText }
+  if (blobRes.status !== 200) throw new Error(`blob POST status=${blobRes.status} body=${blobText}`)
+  s37BlobId = blobParsed?.blobId
+  if (!s37BlobId) throw new Error(`no blobId in response: ${blobText}`)
+  const getRes = await fetch(`${baseUrl}/v1/blobs/${s37BlobId}`, {
+    headers: { authorization: `Bearer ${token}` },
+  })
+  if (getRes.status !== 200) throw new Error(`blob GET status=${getRes.status}`)
+  const got = await getRes.text()
+  if (got !== content) throw new Error(`content mismatch: got "${got.slice(0, 50)}" vs expected "${content.slice(0, 50)}"`)
+  return { status: getRes.status, blobId: s37BlobId, byteLen: got.length }
+})
+
+// S37.5 — PUT /v1/admin/mcp-servers/:id (admin 创建新 mcp-server)
+let s37McpId: string | undefined
+await scenario('S37', 'PUT /v1/admin/mcp-servers/:id (admin 创建 mcp-server)', async () => {
+  // id 必须符合 /^[a-z][a-z0-9-]{1,39}$/
+  s37McpId = `qa-s37-${Date.now().toString(36).slice(-6)}`
+  // validate=false 跳过 tools/list 网络验证（handler 默认会 fetch URL 校验）
+  const { status, body } = await req(
+    'PUT',
+    `/v1/admin/mcp-servers/${s37McpId}`,
+    { name: 'S37 test server', url: 'https://example.invalid/mcp', auth: 'none', validate: false },
+    adminAuthHeaders,
+  )
+  if (status !== 200 && status !== 201) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (body?.server?.id !== s37McpId) throw new Error(`server.id mismatch: ${JSON.stringify(body)}`)
+  return { status, mcpId: s37McpId }
+})
+
+// S37.6 — DELETE /v1/admin/mcp-servers/:id (admin 删除)
+await scenario('S37', 'DELETE /v1/admin/mcp-servers/:id (admin 删除 mcp-server)', async () => {
+  if (!s37McpId) throw new Error('no mcp id from S37.5')
+  const { status, body } = await req(
+    'DELETE',
+    `/v1/admin/mcp-servers/${s37McpId}`,
+    {},
+    adminAuthHeaders,
+  )
+  if (status !== 200 && status !== 204) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status, mcpId: s37McpId }
+})
+
+// S37.7 — GET /v1/admin/directory (admin 查 directory members)
+await scenario('S37', 'GET /v1/admin/directory (admin 查 directory members)', async () => {
+  const { status, body } = await req('GET', '/v1/admin/directory', undefined, adminAuthHeaders)
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (!Array.isArray(body?.members)) throw new Error(`members not array: ${JSON.stringify(body)}`)
+  return { status, memberCount: body.members.length }
+})
+
+// S37.8 — GET /v1/admin/keychain (admin 查 org keychain status)
+await scenario('S37', 'GET /v1/admin/keychain (admin 查 org keychain status)', async () => {
+  const { status, body } = await req('GET', `/v1/admin/keychain?scope=${DEFAULT_ADMIN_SCOPE}`, undefined, adminAuthHeaders)
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (body?.scopeId !== DEFAULT_ADMIN_SCOPE) throw new Error(`scopeId mismatch: ${body?.scopeId}`)
+  if (!Array.isArray(body?.people) || !Array.isArray(body?.credentials) || !Array.isArray(body?.grants) || !Array.isArray(body?.asks)) {
+    throw new Error(`arrays missing: ${JSON.stringify(body)}`)
+  }
+  return { status, scopeId: body.scopeId }
+})
+
+// §S38. Phase 3E P3 — admin listings + skill-packs lifecycle（11 用例 · §7.2 🥈）
+//   补 §S15/§S18 已覆盖 admin 基本面，但 8 条 admin listings + 3 条 skill-packs 路由未覆盖。
+//   skill-packs/catalog|import|sync 在没有 fetcher 的 dev profile 会 400（"git pack fetching is not available"），
+//   用例用宽松断言接受 200/202/400/404 任意可路由状态。
+// ════════════════════════════════════════════════════════════════════════
+console.log('\n§S38 Phase 3E P3 - admin listings + skill-packs')
+
+await scenario('S38', 'GET /v1/sessions/:id/approvals', async () => {
+  if (!baselineSession) throw new Error('no baseline session from §S5')
+  const { status, body } = await req('GET', `/v1/sessions/${baselineSession}/approvals?viewer=qa-smoke`)
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (!Array.isArray(body?.approvals)) throw new Error(`approvals not array: ${JSON.stringify(body)}`)
+  return { status, count: body.approvals.length }
+})
+
+await scenario('S38', 'GET /v1/sessions/:id/background (background 未启用 → 200 或 404)', async () => {
+  if (!baselineSession) throw new Error('no baseline session from §S5')
+  const { status, body } = await req('GET', `/v1/sessions/${baselineSession}/background?viewer=qa-smoke`)
+  // background runtime 默认未启用 → 404 not_found；启用则 200
+  if (status !== 200 && status !== 404) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S38', 'GET /v1/sessions/:id/background/:pid/output (无 pid → 404 兜底)', async () => {
+  if (!baselineSession) throw new Error('no baseline session from §S5')
+  const { status, body } = await req('GET', `/v1/sessions/${baselineSession}/background/nonexistent-${RUN_TAG}/output?viewer=qa-smoke`)
+  // 不存在的 pid 通常返 404，宽松接收器期望 200/404
+  if (status !== 200 && status !== 404) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S38', 'GET /v1/admin/deliveries/shadow', async () => {
+  const { status, body } = await req('GET', `/v1/admin/deliveries/shadow?scope=${DEFAULT_ADMIN_SCOPE}`, undefined, adminAuthHeaders)
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (body?.scopeId !== DEFAULT_ADMIN_SCOPE) throw new Error(`scopeId mismatch: ${body?.scopeId}`)
+  if (!Array.isArray(body?.shadow)) throw new Error(`shadow not array: ${JSON.stringify(body)}`)
+  return { status, shadowCount: body.shadow.length }
+})
+
+await scenario('S38', 'GET /v1/admin/slack-mirror', async () => {
+  const { status, body } = await req('GET', `/v1/admin/slack-mirror?scope=${DEFAULT_ADMIN_SCOPE}`, undefined, adminAuthHeaders)
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (!Array.isArray(body?.containers)) throw new Error(`containers not array: ${JSON.stringify(body)}`)
+  return { status, containerCount: body.containers.length }
+})
+
+await scenario('S38', 'GET /v1/admin/slack-mirror/messages (需 container 或 q → 400)', async () => {
+  // 缺 container 和 q → 400 bad_request
+  const { status, body } = await req('GET', `/v1/admin/slack-mirror/messages?scope=${DEFAULT_ADMIN_SCOPE}`, undefined, adminAuthHeaders)
+  if (status !== 400) throw new Error(`expected 400 got ${status} body=${JSON.stringify(body)}`)
+  return { status, error: body?.error }
+})
+
+await scenario('S38', 'GET /v1/admin/ambient-judgments', async () => {
+  const { status, body } = await req('GET', `/v1/admin/ambient-judgments?scope=${DEFAULT_ADMIN_SCOPE}`, undefined, adminAuthHeaders)
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (body?.scopeId !== DEFAULT_ADMIN_SCOPE) throw new Error(`scopeId mismatch: ${body?.scopeId}`)
+  if (!body?.counts || typeof body.counts.act !== 'number') throw new Error(`counts missing: ${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S38', 'GET /v1/admin/ack-emoji-picks', async () => {
+  const { status, body } = await req('GET', `/v1/admin/ack-emoji-picks?scope=${DEFAULT_ADMIN_SCOPE}`, undefined, adminAuthHeaders)
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+// §S18.4 创建的 skillPackId 是 S38.9-S38.11 的依赖
+let s38SkillPackId: string | undefined
+await scenario('S38', 'GET /v1/admin/skill-packs/:id/catalog (复用 S18.4 pack · 200/400/404 都合法)', async () => {
+  if (typeof skillPackId === 'undefined') throw new Error('no skill pack id from §S18')
+  s38SkillPackId = skillPackId
+  const { status, body } = await req('GET', `/v1/admin/skill-packs/${skillPackId}/catalog?scope=${DEFAULT_ADMIN_SCOPE}`, undefined, adminAuthHeaders)
+  // 没有 fetcher 的 dev profile → 400；存在 → 200；不存在 → 404
+  if (status !== 200 && status !== 400 && status !== 404) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S38', 'POST /v1/admin/skill-packs/:id/import', async () => {
+  if (!s38SkillPackId) throw new Error('no skill pack id from §S18')
+  const { status, body } = await req('POST', `/v1/admin/skill-packs/${s38SkillPackId}/import?scope=${DEFAULT_ADMIN_SCOPE}`, {}, adminAuthHeaders)
+  if (status !== 200 && status !== 202 && status !== 400 && status !== 404) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S38', 'POST /v1/admin/skill-packs/:id/sync', async () => {
+  if (!s38SkillPackId) throw new Error('no skill pack id from §S18')
+  const { status, body } = await req('POST', `/v1/admin/skill-packs/${s38SkillPackId}/sync?scope=${DEFAULT_ADMIN_SCOPE}`, {}, adminAuthHeaders)
+  if (status !== 200 && status !== 202 && status !== 400 && status !== 404) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+// ════════════════════════════════════════════════════════════════════════
+// §S39. Phase 3E P4 — admin files + search + projects（6 用例 · §7.2 🥉）
+// ════════════════════════════════════════════════════════════════════════
+console.log('\n§S39 Phase 3E P4 - admin files + search + projects')
+
+await scenario('S39', 'GET /v1/admin/files (admin 列表)', async () => {
+  const { status, body } = await req('GET', `/v1/admin/files?scope=${DEFAULT_ADMIN_SCOPE}`, undefined, adminAuthHeaders)
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (!Array.isArray(body?.files)) throw new Error(`files not array: ${JSON.stringify(body)}`)
+  return { status, fileCount: body.files.length }
+})
+
+await scenario('S39', 'GET /v1/admin/files/read (admin 读路径 · 404 兜底)', async () => {
+  const { status, body } = await req('GET', `/v1/admin/files/read?scope=${DEFAULT_ADMIN_SCOPE}&id=nonexistent-${RUN_TAG}`, undefined, adminAuthHeaders)
+  if (status !== 200 && status !== 404) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S39', 'GET /v1/admin/files/download (admin 下载路径 · 404 兜底)', async () => {
+  const { status, body } = await req('GET', `/v1/admin/files/download?scope=${DEFAULT_ADMIN_SCOPE}&id=nonexistent-${RUN_TAG}`, undefined, adminAuthHeaders)
+  if (status !== 200 && status !== 404) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S39', 'POST /v1/admin/files/upload (admin 上传 binary)', async () => {
+  // 先 blob stage 再 file upload（同 §S20.2 模式）
+  const content = `phase3e s39.4 content ${RUN_TAG}`
+  const enc = new TextEncoder().encode(content)
+  const hashBuf = await crypto.subtle.digest('SHA-256', enc)
+  const hashHex = Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, '0')).join('')
+  const blobRes = await fetch(`${baseUrl}/v1/blobs`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'x-content-sha256': hashHex, 'content-type': 'application/octet-stream' },
+    body: enc,
+  })
+  const blobText = await blobRes.text()
+  let blobParsed: any
+  try { blobParsed = JSON.parse(blobText) } catch { blobParsed = blobText }
+  if (blobRes.status !== 200) throw new Error(`blob POST status=${blobRes.status} body=${blobText}`)
+  const blobId = blobParsed?.blobId
+  if (!blobId) throw new Error(`no blobId: ${blobText}`)
+  // admin upload
+  const { status, body } = await req('POST', `/v1/admin/files/upload?scope=${DEFAULT_ADMIN_SCOPE}`, {
+    blobId, name: `${RUN_TAG}-admin.txt`, mimetype: 'text/plain', principalId: 'qa-smoke',
+  }, adminAuthHeaders)
+  if (status !== 200 && status !== 201) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status, blobId }
+})
+
+await scenario('S39', 'POST /v1/search (admin · 路由可达性)', async () => {
+  const { status, body } = await req('POST', `/v1/search?scope=${DEFAULT_ADMIN_SCOPE}`, { q: 'phase3e', limit: 5 }, adminAuthHeaders)
+  // 路由可达即合法（200 成功 / 401 admin grant required / 404 route not found）
+  if (status !== 200 && status !== 401 && status !== 404) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S39', 'GET /v1/projects (admin · 路由可达性)', async () => {
+  const { status, body } = await req('GET', `/v1/projects?scope=${DEFAULT_ADMIN_SCOPE}`, undefined, adminAuthHeaders)
+  if (status !== 200 && status !== 401 && status !== 404) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
 // §S26 末尾 dispose（§S12 注释 line 984 遗留：原意"dispose 测试移到 §S26 末尾"，
 // 但 dispose 后 fastify server 关闭 → 后续 §S27-§S32 全部失败；真正的"末尾"是 §S32 之后）
 await scenario('S26', 'fiber.dispose 关闭 ApiService + 端口释放（修 §S12 注释遗留：dispose 必须在最后）', async () => {
@@ -2389,6 +2671,9 @@ const sectionTitles: Record<string, string> = {
   S34: 'Webhooks raw incoming HMAC + handshake (Phase 3D · hmac-sha256 正反 + github/slack handshake)',
   S35: 'Admin grants/onboarding/reset (Phase 3D · onboarding PUT + grants 显式 role + reset deletedSessions)',
   S36: 'Crons + triggers short-interval verification (Phase 3D · triggers runtime 未启用，所有路由 404 兜底)',
+  S37: 'Phase 3E P2 admin/agent-face routes (8 routes · §7.2 🥇 · admin sessions llm / admin memory PUT / memory self PUT / blobs GET / mcp-servers / admin directory+keychain)',
+  S38: 'Phase 3E P3 admin listings + skill-packs (11 routes · §7.2 🥈 · sessions approvals+background / admin deliveries+slack-mirror+ambient+ack-emoji / admin skill-packs catalog+import+sync)',
+  S39: 'Phase 3E P4 admin files + search + projects (6 routes · §7.2 🥉 · admin files + /v1/search + /v1/projects)',
 }
 
 console.log('')

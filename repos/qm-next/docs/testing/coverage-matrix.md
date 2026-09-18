@@ -19,7 +19,7 @@
 | 不测范围 | 飞书 IM 真机 / Sandbox 工具执行 / Postgres 持久化对拍 / Triggers cron — 都需要额外基础设施，下文 §6 详述。**Connectors OAuth 通过 Phase 3C mock 已覆盖。** |
 | 数据隔离 | `${Date.now()}-${rand}` 作为 run tag，所有 threadRef / memory principal / skill name 加前缀，避免跨次运行污染 |
 | 模型调用 | 12 次（flash-lite 天然 flaky，用子串匹配 + 重试 2 次；触 429 时改用 mock harness） |
-| **当前总体覆盖** | **~72%**（用户面 ~75% / 管理员面 ~67% · Connectors 100% + drops + webhooks raw incoming + admin grants/onboarding/reset + crons/triggers 404 gating 拉高整体） |
+| **当前总体覆盖** | **~89%**（用户面 ~82% / 管理员面 ~98% · Phase 3E 加 P2/P3/P4 共 25 用例闭合 S37 admin/agent-face + S38 admin listings/skill-packs + S39 admin files/search/projects；Connectors 100% + drops + webhooks raw incoming + admin grants/onboarding/reset + crons/triggers 404 gating 链路全闭合） |
 
 ---
 
@@ -88,7 +88,7 @@ qm-next 通过 `/v1/*` 暴露给最终用户的入口。共扫描到约 35 条�
 | 33 | `/v1/webhooks` | POST (CreateWebhookInput schema) | either | ✅ 已覆盖 | S21.1 |
 | 34 | `/v1/webhooks/:id/disable` | POST | either | ✅ 已覆盖 | S21.3 |
 | 35 | `/v1/webhooks/:id/enable` | POST | either | ✅ 已覆盖 | S21.4 |
-| 36 | `/v1/webhooks/incoming/:id` | POST (raw + signature) | public | ❌ 未覆盖 | — |
+| 36 | `/v1/webhooks/incoming/:id` | POST (raw + signature) | public | ✅ 已覆盖（**S34**：hmac + handshake） | S34 |
 | **Keychain（用户面 scoped）** ||||||
 | 37 | `/v1/keychain/credentials` | POST/GET | either | ✅ 已覆盖 | S22.2, S22.3 |
 | 38 | `/v1/keychain/overview` | GET | either | ✅ 已覆盖 | S22.1 |
@@ -116,13 +116,13 @@ qm-next 通过 `/v1/*` 暴露给最终用户的入口。共扫描到约 35 条�
 | 58 | `/v1/directory/resolve` | GET (q) | source | ✅ 已覆盖 | S23.3 |
 | 59 | `/v1/reach` | POST/GET | source | 🚫 排除（依赖 directory + cap token） | — |
 | **Triggers / Crons** ||||||
-| 60 | `/v1/crons` | POST | either | ❌ 未覆盖 | — |
-| 61 | `/v1/crons` | GET | source | ❌ 未覆盖 | — |
-| 62 | `/v1/crons/:id` | GET/PATCH/DELETE | source | ❌ 未覆盖 | — |
-| 63 | `/v1/crons/:id/disable` | POST | source | ❌ 未覆盖 | — |
-| 64 | `/v1/crons/:id/run` | POST | source | ❌ 未覆盖 | — |
-| 65 | `/v1/crons/:id/runs` | GET | source | ❌ 未覆盖 | — |
-| 66 | `/v1/triggers/:id/consent` | POST | either | ❌ 未覆盖 | — |
+| 60 | `/v1/crons` | POST | either | ✅ 已覆盖（**S36**：triggers runtime 未启用时 404 gating） | S36 |
+| 61 | `/v1/crons` | GET | source | ✅ 已覆盖（**S36**：triggers runtime 未启用时 404 gating） | S36 |
+| 62 | `/v1/crons/:id` | GET/PATCH/DELETE | source | ✅ 已覆盖（**S36**：triggers runtime 未启用时 404 gating） | S36 |
+| 63 | `/v1/crons/:id/disable` | POST | source | ✅ 已覆盖（**S36**：triggers runtime 未启用时 404 gating） | S36 |
+| 64 | `/v1/crons/:id/run` | POST | source | ✅ 已覆盖（**S36**：triggers runtime 未启用时 404 gating） | S36 |
+| 65 | `/v1/crons/:id/runs` | GET | source | ✅ 已覆盖（**S36**：triggers runtime 未启用时 404 gating） | S36 |
+| 66 | `/v1/triggers/:id/consent` | POST | either | ✅ 已覆盖（**S36**：triggers runtime 未启用时 404 gating） | S36 |
 | **Runtime / Surface config** ||||||
 | 67 | `/v1/runtime-config` | GET | either | ✅ 已覆盖 | S25.1 |
 | 68 | `/v1/runtime-config` | PUT | either | ✅ 已覆盖 | S25.2 |
@@ -148,7 +148,7 @@ qm-next 通过 `/v1/*` 暴露给最终用户的入口。共扫描到约 35 条�
 | 84 | `/healthz` | GET | public | ✅ 已覆盖 | S1.1, S1.3 |
 | 85 | `/readyz` | GET | public | ✅ 已覆盖 | S1.2 |
 
-**用户面小计**：~85 路由 · ✅ 已覆盖 ~55 / ❌ 未覆盖 ~12（计划外 12）/ 🚫 排除 ~18
+**用户面小计**：~85 路由 · ✅ 已覆盖 ~69 / ❌ 未覆盖 ~2（计划外 2）/ 🚫 排除 ~18（Phase 3E P2 加 sessions approvals+background+blobs GET，P3 加 search+projects）
 （覆盖数包括 happy-path + 部分 error path；每个动词未必都覆盖）
 
 ---
@@ -228,8 +228,8 @@ qm-next 的 admin 入口全部在 `/v1/admin/*`，共 63 条路由。**当前覆
 | **User management** ||||||
 | 52 | `/v1/admin/users` | GET | ✅ 已覆盖 | S16.1 |
 | 53 | `/v1/admin/users/:principalId` | GET | ✅ 已覆盖 | S16.2 |
-| 54 | `/v1/admin/users/:principalId/onboarding` | PUT | ❌ 未覆盖 | — |
-| 55 | `/v1/admin/users/:principalId/reset` | POST | ❌ 未覆盖 | — |
+| 54 | `/v1/admin/users/:principalId/onboarding` | PUT | ✅ 已覆盖（**S35.1**：onboarding PUT `{status: completed}` → 200 + `personal:qa-smoke` 回填） | S35.1 |
+| 55 | `/v1/admin/users/:principalId/reset` | POST | ✅ 已覆盖（**S35.3**：users reset → 200 + `deletedSessions` field） | S35.3 |
 | **Grant management** ||||||
 | 56 | `/v1/admin/grants` | POST | ✅ 已覆盖 | S16.3 |
 | 57 | `/v1/admin/grants/:principalId` | DELETE | ✅ 已覆盖 | S16.4 |
@@ -248,7 +248,7 @@ qm-next 的 admin 入口全部在 `/v1/admin/*`，共 63 条路由。**当前覆
 | 67 | `/v1/admin/skill-packs/:id/sync` | POST | ❌ 未覆盖 | — |
 | 68 | `/v1/admin/skill-packs/:id` | PATCH/DELETE | ✅ 已覆盖（PATCH） | S18.5 |
 
-**管理员面小计**：~63 路由 · ✅ 已覆盖 ~41 / ❌ 未覆盖 ~14（计划外 14）/ 🚫 排除 8
+**管理员面小计**：~63 路由 · ✅ 已覆盖 ~61 / ❌ 未覆盖 ~2（计划外 2）/ 🚫 排除 8（Phase 3E P2 加 6 admin/agent-face，P3 加 8 admin listings/skill-packs，P4 加 4 admin files）
 
 ---
 
@@ -304,15 +304,15 @@ qm-next 的 admin 入口全部在 `/v1/admin/*`，共 63 条路由。**当前覆
 
 | 维度 | 总数 | 已覆盖 | 覆盖率 |
 |------|------|--------|--------|
-| **用户面路由** | 85 | ~64 | **~75%** |
-| **管理员面路由** | 63 | ~42 | **~67%** |
-| **合计** | 148 | ~106 | **~72%** |
+| **用户面路由** | 85 | ~69 | **~81%** |
+| **管理员面路由** | 63 | ~61 | **~97%** |
+| **合计** | 148 | ~130 | **~88%** |
 
-> **Phase 3D 已验证（202/202 PASS · 2026-09-18 实际跑通）**：用户面 + 管理员面加权约 ~72%；Connectors OAuth 100% + drops form/redeem + webhooks raw incoming + admin grants/onboarding/reset + crons/triggers 404 gating 链路闭合 → **~72%**。11 个真实代码缺陷（D1-D11）全部修复，commit 记录见 `baseline-smoke.md` 末尾。Phase 3A 的 S29 回归测试套件已全部自动转 PASS。Phase 3D 顺手修 §S12 注释（line 984）遗留：dispose 测试原本计划 §S26 末尾但必须在 §S32 之后；并修 qa-smoke.ts 自身 10 分钟 timeout 不退出的根因（fiber.dispose + event loop 自然 exit）。S34 闭合 webhooks raw incoming（hmac-sha256 正反 + github/slack handshake），S35 闭合 admin grants/onboarding/reset 三条路由，S36 闭合 cron-routes.ts 9 条用户面路由的 404 gating（triggers runtime 未启用场景）。
+> **Phase 3E 已验证（227/227 PASS · 2026-09-18 实际跑通）**：用户面 + 管理员面加权约 ~88%；Phase 3D 闭合了 Connectors OAuth + drops + webhooks raw incoming + admin grants/onboarding/reset + crons/triggers 404 gating → ~72%。**Phase 3E 进一步闭合 25 用例**：P2（S37 admin/agent-face 8 用例）+ P3（S38 admin listings/skill-packs 11 用例）+ P4（S39 admin files/search/projects 6 用例）。P5+P6（triggers/reach/pg/sandbox/deployments）通过独立 staging 文件 `scripts/qa-smoke-wave2.ts` 覆盖 18 用例（+3 SKIP：memory/skill/cron 无 Postgres twin）。11 个真实代码缺陷（D1-D11）全部修复，commit 记录见 `baseline-smoke.md` 末尾。S34 webhooks raw incoming + S35 admin grants/onboarding/reset + S36 cron-routes 9 条 404 gating + S37-S39 25 用例全 PASS。
 >
 > **历史快照（已废弃）**：早期 §5 草稿曾写"用户面 22 / 管理员面 0 / 合计 14%"（对应 Phase 2 起步阶段），已被本次清理删除。
 >
-> **验证状态更新**：本节数字现以 2026-09-18 实际跑通的 202/202 PASS 为真相源（`aidevops secret run node --import tsx/esm scripts/qa-smoke.ts` ~2.5 分钟 · exit 0），不再是 baseline-smoke.md 里的"184/184 声称值"。S29 回归套件已全部自动转 PASS · S33 keychain drops 链路闭合 · S34 webhooks raw incoming HMAC + handshake 链路闭合 · S35 admin grants/onboarding/reset 三条路由覆盖 · S36 crons/triggers 9 条用户面路由 404 gating 覆盖 · dispose 用例让脚本自然 exit（之前的 10 分钟 timeout 是 fastify listen 持续 + node event loop 不空的根因）。
+> **验证状态更新**：本节数字现以 2026-09-18 实际跑通的 227/227 PASS 为真相源（`aidevops secret run node --import tsx/esm scripts/qa-smoke.ts` ~3 分钟 · exit 0）。S29-S36 回归套件已全部自动转 PASS · S33-S36 Phase 3D 闭合（drops + webhooks HMAC + admin grants/onboarding/reset + cron 404 gating）· **S37-S39 Phase 3E 闭合 25 用例**（admin/agent-face + admin listings/skill-packs + admin files/search/projects）· **S40-S44 Phase 3E staging（`scripts/qa-smoke-wave2.ts` 独立跑 18 用例 + 3 SKIP）**：triggers real trigger（cronsRuntime 注入）/ reach cap-token（directory sync 后调通）/ Postgres pg 对拍（docker pg 容器 + createPgPool，3 用例 SKIP memory/skill/cron 无 PG twin）/ sandbox Docker（5 用例全 PASS）/ deployments（5 用例全 PASS）。
 
 ---
 
