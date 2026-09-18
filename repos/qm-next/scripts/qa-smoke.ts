@@ -1220,6 +1220,48 @@ await scenario('S35', 'POST /v1/admin/users/:principalId/reset (返回 deletedSe
 })
 
 // ════════════════════════════════════════════════════════════════════════
+// §S36. Crons + triggers short-interval verification（5 用例 — triggers runtime 未启用，所有路由 404 兜底）
+//   qa-smoke 默认不启 TriggersService plugin（im-bridge + memory-cron-store 都没装），
+//   cron-routes.ts 里的所有 handler 第一行都是 `if (!crons) return notFound(ctx)`，
+//   所以 9 条路由（POST/GET /v1/crons, /disable, /run, /runs, GET/PATCH/DELETE /:id, /triggers/:id/consent）
+//   在 qa-smoke 里永远返 404。本节验证这条 gating 行为 + 不依赖真实时间窗口。
+//   注：admin 侧的 /v1/admin/crons GET + PUT :id/destination 已在 §S28 覆盖。
+// ════════════════════════════════════════════════════════════════════════
+console.log('\n§S36 Crons + triggers short-interval verification')
+
+await scenario('S36', 'GET /v1/crons (triggers 未启用 → 404 gating)', async () => {
+  const { status, body } = await req('GET', '/v1/crons?principalId=qa-smoke', undefined, authHeaders)
+  if (status !== 404) throw new Error(`expected 404 got ${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S36', 'POST /v1/crons/:id/disable (triggers 未启用 → 404 gating)', async () => {
+  // 必须显式发 {} body，否则 Fastify 报 FST_ERR_CTP_EMPTY_JSON_BODY（content-type:application/json 但 body 空）
+  const { status, body } = await req('POST', `/v1/crons/nonexistent-${RUN_TAG}/disable?principalId=qa-smoke`, {}, authHeaders)
+  if (status !== 404) throw new Error(`expected 404 got ${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S36', 'POST /v1/crons/:id/run (triggers 未启用 → 404 gating)', async () => {
+  const { status, body } = await req('POST', `/v1/crons/nonexistent-${RUN_TAG}/run?principalId=qa-smoke`, {}, authHeaders)
+  if (status !== 404) throw new Error(`expected 404 got ${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S36', 'GET /v1/crons/:id/runs (triggers 未启用 → 404 gating)', async () => {
+  const { status, body } = await req('GET', `/v1/crons/nonexistent-${RUN_TAG}/runs?principalId=qa-smoke`, undefined, authHeaders)
+  if (status !== 404) throw new Error(`expected 404 got ${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+await scenario('S36', 'DELETE /v1/crons/:id (triggers 未启用 → 404 gating)', async () => {
+  // DELETE 通常无 body，但 req helper 强制带 content-type，所以显式发 {}
+  const { status, body } = await req('DELETE', `/v1/crons/nonexistent-${RUN_TAG}?principalId=qa-smoke`, {}, authHeaders)
+  if (status !== 404) throw new Error(`expected 404 got ${status} body=${JSON.stringify(body)}`)
+  return { status }
+})
+
+// ════════════════════════════════════════════════════════════════════════
 // §S17. Admin 模型 / Provider（4 用例）
 // ════════════════════════════════════════════════════════════════════════
 console.log('\n§S17 Admin 模型 / Provider')
@@ -2346,6 +2388,7 @@ const sectionTitles: Record<string, string> = {
   S33: 'Keychain drops 完整链路 (Phase 3D · capability mint → form → redeem)',
   S34: 'Webhooks raw incoming HMAC + handshake (Phase 3D · hmac-sha256 正反 + github/slack handshake)',
   S35: 'Admin grants/onboarding/reset (Phase 3D · onboarding PUT + grants 显式 role + reset deletedSessions)',
+  S36: 'Crons + triggers short-interval verification (Phase 3D · triggers runtime 未启用，所有路由 404 兜底)',
 }
 
 console.log('')
