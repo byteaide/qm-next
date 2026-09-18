@@ -1162,6 +1162,64 @@ await scenario('S16', 'admin external-users 撤销', async () => {
 })
 
 // ════════════════════════════════════════════════════════════════════════
+// §S35. Admin grants/onboarding/reset（3 用例 — 补 §S16 grant CRUD 没覆盖的三个路由）
+//   §S16 已覆盖 basic grants POST/DELETE，但没测 onboarding PUT（user-facing admin action）
+//   + 没测带显式 role 的 grants POST（D10 fix 后才合法）+ 没测 reset（destroyer，验 deletedSessions 字段）
+// ════════════════════════════════════════════════════════════════════════
+console.log('\n§S35 Admin grants/onboarding/reset')
+
+await scenario('S35', 'PUT /v1/admin/users/:principalId/onboarding (set status=completed)', async () => {
+  const { status, body } = await req(
+    'PUT',
+    `/v1/admin/users/qa-smoke/onboarding?scope=${DEFAULT_ADMIN_SCOPE}`,
+    { status: 'completed' },
+    adminAuthHeaders,
+  )
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (body?.ok !== true || body?.status !== 'completed' || body?.scopeId !== 'personal:qa-smoke') {
+    throw new Error(`unexpected body=${JSON.stringify(body)}`)
+  }
+  return { status, scopeId: body.scopeId, onboardingStatus: body.status }
+})
+
+await scenario('S35', 'POST /v1/admin/grants (显式 role + scopeId，验证 D10 fix)', async () => {
+  const targetPrincipal = `s35-grantee-${Date.now()}`
+  const { status, body } = await req(
+    'POST',
+    `/v1/admin/grants?scope=${DEFAULT_ADMIN_SCOPE}`,
+    { principalId: targetPrincipal, role: 'org_admin', scopeId: DEFAULT_ADMIN_SCOPE },
+    adminAuthHeaders,
+  )
+  if (status !== 200 && status !== 201) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (body?.ok !== true || !body?.grant) throw new Error(`unexpected body=${JSON.stringify(body)}`)
+  // 验证 grant 字段：principalId + role + scopeId 都回填正确
+  const grant = body.grant
+  if (grant?.principalId !== targetPrincipal) throw new Error(`grant.principalId=${grant?.principalId}`)
+  if (grant?.role !== 'org_admin') throw new Error(`grant.role=${grant?.role}`)
+  if (grant?.scopeId !== DEFAULT_ADMIN_SCOPE) throw new Error(`grant.scopeId=${grant?.scopeId}`)
+  return { status, principalId: grant.principalId, role: grant.role }
+})
+
+await scenario('S35', 'POST /v1/admin/users/:principalId/reset (返回 deletedSessions 计数)', async () => {
+  // 用全新 principalId 避免影响其他测试（reset 会删该 principal 的所有 sessions）
+  const resetTarget = `s35-reset-${Date.now()}`
+  // 必须显式发 {} body，因为 adminAuthHeaders 强制 content-type=application/json，
+  // 否则 Fastify 报 FST_ERR_CTP_EMPTY_JSON_BODY
+  const { status, body } = await req(
+    'POST',
+    `/v1/admin/users/${resetTarget}/reset?scope=${DEFAULT_ADMIN_SCOPE}`,
+    {},
+    adminAuthHeaders,
+  )
+  if (status !== 200) throw new Error(`status=${status} body=${JSON.stringify(body)}`)
+  if (body?.ok !== true) throw new Error(`ok != true: ${JSON.stringify(body)}`)
+  if (body?.scopeId !== `personal:${resetTarget}`) throw new Error(`scopeId=${body?.scopeId}`)
+  // deletedSessions 应该是 number（新 principal 应为 0）
+  if (typeof body?.deletedSessions !== 'number') throw new Error(`deletedSessions not number: ${JSON.stringify(body)}`)
+  return { status, scopeId: body.scopeId, deletedSessions: body.deletedSessions }
+})
+
+// ════════════════════════════════════════════════════════════════════════
 // §S17. Admin 模型 / Provider（4 用例）
 // ════════════════════════════════════════════════════════════════════════
 console.log('\n§S17 Admin 模型 / Provider')
@@ -2287,6 +2345,7 @@ const sectionTitles: Record<string, string> = {
   S32: 'Connectors OAuth Mock (Phase 3C)',
   S33: 'Keychain drops 完整链路 (Phase 3D · capability mint → form → redeem)',
   S34: 'Webhooks raw incoming HMAC + handshake (Phase 3D · hmac-sha256 正反 + github/slack handshake)',
+  S35: 'Admin grants/onboarding/reset (Phase 3D · onboarding PUT + grants 显式 role + reset deletedSessions)',
 }
 
 console.log('')
