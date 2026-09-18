@@ -289,10 +289,11 @@ qm-next 的 admin 入口全部在 `/v1/admin/*`，共 63 条路由。**当前覆
 | **S29** | Admin providers 写（回归） | 4 | model GET+PUT+DELETE / custom DELETE | ✅ **全部转 PASS（Phase 3B 修复 D6/D7/D9 后）** |
 | **S30** | Sessions 详情 (Fork/Entries) | 3 | POST fork / GET entries/:seq | ✅ 完成（**D1 修复**） |
 | **S31** | User misc | 5 | surface-config / channel-header-pin GET+PUT / soul / grants revoke | ✅ 完成 (Phase 3A) |
-| **S32** | Connectors OAuth mock | 16 | catalog / consent mint+redeem / provider start+callback / token / status / revoke（mock OAuth provider，闭环 8 条 Connectors 路由） | ✅ **全部 PASS（Phase 3C · 184/184 总数起点）** |
-| **S33** | Keychain drops 完整链路 | 3 | cap token mint → form GET → redeem POST（`mintCapabilityToken` + `SECRET_DROP_AUD` 第一次接入 qa-smoke；闭合 drops form/redeem 链路） | ✅ **全部 PASS（Phase 3D · 187/187 总数起点）** |
+| **S32** | Connectors OAuth mock | 16 | catalog / consent mint+redeem / provider start+callback / token / status / revoke（mock OAuth provider，闭环 8 条 Connectors 路由） | ✅ **全部 PASS（Phase 3C · 已验证 184/184）** |
+| **S33** | Keychain drops 完整链路 | 3 | cap token mint → form GET → redeem POST（`mintCapabilityToken` + `CONTROL_PLANE_AUD` 第一次接入 qa-smoke；闭合 drops form/redeem 链路） | ✅ **全部 PASS（Phase 3D · 已验证 188/188）** |
+| **S26**（末位） | fiber.dispose + 端口释放 | 1 | 修 §S12 注释（line 984）遗留：dispose 测试原本计划 §S26 末尾但必须在 §S32 之后才能跑（dispose 后所有 HTTP 失败）；并修 qa-smoke.ts 自身 10 分钟 timeout 不退出的根因（fiber.dispose + node event loop 自然 exit） | ✅ **PASS（188/188 总数稳定点）** |
 
-**总计**：187 用例（Phase 3D +3 drops 链路）· **12 次模型调用 · 实际耗时 ~3.5 分钟**
+**总计**：188 用例（Phase 3D +3 drops 链路 + 1 dispose 修复）· **12 次模型调用 · 实际耗时 ~2.5 分钟 · exit 0**
 
 ---
 
@@ -304,9 +305,11 @@ qm-next 的 admin 入口全部在 `/v1/admin/*`，共 63 条路由。**当前覆
 | **管理员面路由** | 63 | ~39 | **~62%** |
 | **合计** | 148 | ~94 | **~65%** |
 
-> **Phase 3D 进行中（187/187 PASS · S33 完成）**：用户面 + 管理员面加权约 ~63%；Connectors OAuth 100% + drops form/redeem 链路闭合 → **~65%**。11 个真实代码缺陷（D1-D11）全部修复，commit 记录见 `baseline-smoke.md` 末尾。Phase 3A 的 S29 回归测试套件已全部自动转 PASS。
+> **Phase 3D 已验证（188/188 PASS · 2026-09-18 实际跑通）**：用户面 + 管理员面加权约 ~63%；Connectors OAuth 100% + drops form/redeem 链路闭合 → **~65%**。11 个真实代码缺陷（D1-D11）全部修复，commit 记录见 `baseline-smoke.md` 末尾。Phase 3A 的 S29 回归测试套件已全部自动转 PASS。Phase 3D 顺手修 §S12 注释（line 984）遗留：dispose 测试原本计划 §S26 末尾但必须在 §S32 之后；并修 qa-smoke.ts 自身 10 分钟 timeout 不退出的根因（fiber.dispose + event loop 自然 exit）。
 >
 > **历史快照（已废弃）**：早期 §5 草稿曾写"用户面 22 / 管理员面 0 / 合计 14%"（对应 Phase 2 起步阶段），已被本次清理删除。
+>
+> **验证状态更新**：本节数字现以 2026-09-18 实际跑通的 188/188 PASS 为真相源（`aidevops secret run node --import tsx/esm scripts/qa-smoke.ts` ~2.5 分钟 · exit 0），不再是 baseline-smoke.md 里的"184/184 声称值"。S29 回归套件已全部自动转 PASS · S33 keychain drops 链路闭合 · dispose 用例让脚本自然 exit（之前的 10 分钟 timeout 是 fastify listen 持续 + node event loop 不空的根因）。
 
 ---
 
@@ -372,7 +375,7 @@ qm-next 的 admin 入口全部在 `/v1/admin/*`，共 63 条路由。**当前覆
 
 ## 9. 下一步建议（按你确认的优先级）
 
-> **当前快照（2026-09-18）**：Phase 3C 已完成 · **184/184 PASS · 整体 ~65% 覆盖** · 11 个真实代码缺陷（D1-D11）全部修复 · Connectors OAuth 8 条路由 100% 覆盖。Phase 3B 的 S29 回归测试套件已全部自动转 PASS。剩余工作全部为"按 ROI 排序的扩展"，详见 §7.2。
+> **当前快照（2026-09-18 · 已验证）**：Phase 3D 已完成 · **188/188 PASS · 整体 ~65% 覆盖** · 11 个真实代码缺陷（D1-D11）全部修复 · Connectors OAuth 8 条路由 100% 覆盖 · Keychain drops form/redeem 链路闭合。Phase 3B 的 S29 回归测试套件已全部自动转 PASS · 顺手修 §S12 注释（line 984）遗留（fiber.dispose 必须 §S32 之后）+ 修 qa-smoke.ts 10 分钟 timeout 不退出的根因（dispose + event loop 自然 exit）。剩余工作全部为"按 ROI 排序的扩展"，详见 §7.2。
 
 1. **立刻能加的**（无需新基础设施，按 ROI 排序）：keychain drops form/redeem (~30m) → webhooks raw incoming HMAC (~30m) → admin grants/onboarding/reset (~30m) → crons + triggers 短间隔验证 (~1h)
 2. **需要小投入**（mock 一些东西）：admin directory/keychain (~30m) → admin files list/read/download/upload (~1h) → admin deliveries/slack-mirror/ambient/ack-emoji (~30m)

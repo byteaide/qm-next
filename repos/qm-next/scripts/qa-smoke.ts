@@ -53,7 +53,7 @@ const QM_NEXT_ROOT = join(__dirname, '..')
 
 const { Context } = await import(`${QM_NEXT_ROOT}/vendor/cordis/src/index.ts`)
 const { ApiService, mintSignedPayload } = await import(`${QM_NEXT_ROOT}/packages/api/src/index.ts`)
-const { mintCapabilityToken, SECRET_DROP_AUD } = await import(`${QM_NEXT_ROOT}/packages/auth/src/index.ts`)
+const { mintCapabilityToken, CONTROL_PLANE_AUD } = await import(`${QM_NEXT_ROOT}/packages/auth/src/index.ts`)
 
 // ════════════════════════════════════════════════════════════════════════
 // 配置
@@ -1641,7 +1641,9 @@ await scenario('S33', 'POST /v1/keychain/drops (agent capability token mint → 
   const dropCap = await mintCapabilityToken({
     actorId: 'qa-smoke',
     scopeId: 'personal:qa-smoke',
-    aud: SECRET_DROP_AUD,
+    // framework.ts:113 要求 'either' 路由的 cap token 必须用 CONTROL_PLANE_AUD；
+    // mintDrop 内部不做 aud 校验（只查 capability.triggered），所以 SECRET_DROP_AUD 反而会 403
+    aud: CONTROL_PLANE_AUD,
     exp: Date.now() + 60_000,
   }, SECRET, 'default')
   const res = await fetch(`${baseUrl}/v1/keychain/drops`, {
@@ -2112,6 +2114,24 @@ await scenario('S32', 'POST revoke 缺 principalId → 400', async () => {
   return { status }
 })
 
+// §S26 末尾 dispose（§S12 注释 line 984 遗留：原意"dispose 测试移到 §S26 末尾"，
+// 但 dispose 后 fastify server 关闭 → 后续 §S27-§S32 全部失败；真正的"末尾"是 §S32 之后）
+await scenario('S26', 'fiber.dispose 关闭 ApiService + 端口释放（修 §S12 注释遗留：dispose 必须在最后）', async () => {
+  // 这是 §S12 注释（line 984）原意"fiber.dispose 后端口释放"用例的真正落地位置——
+  // 必须放在最后一个 scenario 之后。修脚本不再自然 exit 的根因（process.exitCode 设了但
+  // event loop 不空：fastify listen 持续），让 qa-smoke.ts 能完整跑到报告输出并 exit。
+  const portBeforeDispose = port
+  await fiber.dispose()
+  let connectionRefused = false
+  try {
+    await fetch(`http://127.0.0.1:${portBeforeDispose}/healthz`, { signal: AbortSignal.timeout(1000) })
+  } catch (e: any) {
+    if (e?.code === 'ECONNREFUSED' || e?.cause?.code === 'ECONNREFUSED') connectionRefused = true
+  }
+  if (!connectionRefused) throw new Error(`expected ECONNREFUSED after dispose, port ${portBeforeDispose} still accepting`)
+  return { portBeforeDispose, connectionRefused: true }
+})
+
 // ════════════════════════════════════════════════════════════════════════
 // 汇总报告
 // ════════════════════════════════════════════════════════════════════════
@@ -2153,6 +2173,7 @@ const sectionTitles: Record<string, string> = {
   S30: 'Sessions 详情 (Fork/Entries)',
   S31: 'User misc (Surface-config/Pin/Soul/Grants revoke)',
   S32: 'Connectors OAuth Mock (Phase 3C)',
+  S33: 'Keychain drops 完整链路 (Phase 3D · capability mint → form → redeem)',
 }
 
 console.log('')
@@ -2201,3 +2222,6 @@ if (failed > 0) {
 console.log('═══════════════════════════════════════════════════════════════════════')
 
 process.exitCode = failed === 0 ? 0 : 1
+// 脚本最末的 fiber.dispose() 已在前一个 §S26 用例中执行；fastify listen 已释放，
+// event loop 空 → node 自动 exit。保留 process.exitCode 设值让 CI 能拿到退出码。
+// 不调 process.exit() 是为了不杀任何尚在 settle 的 promise（dispose 链）。
