@@ -780,5 +780,8 @@ P3 验收时"其余文件均为技术性字符串"的判断有漏网,本阶段�
   files 列表/筛选、⌘K 搜索面板 zh 全中文、en 全回退
   (截图 i18n-p4-webhooks-form-zh-fixed.png /
   i18n-p4-files-zh.png / i18n-p4-search-zh.png)
-- 提交:portal 词表 90ff295 前(见各清扫提交)、防漂移测试
-  a208f35、残留清扫 6329f5b/36e46e7/2ad7610/282f205/18fb303
+- 提交(12 个):P4 基础层补交 414895a/8e407ce/61e6a46/9111696
+  (portal 词表模块 / portal-routes 走词表 / portal 对齐测试 /
+  SPA qm.locale cookie 同步);残留清扫 90ff295/6329f5b/36e46e7
+  /2ad7610/282f205/18fb303;防漂移测试 a208f35;docs §7.11
+  319b5b3
