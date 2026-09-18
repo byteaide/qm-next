@@ -36,6 +36,16 @@ export function currentLocale(): Locale {
 export function applyLocale(): void {
   if (typeof document === "undefined") return; // plain node / SSR
   document.documentElement.lang = currentLocale() === "zh" ? "zh-CN" : "en";
+  syncLocaleCookie(currentLocale());
+}
+
+// Mirror the choice into a `qm.locale` cookie so the same-origin portal pages
+// (server-rendered HTML) follow the SPA's language (i18n plan §4.4). Runs on
+// startup via applyLocale() and on every toggle; host-only cookie — portal and
+// SPA share one origin on the qm-next single-process topology.
+function syncLocaleCookie(locale: Locale): void {
+  if (typeof document === "undefined") return; // plain node / SSR
+  document.cookie = `${STORAGE_KEY}=${locale}; path=/; max-age=31536000; samesite=lax`;
 }
 
 export function setLocale(locale: Locale): void {
@@ -59,7 +69,8 @@ export function toggleLocale(): void {
 // placeholders interpolate from params.
 export function t(key: string, params?: Record<string, string | number>): string {
   const table = TABLES[currentLocale()];
-  let out = Object.hasOwn(table, key) ? table[key] : key;
+  const entry = Object.hasOwn(table, key) ? table[key] : undefined;
+  let out: string = entry ?? key;
   if (params) {
     out = out.replace(/\{(\w+)\}/g, (match, name: string) =>
       Object.hasOwn(params, name) ? String(params[name]) : match,
