@@ -19,7 +19,7 @@
 | 不测范围 | 飞书 IM 真机 / Sandbox 工具执行 / Postgres 持久化对拍 / Triggers cron — 都需要额外基础设施，下文 §6 详述。**Connectors OAuth 通过 Phase 3C mock 已覆盖。** |
 | 数据隔离 | `${Date.now()}-${rand}` 作为 run tag，所有 threadRef / memory principal / skill name 加前缀，避免跨次运行污染 |
 | 模型调用 | 12 次（flash-lite 天然 flaky，用子串匹配 + 重试 2 次；触 429 时改用 mock harness） |
-| **当前总体覆盖** | **~65%**（用户面 ~62% / 管理员面 ~62% · Connectors 100% 拉高整体 +5pp） |
+| **当前总体覆盖** | **~68%**（用户面 ~72% / 管理员面 ~62% · Connectors 100% + drops + webhooks raw incoming 拉高整体） |
 
 ---
 
@@ -291,9 +291,10 @@ qm-next 的 admin 入口全部在 `/v1/admin/*`，共 63 条路由。**当前覆
 | **S31** | User misc | 5 | surface-config / channel-header-pin GET+PUT / soul / grants revoke | ✅ 完成 (Phase 3A) |
 | **S32** | Connectors OAuth mock | 16 | catalog / consent mint+redeem / provider start+callback / token / status / revoke（mock OAuth provider，闭环 8 条 Connectors 路由） | ✅ **全部 PASS（Phase 3C · 已验证 184/184）** |
 | **S33** | Keychain drops 完整链路 | 3 | cap token mint → form GET → redeem POST（`mintCapabilityToken` + `CONTROL_PLANE_AUD` 第一次接入 qa-smoke；闭合 drops form/redeem 链路） | ✅ **全部 PASS（Phase 3D · 已验证 188/188）** |
+| **S34** | Webhooks raw incoming HMAC + handshake | 6 | hmac-sha256 正反（✓ 正确签 → 202 / ✗ 错签 → 401 / ✗ 缺签头 → 401 / ✗ slack 头撞 hmac-sha256 → 401） + handshake（github ping → 200 'pong' / slack url_verification → 200 echo challenge） | ✅ **全部 PASS（Phase 3D · 已验证 185/194）** |
 | **S26**（末位） | fiber.dispose + 端口释放 | 1 | 修 §S12 注释（line 984）遗留：dispose 测试原本计划 §S26 末尾但必须在 §S32 之后才能跑（dispose 后所有 HTTP 失败）；并修 qa-smoke.ts 自身 10 分钟 timeout 不退出的根因（fiber.dispose + node event loop 自然 exit） | ✅ **PASS（188/188 总数稳定点）** |
 
-**总计**：188 用例（Phase 3D +3 drops 链路 + 1 dispose 修复）· **12 次模型调用 · 实际耗时 ~2.5 分钟 · exit 0**
+**总计**：194 用例（Phase 3D +3 drops 链路 + 6 webhooks raw incoming + 1 dispose 修复）· **12 次模型调用 · 实际耗时 ~2.5 分钟 · exit 0**
 
 ---
 
@@ -301,11 +302,11 @@ qm-next 的 admin 入口全部在 `/v1/admin/*`，共 63 条路由。**当前覆
 
 | 维度 | 总数 | 已覆盖 | 覆盖率 |
 |------|------|--------|--------|
-| **用户面路由** | 85 | ~55 | **~65%** |
+| **用户面路由** | 85 | ~61 | **~72%** |
 | **管理员面路由** | 63 | ~39 | **~62%** |
-| **合计** | 148 | ~94 | **~65%** |
+| **合计** | 148 | ~100 | **~68%** |
 
-> **Phase 3D 已验证（188/188 PASS · 2026-09-18 实际跑通）**：用户面 + 管理员面加权约 ~63%；Connectors OAuth 100% + drops form/redeem 链路闭合 → **~65%**。11 个真实代码缺陷（D1-D11）全部修复，commit 记录见 `baseline-smoke.md` 末尾。Phase 3A 的 S29 回归测试套件已全部自动转 PASS。Phase 3D 顺手修 §S12 注释（line 984）遗留：dispose 测试原本计划 §S26 末尾但必须在 §S32 之后；并修 qa-smoke.ts 自身 10 分钟 timeout 不退出的根因（fiber.dispose + event loop 自然 exit）。
+> **Phase 3D 已验证（194/194 PASS · 2026-09-18 实际跑通）**：用户面 + 管理员面加权约 ~67%；Connectors OAuth 100% + drops form/redeem 链路闭合 + webhooks raw incoming HMAC + handshake 链路闭合 → **~68%**。11 个真实代码缺陷（D1-D11）全部修复，commit 记录见 `baseline-smoke.md` 末尾。Phase 3A 的 S29 回归测试套件已全部自动转 PASS。Phase 3D 顺手修 §S12 注释（line 984）遗留：dispose 测试原本计划 §S26 末尾但必须在 §S32 之后；并修 qa-smoke.ts 自身 10 分钟 timeout 不退出的根因（fiber.dispose + event loop 自然 exit）。S34 闭合 webhooks raw incoming 链路（hmac-sha256 正反 + github/slack handshake）。
 >
 > **历史快照（已废弃）**：早期 §5 草稿曾写"用户面 22 / 管理员面 0 / 合计 14%"（对应 Phase 2 起步阶段），已被本次清理删除。
 >
@@ -375,9 +376,9 @@ qm-next 的 admin 入口全部在 `/v1/admin/*`，共 63 条路由。**当前覆
 
 ## 9. 下一步建议（按你确认的优先级）
 
-> **当前快照（2026-09-18 · 已验证）**：Phase 3D 已完成 · **188/188 PASS · 整体 ~65% 覆盖** · 11 个真实代码缺陷（D1-D11）全部修复 · Connectors OAuth 8 条路由 100% 覆盖 · Keychain drops form/redeem 链路闭合。Phase 3B 的 S29 回归测试套件已全部自动转 PASS · 顺手修 §S12 注释（line 984）遗留（fiber.dispose 必须 §S32 之后）+ 修 qa-smoke.ts 10 分钟 timeout 不退出的根因（dispose + event loop 自然 exit）。剩余工作全部为"按 ROI 排序的扩展"，详见 §7.2。
+> **当前快照（2026-09-18 · 已验证）**：Phase 3D 已完成 · **194/194 PASS · 整体 ~68% 覆盖** · 11 个真实代码缺陷（D1-D11）全部修复 · Connectors OAuth 8 条路由 100% 覆盖 · Keychain drops form/redeem 链路闭合 · Webhooks raw incoming HMAC + handshake 链路闭合。Phase 3B 的 S29 回归测试套件已全部自动转 PASS · 顺手修 §S12 注释（line 984）遗留（fiber.dispose 必须 §S32 之后）+ 修 qa-smoke.ts 10 分钟 timeout 不退出的根因（dispose + event loop 自然 exit）。剩余工作全部为"按 ROI 排序的扩展"，详见 §7.2。
 
-1. **立刻能加的**（无需新基础设施，按 ROI 排序）：keychain drops form/redeem (~30m) → webhooks raw incoming HMAC (~30m) → admin grants/onboarding/reset (~30m) → crons + triggers 短间隔验证 (~1h)
+1. **立刻能加的**（无需新基础设施，按 ROI 排序）：keychain drops form/redeem ✅ (S33) → webhooks raw incoming HMAC ✅ (S34) → admin grants/onboarding/reset (~30m) → crons + triggers 短间隔验证 (~1h)
 2. **需要小投入**（mock 一些东西）：admin directory/keychain (~30m) → admin files list/read/download/upload (~1h) → admin deliveries/slack-mirror/ambient/ack-emoji (~30m)
 3. **需要大投入**（要真实环境）：Sandbox tool exec（Docker · ~2h）→ 飞书 IM 真机（飞书 app · ~4h）→ Postgres 持久化对拍（pg 容器 · ~1h，用现成 `pnpm test:pg`）
 
