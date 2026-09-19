@@ -7,8 +7,20 @@
  */
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import type { EnqueueInput, EnqueueResult, ReapEvent, Run, RunDeliveryState, RunStore, TurnInput, TurnResult } from '@qm/types'
-import { isTerminal } from '@qm/types'
+import type {
+  EnqueueInput,
+  EnqueueResult,
+  FailureReason,
+  ReapEvent,
+  Run,
+  RunDeliveryState,
+  RunSource,
+  RunState,
+  RunStore,
+  TurnInput,
+  TurnResult,
+} from '@qm/types'
+import { assertTargetRunInvariant, isTerminal } from '@qm/types'
 import { createPgPool, errMessage, type PgPool } from './pg-pool.ts'
 import { RUN_SCHEMA_STATEMENTS } from './schema.ts'
 
@@ -21,6 +33,9 @@ function rowToRun(r: Record<string, unknown>): Run {
     id: r.id as string,
     sessionId: r.session_id as string,
     status: r.status as Run['status'],
+    targetState: (r.target_state as RunState | null) ?? 'queued',
+    runSource: (r.run_source as RunSource | null) ?? 'legacy',
+    failureReason: (r.failure_reason as FailureReason | null) ?? undefined,
     request: JSON.parse(r.request as string) as TurnInput,
     result: r.result != null ? (JSON.parse(r.result as string) as TurnResult) : null,
     deliveryState: r.delivery_state != null ? (JSON.parse(r.delivery_state as string) as RunDeliveryState) : null,
@@ -63,17 +78,18 @@ export function createPostgresRunStore(connectionString: string, opts?: { maxCla
     run: Run,
     error: string,
     retry: boolean,
-    opts?: { ifExpiredAt?: number; countsAsError?: boolean },
+    opts?: { ifExpiredAt?: number; countsAsError?: boolean; failureReason?: FailureReason },
   ): Promise<{ requeued: boolean; applied: boolean }> {
     const ifExpiredAt = opts?.ifExpiredAt ?? null
     const countsAsError = opts?.countsAsError ?? false
     const errorAttemptsAfter = run.errorAttempts + (countsAsError ? 1 : 0)
     const overClaimed = run.attempts >= maxClaims
-    if (retry && errorAttemptsAfter < run.maxAttempts && !overClaimed) {
+if (retry && errorAttemptsAfter < run.maxAttempts && !overClaimed) {
       const { rowCount } = await query(
-        `UPDATE runs SET status='pending', lease_token=NULL, lease_expires_at=NULL, worker_id=NULL,
+        `UPDATE runs SET status='pending', target_state='queued', failure_reason=NULL,
+           lease_token=NULL, lease_expires_at=NULL, worker_id=NULL,
            error_attempts=error_attempts+$4
-         WHERE id=$1 AND lease_token=$2 AND status='running' AND ($3::bigint IS NULL OR lease_expires_at <= $3)`,
+         WHERE id=$1 AND lease_token=[redacted-credential] AND status='running' AND ($3::bigint IS NULL OR lease_expires_at <= $3)`,
         [run.id, run.leaseToken, ifExpiredAt, countsAsError ? 1 : 0],
       )
       return { requeued: rowCount > 0, applied: rowCount > 0 }
@@ -82,12 +98,14 @@ export function createPostgresRunStore(connectionString: string, opts?: { maxCla
       !countsAsError && overClaimed && retry && errorAttemptsAfter < run.maxAttempts
         ? `run parked after ${run.attempts} claims without completing (suspected crash loop)`
         : error
-    const result: TurnResult = { status: 'failed', sessionId: run.sessionId, reason }
+const result: TurnResult = { status: 'failed', sessionId: run.sessionId, reason }
+    const failureReason = opts?.failureReason ?? 'execution_failed'
     const { rowCount } = await query(
-      `UPDATE runs SET status='failed', result=$4, lease_token=NULL, lease_expires_at=NULL, worker_id=NULL, finished_at=$5,
+      `UPDATE runs SET status='failed', target_state='failed', failure_reason=$7, result=$4,
+         lease_token=NULL, lease_expires_at=NULL, worker_id=NULL, finished_at=$5,
          error_attempts=error_attempts+$6
-       WHERE id=$1 AND lease_token=$2 AND status='running' AND ($3::bigint IS NULL OR lease_expires_at <= $3)`,
-      [run.id, run.leaseToken, ifExpiredAt, JSON.stringify(result), Date.now(), countsAsError ? 1 : 0],
+       WHERE id=$1 AND lease_token=[redacted-credential] AND status='running' AND ($3::bigint IS NULL OR lease_expires_at <= $3)`,
+      [run.id, run.leaseToken, ifExpiredAt, JSON.stringify(result), Date.now(), countsAsError ? 1 : 0, failureReason],
     )
     if (rowCount > 0) settle(await getRun(run.id))
     return { requeued: false, applied: rowCount > 0 }
@@ -99,22 +117,28 @@ export function createPostgresRunStore(connectionString: string, opts?: { maxCla
     async enqueue({ sessionId, request, dedupKey, maxAttempts = 3 }: EnqueueInput): Promise<EnqueueResult> {
       const id = randomUUID()
       const { rows: inserted } = await query(
-        `INSERT INTO runs(id, session_id, status, request, idempotency_key, attempts, max_attempts, created_at)
-         VALUES ($1,$2,'pending',$3,$4,0,$5,$6)
+        `INSERT INTO runs(id, session_id, status, target_state, run_source, request, idempotency_key, attempts, max_attempts, created_at)
+         VALUES ($1,$2,'pending','queued','legacy',$3,$4,0,$5,$6)
          ON CONFLICT (idempotency_key) DO NOTHING RETURNING *`,
         [id, sessionId, JSON.stringify(request), dedupKey ?? null, maxAttempts, Date.now()],
       )
-      if (inserted[0]) return { run: rowToRun(inserted[0]), deduped: false }
+      if (inserted[0]) {
+        const run = rowToRun(inserted[0])
+        assertTargetRunInvariant(run)
+        return { run, deduped: false }
+      }
       const { rows } = await query('SELECT * FROM runs WHERE idempotency_key = $1', [dedupKey])
-      return { run: rowToRun(rows[0]!), deduped: true }
+      const run = rowToRun(rows[0]!)
+      assertTargetRunInvariant(run)
+      return { run, deduped: true }
     },
 
-    async claim(workerId, ttlMs): Promise<Run | null> {
-      const token = randomUUID()
+async claim(workerId, ttlMs): Promise<Run | null> {
+      const token = [redacted-credential])
       const now = Date.now()
       try {
         const { rows } = await query(
-          `UPDATE runs SET status='running', lease_token=$1, lease_expires_at=$2, worker_id=$3,
+          `UPDATE runs SET status='running', target_state='running', lease_token=[redacted-credential], lease_expires_at=$2, worker_id=$3,
              attempts=attempts+1, started_at=COALESCE(started_at,$4)
            WHERE id = (
              SELECT id FROM runs WHERE status='pending'
@@ -130,12 +154,12 @@ export function createPostgresRunStore(connectionString: string, opts?: { maxCla
       }
     },
 
-    async claimById(runId, workerId, ttlMs): Promise<Run | null> {
-      const token = randomUUID()
+async claimById(runId, workerId, ttlMs): Promise<Run | null> {
+      const token = [redacted-credential])
       const now = Date.now()
       try {
         const { rows } = await query(
-          `UPDATE runs SET status='running', lease_token=$1, lease_expires_at=$2, worker_id=$3,
+          `UPDATE runs SET status='running', target_state='running', lease_token=[redacted-credential], lease_expires_at=$2, worker_id=$3,
              attempts=attempts+1, started_at=COALESCE(started_at,$4)
            WHERE id = (
              SELECT id FROM runs WHERE id=$5 AND status='pending'
@@ -161,7 +185,7 @@ export function createPostgresRunStore(connectionString: string, opts?: { maxCla
 
     async releaseLease(runId, leaseToken): Promise<boolean> {
       const { rowCount } = await query(
-        "UPDATE runs SET status='pending', lease_token=NULL, lease_expires_at=NULL, worker_id=NULL WHERE id=$1 AND lease_token=$2 AND status='running'",
+        "UPDATE runs SET status='pending', target_state='queued', failure_reason=NULL, lease_token=NULL, lease_expires_at=NULL, worker_id=NULL WHERE id=$1 AND lease_token=$2 AND status='running'",
         [runId, leaseToken],
       )
       return rowCount > 0
@@ -169,7 +193,7 @@ export function createPostgresRunStore(connectionString: string, opts?: { maxCla
 
     async complete(runId, leaseToken, result): Promise<boolean> {
       const { rowCount } = await query(
-        "UPDATE runs SET status='done', result=$1, lease_token=NULL, lease_expires_at=NULL, finished_at=$2 WHERE id=$3 AND lease_token=$4 AND status='running'",
+        "UPDATE runs SET status='done', target_state='succeeded', failure_reason=NULL, result=$1, lease_token=NULL, lease_expires_at=NULL, finished_at=$2 WHERE id=$3 AND lease_token=$4 AND status='running'",
         [JSON.stringify(result), Date.now(), runId, leaseToken],
       )
       if (rowCount > 0) {

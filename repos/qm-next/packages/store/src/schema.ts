@@ -6,16 +6,37 @@
 export const RUN_SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS runs(
       id TEXT PRIMARY KEY, session_id TEXT NOT NULL, status TEXT NOT NULL,
+      target_state TEXT NOT NULL DEFAULT 'queued',
+      run_source TEXT NOT NULL DEFAULT 'legacy',
+      failure_reason TEXT,
       request TEXT NOT NULL, result TEXT, delivery_state TEXT, idempotency_key TEXT UNIQUE,
       attempts INT NOT NULL DEFAULT 0, error_attempts INT NOT NULL DEFAULT 0,
       max_attempts INT NOT NULL DEFAULT 3,
       lease_token TEXT, lease_expires_at BIGINT, worker_id TEXT,
       created_at BIGINT NOT NULL, started_at BIGINT, finished_at BIGINT, seq BIGSERIAL
     )`,
+  // Phase 1 — backfill columns on existing installs. The CREATE TABLE
+  // above ships the columns already; the ALTERs are no-ops on fresh
+  // installs and idempotent on existing ones.
+  `ALTER TABLE runs ADD COLUMN IF NOT EXISTS target_state TEXT NOT NULL DEFAULT 'queued'`,
+  `ALTER TABLE runs ADD COLUMN IF NOT EXISTS run_source TEXT NOT NULL DEFAULT 'legacy'`,
+  `ALTER TABLE runs ADD COLUMN IF NOT EXISTS failure_reason TEXT`,
   `CREATE INDEX IF NOT EXISTS idx_runs_status_created_seq ON runs(status, created_at, seq)`,
   `CREATE INDEX IF NOT EXISTS idx_runs_session_active_created
       ON runs(session_id, created_at DESC) WHERE status IN ('pending','running')`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_one_running_per_session ON runs(session_id) WHERE status='running'`,
+  // Phase 1 — durable Run Event log. (run_id, seq) is unique; events are
+  // immutable. Slice 1.2 wires the writes inside the same transaction
+  // as state transitions.
+  `CREATE TABLE IF NOT EXISTS run_event_log(
+      run_id TEXT NOT NULL, seq BIGINT NOT NULL,
+      kind TEXT NOT NULL, attempt_id TEXT, attempt_seq INT,
+      session_id TEXT NOT NULL, ts BIGINT NOT NULL,
+      outcome TEXT, failure_reason TEXT,
+      payload TEXT,
+      PRIMARY KEY(run_id, seq)
+    )`,
+  `CREATE INDEX IF NOT EXISTS idx_run_event_log_run_ts ON run_event_log(run_id, ts)`,
 ]
 
 export const SESSION_SCHEMA_STATEMENTS = [

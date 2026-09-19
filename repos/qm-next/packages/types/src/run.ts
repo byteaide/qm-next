@@ -6,10 +6,43 @@
  * Expired leases are reaped back to pending or parked. Both the in-memory and
  * Postgres implementations must satisfy these semantics identically (lane A
  * parity tests).
+ *
+ * Phase 1 (2026-09-20 architecture review) — Run-owned lifecycle:
+ *   - `targetState` is the target Run lifecycle state (RunState in
+ *     `./run-lifecycle.ts`). The legacy `status` field is kept until
+ *     Phase 7 cleanup so legacy code paths keep compiling during the
+ *     migration window.
+ *   - `failureReason` is required when `targetState === 'failed'`.
+ *   - `currentAttempt` and `attempts` already track the Attempt identity.
+ *     The target Attempt State machine is a separate contract in
+ *     `AttemptState`; it is computed from `targetState` plus the durable
+ *     event log (Slice 1.2 lands the event log).
+ *   - `runSource` declares whether a row was created by the legacy path
+ *     (`legacy`) or the target path (`target`). It is the toggle the
+ *     rollout flag (`Phase 0 RolloutFlag` for `target.run-observation`)
+ *     checks at write time; the architecture gate rejects new
+ *     `runSource = 'target'` rows that still write `'done'` as the
+ *     legacy status.
+ *
+ * Linked ADRs: ADR-0001 (Run owns terminal state), ADR-0005 (legacy
+ * projection), ADR-0011 (Run/Attempt states separate), ADR-0013
+ * (state + event commit together).
  */
 import type { TurnInput, TurnResult } from './turn.ts'
+import type { FailureReason, RunState } from './run-lifecycle.ts'
 
 export type RunStatus = 'pending' | 'running' | 'done' | 'failed'
+
+/**
+ * Whether a Run row was written by the legacy write path (`legacy`)
+ * or the target write path (`target`). The target path is gated by
+ * `target.run-observation` (Phase 0 RolloutFlag); when the flag is
+ * off, all writes go through the legacy path even on services that
+ * have been migrated. The architecture gate rejects any
+ * `runSource: 'target'` row whose `status === 'done'` literal is
+ * physically present.
+ */
+export type RunSource = 'legacy' | 'target'
 
 export interface ReapEvent {
   runId: string
@@ -27,7 +60,28 @@ export interface RunDeliveryState {
 export interface Run {
   id: string
   sessionId: string
+  /** Legacy Run status. `done` is the legacy terminal success state. */
   status: RunStatus
+  /**
+   * Target Run state (ADR-0001). Defaults to `'queued'` for legacy
+   * rows that did not record a target state at write time. The
+   * migration projection (§1.5) lifts legacy rows into target
+   * semantics on read; the durable value lands when the rollout
+   * flag flips.
+   */
+  targetState: RunState
+  /**
+   * Closed set of reasons a Run may have failed (Phase 0). Required
+   * when `targetState === 'failed'`; absent otherwise.
+   */
+  failureReason?: FailureReason
+  /**
+   * Source path the Run was written from. Production writes that go
+   * through the target contract set `target`; everything else is
+   * `legacy`. The architecture gate asserts no `target` rows carry
+   * the literal `'done'`.
+   */
+  runSource: RunSource
   request: TurnInput
   result: TurnResult | null
   deliveryState: RunDeliveryState | null
@@ -110,4 +164,85 @@ export function errorParks(run: Pick<Run, 'errorAttempts' | 'maxAttempts' | 'att
 
 export function leaseLapsed(run: Pick<Run, 'status' | 'leaseExpiresAt'>, asOf: number): boolean {
   return run.status === 'running' && run.leaseExpiresAt !== null && run.leaseExpiresAt <= asOf
+}
+
+/**
+ * Phase 1 — Target Run state from a legacy status. The legacy status
+ * `'done'` is ambiguous: it covers `succeeded`, `silent success`, and
+ * `command_refused` (which the target model distinguishes via
+ * `FailureReason`). Legacy rows are projected to target states at read
+ * time so the call site observes one well-typed shape regardless of
+ * whether the write path was legacy or target.
+ *
+ * Phase 1 ships the projection; the durable `targetState` lands when
+ * the rollout flag flips (§1.5). Until then, every call to a target
+ * observation port goes through `projectLegacyStatus` and the result
+ * is the source of truth for the API/Web surface.
+ */
+export function projectLegacyStatus(
+  status: RunStatus,
+  opts: { result?: TurnResult | null; failureReason?: FailureReason | null } = {},
+): RunState {
+  if (status === 'pending') return 'queued'
+  if (status === 'running') return 'running'
+  if (status === 'failed') {
+    const reason = opts.failureReason ?? null
+    if (reason === 'command_refused') return 'failed'
+    if (reason === 'approval_denied') return 'failed'
+    if (reason === 'approval_expired') return 'failed'
+    if (reason === 'approval_continuation_unavailable') return 'failed'
+    if (reason === 'timeout') return 'failed'
+    if (reason === 'cancelled') return 'cancelled'
+    return 'failed'
+  }
+  // status === 'done'
+  const resultStatus = opts.result?.status
+  if (resultStatus === 'silent') return 'succeeded'
+  if (resultStatus === 'refused') return 'failed'
+  if (resultStatus === 'failed') return 'failed'
+  if (resultStatus === 'pending_approval') return 'failed'
+  return 'succeeded'
+}
+
+/**
+ * Phase 1 — Project a `Run` row to its target terminal outcome. For
+ * non-terminal rows the function returns `null`; callers project
+ * themselves via `projectLegacyStatus`.
+ */
+export function projectLegacyOutcome(run: Pick<Run, 'status' | 'targetState' | 'result' | 'failureReason'>): 'succeeded' | 'failed' | 'cancelled' | null {
+  const state = run.targetState
+  if (state === 'succeeded') return 'succeeded'
+  if (state === 'failed') return 'failed'
+  if (state === 'cancelled') return 'cancelled'
+  if (run.status === 'done') {
+    const resultStatus = run.result?.status
+    if (resultStatus === 'silent') return 'succeeded'
+    if (resultStatus === 'refused') return 'failed'
+    if (resultStatus === 'failed') return 'failed'
+    if (resultStatus === 'pending_approval') return 'failed'
+    return 'succeeded'
+  }
+  return null
+}
+
+/**
+ * Phase 1 — Validate that a Run row written by the target path does
+ * not carry the legacy `'done'` literal as its `status`. The
+ * architecture gate enforces the same rule at static-check time; this
+ * helper is the runtime guard used by store implementations and by
+ * the rollout-flag-on write path.
+ */
+export function assertTargetRunInvariant(run: Pick<Run, 'runSource' | 'status' | 'targetState' | 'failureReason'>): void {
+  if (run.runSource !== 'target') return
+  if (run.status === 'done') {
+    throw new Error(
+      'architecture violation: target Run row carries legacy status `done`; use `targetState = succeeded`',
+    )
+  }
+  if (run.targetState === 'failed' && run.failureReason === undefined) {
+    throw new Error('architecture violation: target Run row with targetState=`failed` requires a FailureReason')
+  }
+  if (run.targetState !== 'failed' && run.failureReason !== undefined) {
+    throw new Error('architecture violation: target Run row with failureReason but targetState != `failed`')
+  }
 }

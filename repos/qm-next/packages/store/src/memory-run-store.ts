@@ -5,8 +5,8 @@
  */
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import type { EnqueueInput, EnqueueResult, ReapEvent, Run, RunDeliveryState, RunStore } from '@qm/types'
-import { isTerminal, leaseLapsed } from '@qm/types'
+import type { EnqueueInput, EnqueueResult, FailureReason, ReapEvent, Run, RunDeliveryState, RunStore } from '@qm/types'
+import { assertTargetRunInvariant, isTerminal, leaseLapsed } from '@qm/types'
 
 export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
   const maxClaims = opts?.maxClaims ?? Number.POSITIVE_INFINITY
@@ -29,9 +29,10 @@ export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
     for (const listener of terminalListeners) listener(run)
   }
 
-  function lease(run: Run, workerId: string, ttlMs: number): Run {
+function lease(run: Run, workerId: string, ttlMs: number): Run {
     run.status = 'running'
-    run.leaseToken = randomUUID()
+    run.targetState = 'running'
+    run.leaseToken = [redacted-credential])
     run.leaseExpiresAt = Date.now() + ttlMs
     run.workerId = workerId
     run.attempts += 1
@@ -43,7 +44,7 @@ export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
     run: Run,
     error: string,
     retry: boolean,
-    opts?: { ifExpiredAt?: number; countsAsError?: boolean },
+    opts?: { ifExpiredAt?: number; countsAsError?: boolean; failureReason?: FailureReason },
   ): { requeued: boolean; applied: boolean } {
     if (run.status !== 'running') return { requeued: false, applied: false }
     if (opts?.ifExpiredAt !== undefined && (run.leaseExpiresAt === null || run.leaseExpiresAt > opts.ifExpiredAt)) {
@@ -56,15 +57,20 @@ export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
     const overClaimed = run.attempts >= maxClaims
     if (retry && run.errorAttempts < run.maxAttempts && !overClaimed) {
       run.status = 'pending'
+      run.targetState = 'queued'
+      run.failureReason = undefined
       return { requeued: true, applied: true }
     }
     run.status = 'failed'
+    run.targetState = 'failed'
+    run.failureReason = opts?.failureReason ?? 'execution_failed'
     const reason =
       !opts?.countsAsError && overClaimed && retry && run.errorAttempts < run.maxAttempts
         ? `run parked after ${run.attempts} claims without completing (suspected crash loop)`
         : error
     run.result = { status: 'failed', sessionId: run.sessionId, reason }
     run.finishedAt = Date.now()
+    assertTargetRunInvariant(run)
     settle(run)
     return { requeued: false, applied: true }
   }
@@ -84,6 +90,8 @@ export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
         id: randomUUID(),
         sessionId,
         status: 'pending',
+        targetState: 'queued',
+        runSource: 'legacy',
         request,
         result: null,
         deliveryState: null,
@@ -98,6 +106,7 @@ export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
         startedAt: null,
         finishedAt: null,
       }
+      assertTargetRunInvariant(run)
       runs.set(run.id, run)
       if (dedupKey) byKey.set(dedupKey, run.id)
       return { run, deduped: false }
@@ -129,6 +138,7 @@ export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
       const run = runs.get(runId)
       if (!run || run.status !== 'running' || run.leaseToken !== leaseToken) return false
       run.status = 'pending'
+      run.targetState = 'queued'
       run.leaseToken = null
       run.leaseExpiresAt = null
       run.workerId = null
@@ -138,11 +148,18 @@ export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
     async complete(runId, leaseToken, result) {
       const run = runs.get(runId)
       if (!run || run.leaseToken !== leaseToken) return false
+      // Legacy write path: terminal success. targetState captures the
+      // target semantic; the legacy `status='done'` literal stays so
+      // existing surface code (web SSE, api relay) keeps reading the
+      // same wire shape. Phase 7 cleanup removes `status` entirely.
       run.status = 'done'
+      run.targetState = 'succeeded'
+      run.failureReason = undefined
       run.result = result
       run.leaseToken = null
       run.leaseExpiresAt = null
       run.finishedAt = Date.now()
+      assertTargetRunInvariant(run)
       settle(run)
       return true
     },
