@@ -12,6 +12,7 @@
     "test": "node --import tsx/esm --test packages/*/tests/*.test.ts",
     "test:pg": "bash scripts/run-pg.sh",
     "test:all": "node --import tsx/esm scripts/run-all-tests.ts",
+    "test:architecture": "bash scripts/architecture-gate.sh",
     "test:cli": "node --import tsx/esm scripts/qa-cli.ts",
     "test:user-stories": "node --import tsx/esm scripts/qa-user-stories.ts",
     "test:smoke-wave2": "node --import tsx/esm scripts/qa-smoke-wave2.ts",

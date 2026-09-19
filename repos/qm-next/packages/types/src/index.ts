@@ -14,3 +14,14 @@ export * from './sandbox.ts'
 export * from './tools.ts'
 export * from './ratelimit.ts'
 export * from './orchestrator.ts'
+// Phase 0 target contracts — see docs/implementation-plan.md §Phase 0.
+// These types compile and are referenced by ADR JSDoc; runtime behavior
+// continues to use the legacy contracts above until Phase 1+ switches
+// the write paths.
+export * from './run-lifecycle.ts'
+export * from './run-observation.ts'
+export * from './command-gate.ts'
+export * from './admission.ts'
+export * from './approval-continuation.ts'
+export * from './trigger-runtime.ts'
+export * from './concurrency.ts'

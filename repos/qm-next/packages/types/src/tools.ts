@@ -22,11 +22,17 @@ export interface GrantedHandle {
   permission: Permission
 }
 
-export type CommandDecision = 'allow' | 'deny' | 'require_approval'
+/**
+ * Legacy Command Gate decision (M3 sandbox policy engine). The canonical
+ * target contract lives in `./command-gate.ts` — Phase 2 migrates the
+ * runtime sandbox policy to the typed `CommandDecision` interface. Until
+ * then this alias keeps existing imports compiling.
+ */
+export type LegacyCommandDecision = 'allow' | 'deny' | 'require_approval'
 
 export interface CommandRule {
   pattern: string
-  decision: CommandDecision
+  decision: LegacyCommandDecision
   reason?: string
 }
 

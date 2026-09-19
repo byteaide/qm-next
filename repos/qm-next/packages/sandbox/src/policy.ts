@@ -20,11 +20,11 @@
  *     default. Callers who need case-insensitive matching should write
  *     the pattern with the `i` flag explicitly.
  */
-import type { CommandDecision, CommandPolicy, CommandRule } from '@qm/types'
+import type { CommandPolicy, CommandRule, LegacyCommandDecision } from '@qm/types'
 import { CommandDenied, NeedsApproval } from '@qm/types'
 
 export interface PolicyVerdict {
-  decision: CommandDecision
+  decision: LegacyCommandDecision
   reason?: string
   matched?: string
 }

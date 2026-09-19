@@ -13,10 +13,10 @@ import type {
   Orchestrator,
   OrchestratorDeps,
   PendingApproval,
-  RunDeltaEvent,
-  RunEvent,
-  RunEventDraft,
-  RunProgressEvent,
+  LegacyRunDeltaEvent,
+  LegacyRunEvent,
+  LegacyRunEventDraft,
+  LegacyRunProgressEvent,
   SessionEntry,
   TurnInput,
   TurnResult,
@@ -93,8 +93,8 @@ export class OrchestratorService extends Service implements Orchestrator {
     const lease = leaseAttempt.lease
     const events = deps.runEvents && input.runId ? deps.runEvents : undefined
     let seq = 0
-    const publish = (event: RunEventDraft): void => {
-      events?.publish({ ...event, runId: input.runId!, sessionId: session.id, seq } as RunEvent)
+    const publish = (event: LegacyRunEventDraft): void => {
+      events?.publish({ ...event, runId: input.runId!, sessionId: session.id, seq } as LegacyRunEvent)
       seq += 1
     }
     if (events) publish({ kind: 'status', status: 'running' })
@@ -139,8 +139,8 @@ export class OrchestratorService extends Service implements Orchestrator {
         },
         ...(events
           ? {
-              onDelta: (text: string) => publish({ kind: 'delta', text } satisfies Omit<RunDeltaEvent, 'runId' | 'sessionId' | 'seq'>),
-              onProgress: (p: { toolCalls: number }) => publish({ kind: 'progress', toolCalls: p.toolCalls } satisfies Omit<RunProgressEvent, 'runId' | 'sessionId' | 'seq'>),
+              onDelta: (text: string) => publish({ kind: 'delta', text } satisfies Omit<LegacyRunDeltaEvent, 'runId' | 'sessionId' | 'seq'>),
+              onProgress: (p: { toolCalls: number }) => publish({ kind: 'progress', toolCalls: p.toolCalls } satisfies Omit<LegacyRunProgressEvent, 'runId' | 'sessionId' | 'seq'>),
             }
           : {}),
       })
