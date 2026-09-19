@@ -1,5 +1,5 @@
 /**
- * Slice 2.3 — In-memory `ApprovalStore` implementation.
+ * Slice 2.3 + 2.5 — In-memory `ApprovalStore` implementation.
  *
  * Implements the durable Approval Request registry port from
  * `@qm/types/approval-continuation.ts` for tests and single-process
@@ -12,10 +12,10 @@ import { randomUUID } from 'node:crypto'
 import type {
   ApprovalContinuation,
   ApprovalDecisionOutcome,
+  ApprovalRenewalOutcome,
   ApprovalRequest,
   ApprovalRequestInput,
   ApprovalStore,
-  AttemptState,
 } from '@qm/types'
 import { APPROVAL_DEFAULT_TTL_MS } from '@qm/types'
 
@@ -58,20 +58,26 @@ export function createMemoryTargetApprovalStore(
   const allocate = opts.idAllocator ?? (() => randomUUID())
   const records = new Map<string, StoredRecord>()
 
-  function effectiveTtlMs(input: ApprovalRequestInput): number {
+  function ttlFromInput(input: ApprovalRequestInput): number {
     return input.ttlMs ?? APPROVAL_DEFAULT_TTL_MS
+  }
+
+  function maxTtlFromInput(input: ApprovalRequestInput, ttlMs: number): number {
+    return input.maxTtlMs ?? ttlMs
   }
 
   function buildRequest(input: ApprovalRequestInput, id: string): ApprovalRequest {
     const now = clock.now()
-    const ttlMs = effectiveTtlMs(input)
-    const absoluteExpiry = now + ttlMs
+    const ttlMs = ttlFromInput(input)
+    const maxTtlMs = maxTtlFromInput(input, ttlMs)
+    const absoluteExpiry = now + maxTtlMs
     return {
       id,
       runId: input.runId,
       attemptId: input.attemptId,
       requesterPrincipalId: input.requesterPrincipalId,
       ttlMs,
+      maxTtlMs,
       absoluteExpiry,
       status: 'pending',
       createdAt: now,
@@ -81,6 +87,13 @@ export function createMemoryTargetApprovalStore(
 
   function snapshot(rec: StoredRecord): ApprovalRequest {
     return { ...rec.request, continuation: { ...rec.request.continuation } }
+  }
+
+  function isCurrentlyExpired(rec: StoredRecord, now: number): boolean {
+    // Slice 2.5 — `decide` does NOT perform lazy expiry. The sweep is
+    // the only authority for the `expired` status; we use this helper
+    // only inside the sweep itself to detect past-due pending records.
+    return rec.request.status === 'pending' && rec.request.absoluteExpiry <= now
   }
 
   return {
@@ -115,7 +128,15 @@ export function createMemoryTargetApprovalStore(
     async decide(requestId, decision): Promise<ApprovalDecisionOutcome> {
       const rec = records.get(requestId)
       if (!rec) return { outcome: 'not_found' }
-      const now = decision.now ?? clock.now()
+      // Slice 2.5 — durable sweep is the only authority for expiry. If
+      // the record is past `absoluteExpiry` but the sweep has not yet
+      // marked it `expired`, `decide` returns `expired` defensively
+      // without mutating state; the next sweep will mark it. This
+      // keeps the lazy-expiry invariant intact while still surfacing
+      // a coherent outcome to the caller.
+      if (rec.request.status === 'pending' && rec.request.absoluteExpiry <= (decision.now ?? clock.now())) {
+        return { outcome: 'expired', request: snapshot(rec) }
+      }
       if (rec.request.status !== 'pending') {
         return {
           outcome: 'already_decided',
@@ -126,14 +147,11 @@ export function createMemoryTargetApprovalStore(
       if (rec.request.requesterPrincipalId !== decision.decidedBy) {
         return { outcome: 'forbidden', request: snapshot(rec) }
       }
-      if (rec.request.absoluteExpiry <= now) {
-        return { outcome: 'expired', request: snapshot(rec) }
-      }
       rec.request = {
         ...rec.request,
         status: decision.approved ? 'approved' : 'rejected',
         approved: decision.approved,
-        decidedAt: now,
+        decidedAt: decision.now ?? clock.now(),
         decidedBy: decision.decidedBy,
       }
       return { outcome: 'decided', approved: decision.approved, request: snapshot(rec) }
@@ -153,9 +171,83 @@ export function createMemoryTargetApprovalStore(
       rec.request = { ...rec.request, status: 'expired', decidedAt: t }
       return { outcome: 'decided', approved: false, request: snapshot(rec) }
     },
+
+    /**
+     * Slice 2.5 — extend the TTL on a pending request. The new
+     * `ttlMs` is clamped at the absolute expiry (`createdAt +
+     * maxTtlMs`); renewals never extend past it (ADR-0010 §2.5). A
+     * renewal attempt after absolute expiry returns `expired`. A
+     * renewal that would not move the absolute expiry returns
+     * `no_op` with `reason: 'ttl_already_at_max'` so the audit log
+     * records a benign attempt.
+     */
+    async renew(requestId, renewal): Promise<ApprovalRenewalOutcome> {
+      const rec = records.get(requestId)
+      if (!rec) return { outcome: 'not_found' }
+      const now = renewal.now ?? clock.now()
+      if (rec.request.status !== 'pending') {
+        return {
+          outcome: 'already_decided',
+          approved: rec.request.approved ?? false,
+          request: snapshot(rec),
+        }
+      }
+      if (rec.request.requesterPrincipalId !== renewal.renewedBy) {
+        return { outcome: 'forbidden', request: snapshot(rec) }
+      }
+      if (now >= rec.request.absoluteExpiry) {
+        return { outcome: 'expired', request: snapshot(rec) }
+      }
+      const currentExpiry = rec.request.createdAt + rec.request.ttlMs
+      const newExpiry = Math.min(rec.request.createdAt + renewal.newTtlMs, rec.request.absoluteExpiry)
+      if (newExpiry <= currentExpiry) {
+        return { outcome: 'no_op', reason: 'ttl_already_at_max', request: snapshot(rec) }
+      }
+      rec.request = {
+        ...rec.request,
+        ttlMs: newExpiry - rec.request.createdAt,
+        renewalCount: (rec.request.renewalCount ?? 0) + 1,
+      }
+      return { outcome: 'renewed', request: snapshot(rec) }
+    },
   }
 }
 
-/** Re-export for ergonomic single-import from tests. */
-export type { ApprovalStore, ApprovalRequest, ApprovalContinuation, AttemptState }
-export { APPROVAL_DEFAULT_TTL_MS }
+/**
+ * Slice 2.5 — durable TTL sweep. The sweep is the only authority for
+ * the `expired` status (ADR-0010 §2.5); lazy expiry during a decision
+ * attempt is forbidden. Returns the number of requests transitioned
+ * to `expired`.
+ *
+ * The sweep does NOT itself fail the corresponding Run — that wiring
+ * lives in slice 2.6 (reservation release order). Each expired
+ * request returns its durable record so the caller can drive the
+ * downstream Run failure (failureReason: 'approval_expired') in the
+ * same transaction as the durable expiry event (slice 2.6 §durable
+ * transition → event → release).
+ */
+export interface ApprovalTTLSweepOptions {
+  /** Injectable wall-clock; tests use a deterministic clock. */
+  now?: number
+  /** Max records to expire per sweep tick; default `Number.POSITIVE_INFINITY`. */
+  limit?: number
+}
+
+export async function runApprovalTTLSweep(
+  store: ApprovalStore,
+  opts: ApprovalTTLSweepOptions = {},
+): Promise<readonly ApprovalRequest[]> {
+  const limit = opts.limit ?? Number.POSITIVE_INFINITY
+  const now = opts.now ?? Date.now()
+  const pending = await store.listPending({ now, limit: Number.POSITIVE_INFINITY })
+  const expired: ApprovalRequest[] = []
+  for (const request of pending) {
+    if (request.absoluteExpiry > now) continue
+    if (expired.length >= limit) break
+    const outcome = await store.expire(request.id, now)
+    if (outcome.outcome === 'decided') {
+      expired.push(outcome.request)
+    }
+  }
+  return expired
+}

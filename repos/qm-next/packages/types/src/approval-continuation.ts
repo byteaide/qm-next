@@ -53,10 +53,19 @@ export interface ApprovalRequest {
   attemptId: string
   /** Strict principal equality check on decision; only the requester may decide. */
   requesterPrincipalId: string
-  /** TTL the request was created with. */
+  /** Current TTL the request carries; renewable up to but not past `absoluteExpiry`. */
   ttlMs: number
+  /**
+   * Slice 2.5 — `maxTtlMs` is the deployment's hard upper bound,
+   * recorded on the Approval Request at creation time and never
+   * mutated. `absoluteExpiry` derives from this value:
+   * `absoluteExpiry = createdAt + maxTtlMs`.
+   */
+  maxTtlMs: number
   /** Wall-clock absolute expiry; renewal never extends past this. */
   absoluteExpiry: number
+  /** Cumulative number of renewals applied to this request (audit). */
+  renewalCount?: number
   status: ApprovalRequestStatus
   /** Wall-clock creation time; recorded so replay can verify the absolute expiry. */
   createdAt: number
@@ -75,6 +84,15 @@ export type ApprovalDecisionOutcome =
   | { outcome: 'expired'; request: ApprovalRequest }
   | { outcome: 'not_found' }
 
+/** Outcome of a renewal attempt (slice 2.5). */
+export type ApprovalRenewalOutcome =
+  | { outcome: 'renewed'; request: ApprovalRequest }
+  | { outcome: 'forbidden'; request: ApprovalRequest }
+  | { outcome: 'expired'; request: ApprovalRequest }
+  | { outcome: 'already_decided'; request: ApprovalRequest }
+  | { outcome: 'not_found' }
+  | { outcome: 'no_op'; reason: 'ttl_already_at_max'; request: ApprovalRequest }
+
 /** Input for creating an Approval Request (slice 2.3). */
 export interface ApprovalRequestInput {
   /** Stable id; default allocator in `ApprovalStore.create`. */
@@ -83,8 +101,19 @@ export interface ApprovalRequestInput {
   attemptId: string
   /** Original requester principal id — only they may decide (ADR-0012). */
   requesterPrincipalId: string
-  /** TTL the request is created with; default `APPROVAL_DEFAULT_TTL_MS`. */
+  /**
+   * TTL the request is created with; default `APPROVAL_DEFAULT_TTL_MS`.
+   * `absoluteExpiry = createdAt + maxTtlMs`, where `maxTtlMs` defaults
+   * to this same value when not specified. Slice 2.5 separates the
+   * two so renewal can extend `ttlMs` up to but not past the recorded
+   * `maxTtlMs` / `absoluteExpiry`.
+   */
   ttlMs?: number
+  /**
+   * Slice 2.5 — explicit deployment-max TTL. Defaults to `ttlMs` when
+   * absent. Recorded at creation time; never mutated.
+   */
+  maxTtlMs?: number
   /** Snapshot of the Suspended Attempt the Approval resumes (ADR-0010). */
   attemptState: AttemptState
   /** Stable command-request id; the resumer MUST replay by `commandRequestId`, not raw text. */
@@ -134,5 +163,14 @@ export interface ApprovalStore {
    * forbidden (ADR-0010 §2.5).
    */
   expire(requestId: string, now?: number): Promise<ApprovalDecisionOutcome>
+  /**
+   * Slice 2.5 — extend the current TTL on a pending request. The new
+   * `ttlMs` is clamped at `absoluteExpiry`; renewals never extend past
+   * the absolute expiry (which is `createdAt + maxTtlMs`). Only the
+   * original requester may renew. A renewal after `absoluteExpiry`
+   * returns `expired`; a renewal that would not change anything
+   * returns `no_op`.
+   */
+  renew(requestId: string, renewal: { newTtlMs: number; renewedBy: string; now?: number }): Promise<ApprovalRenewalOutcome>
   close?(): Promise<void>
 }
