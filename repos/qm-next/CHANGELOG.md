@@ -241,3 +241,16 @@ P5 重新洗牌为四条车道（详见 `todo/tasks/tasks-qm-parity.md` §P5）�
   阶梯（缺 scope 400 / 无授权 403，admin 面无 401 级）。
 - **验证**：`pnpm test:pg` 全绿（新增 durable-wiring 端到端表清单断言、
   delivery-queue-pg 契约对拍）；备份还原演练 PASS。
+
+### 真机回归证据（2026-09-19）
+
+v1.0.0 + Phase 3F（S45 深覆盖 + OAuth connector trim + consent audience
+gate）后续工作后，飞书 e2e 三腿复跑（与 v0.1.0 时期 17.1 同剧本）：
+
+- Leg 1 卡片点击：`Approve: e2e-approval-1` ✅ / `Reject: e2e-approval-2` ✅ / 重复点同卡静默去重 ✅
+- Leg 2 ambient 真频道：`hello` → `echo: hello` ✅
+- Leg 3 cron fire：`!run e2e cron fire` 一次性投递 ✅
+- SIGTERM 关停：profile 树干净卸载，无 stack trace ✅
+
+证据 `docs/e2e-feishu-2026-09-19.log`（pnpm 管道缓冲已落盘的终态文件日志）。
+`pnpm check:im` 通过 — Phase 3F 改动未污染 IM 符号隔离。

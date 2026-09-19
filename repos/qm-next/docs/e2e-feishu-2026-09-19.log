@@ -1,0 +1,16 @@
+2026-09-19T02:45:11.320Z im-e2e: booted, api 127.0.0.1:60554, healthz 200
+2026-09-19T02:45:11.321Z im-e2e: ambient OFF for now (set E2E_AMBIENT_CONTAINER to pin it; auto-arm enables it for the first observed chat)
+2026-09-19T02:45:11.482Z im-e2e: chat listing unavailable: Request failed with status code 400
+2026-09-19T02:45:11.484Z im-e2e: cron OFF for now (set E2E_CRON_CHAT to pin it; auto-arm schedules it for the first observed chat)
+2026-09-19T02:45:11.484Z im-e2e: leg 1 — @机器人 with !approval; expect the card, then click Approve/Reject and watch the follow-up echo
+2026-09-19T02:45:11.484Z im-e2e: auto-arm on — send ANY @bot message and legs 2+3 arm for that chat
+2026-09-19T02:46:15.843Z im-e2e: run d3dd4f9d-4330-47c0-94ba-77518a0c7839 terminal surface=feishu origin=human status=done result=ok reply="echo: hi" threadRef=feishu:oc_d5c03fca10e4425f0bc24ce746e05326
+2026-09-19T02:46:15.845Z im-e2e: leg 2 ARMED — ambient on for feishu:oc_d5c03fca10e4425f0bc24ce746e05326 (keyword '*'); send a NON-mention message and the bot replies
+2026-09-19T02:46:15.846Z im-e2e: leg 3 ARMED — cron 1b1bee54adcb0940bb6745a9 fires once ~20s from now into oc_d5c03fca10e4425f0bc24ce746e05326; expect 'e2e echo: !run e2e cron fire' there
+2026-09-19T02:46:36.752Z im-e2e: run 5fb0f2cd-9f63-4af7-82eb-ae8da42220c5 terminal surface=cron origin=automation status=done result=ok reply="echo: !run e2e cron fire" threadRef=cron:3c166a22dcd8
+2026-09-19T02:47:10.940Z im-e2e: run 4c6870cd-ea5b-48e4-b534-1c0a5270d17c terminal surface=feishu origin=ambient status=done result=ok reply="echo: hello" threadRef=feishu:oc_d5c03fca10e4425f0bc24ce746e05326
+2026-09-19T02:48:48.098Z im-e2e: run 242d5d31-9db6-4cdd-a4de-d5ba24accaa1 terminal surface=feishu origin=human status=done result=pending_approval pendingApprovals=1 threadRef=feishu:oc_d5c03fca10e4425f0bc24ce746e05326
+2026-09-19T02:48:53.947Z im-e2e: run ec4e2866-f45b-47ae-a81d-8a325228110c terminal surface=feishu origin=human status=done result=ok reply="echo: Approve: e2e-approval-1" threadRef=feishu:oc_d5c03fca10e4425f0bc24ce746e05326
+2026-09-19T02:49:28.891Z im-e2e: run 203925a7-a691-43ae-8c5c-30f9e754303e terminal surface=feishu origin=human status=done result=pending_approval pendingApprovals=1 threadRef=feishu:oc_d5c03fca10e4425f0bc24ce746e05326
+2026-09-19T02:49:37.422Z im-e2e: run 16a3da0a-073b-42f2-9e3f-c5382d4f439f terminal surface=feishu origin=human status=done result=ok reply="echo: Reject: e2e-approval-2" threadRef=feishu:oc_d5c03fca10e4425f0bc24ce746e05326
+2026-09-19T02:50:30.285Z im-e2e: SIGTERM received, unmounting profile tree
