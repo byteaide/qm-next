@@ -20,6 +20,8 @@ import type {
   RunEventBus,
   RunStore,
   SessionStore,
+  TargetRunEvent,
+  TargetRunObservation,
   TurnApproval,
   TurnInput,
 } from '@qm/types'
@@ -54,6 +56,8 @@ export interface WebUiDeps {
   publicUrl?: string
   /** Identity verification + principal allow-list (qm WEB_UI hardening). */
   auth?: AuthOptions
+  /** Phase 1 slice 1.4 — Run Observation port (snapshot/replay/subscribe). */
+  runObservation?: TargetRunObservation
 }
 
 export interface WebUiServerOptions {
@@ -468,6 +472,86 @@ export function createWebUiServer(deps: WebUiDeps, opts: WebUiServerOptions): Fa
     }, SSE_HEARTBEAT_MS)
     heartbeat.unref?.()
   })
+
+  // Phase 1 slice 1.4 — Run Observation routes (mirror the API
+  // surface but consume `TargetRunObservation` directly in-process so
+  // web-ui does not need to relay through the API gateway). The
+  // browser-side runs the existing `/api/runs/:id/events` legacy
+  // stream during the migration window; the observation routes give
+  // new clients the typed envelope (ADR-0014 §2 + ADR-0013).
+  if (deps.runObservation) {
+    app.get('/api/runs/:id/observation/snapshot', async (req, reply) => {
+      const user = authed(req)
+      if (!user) return unauthorized(reply)
+      const id = (req.params as { id: string }).id
+      const initial = await deps.runs!.get(id)
+      if (!initial) return notFound(reply)
+      const snap = await deps.runObservation!.snapshot(id, {
+        sessionId: initial.sessionId,
+        callerPrincipalId: user,
+        scope: 'principal',
+      })
+      if (!snap) return notFound(reply)
+      return reply.code(200).send(snap)
+    })
+
+    app.get('/api/runs/:id/observation/replay', async (req, reply) => {
+      const user = authed(req)
+      if (!user) return unauthorized(reply)
+      const id = (req.params as { id: string }).id
+      const query = req.query as Record<string, string | undefined>
+      const afterStr = query.after
+      const after = afterStr === undefined ? -1 : Number.parseInt(afterStr, 10)
+      if (!Number.isInteger(after) || after < -1) {
+        return reply.code(400).send({ error: 'bad_request', message: '`after` must be an integer >= -1' })
+      }
+      const initial = await deps.runs!.get(id)
+      if (!initial) return notFound(reply)
+      const events = await deps.runObservation!.replay(
+        { runId: id, seq: after },
+        { sessionId: initial.sessionId, callerPrincipalId: user, scope: 'principal' },
+      )
+      return reply.code(200).send(events)
+    })
+
+    app.get('/api/runs/:id/observation/subscribe', async (req, reply) => {
+      const user = authed(req)
+      if (!user) return unauthorized(reply)
+      const id = (req.params as { id: string }).id
+      const query = req.query as Record<string, string | undefined>
+      const afterStr = query.after
+      const after = afterStr === undefined ? -1 : Number.parseInt(afterStr, 10)
+      if (!Number.isInteger(after) || after < -1) {
+        return reply.code(400).send({ error: 'bad_request', message: '`after` must be an integer >= -1' })
+      }
+      const initial = await deps.runs!.get(id)
+      if (!initial) return notFound(reply)
+      reply.hijack()
+      sseHead(reply)
+      const raw = reply.raw
+      let closed = false
+      req.raw.on('close', () => {
+        closed = true
+      })
+      const beat = setInterval(() => {
+        if (!closed) sseComment(raw, 'ping')
+      }, SSE_HEARTBEAT_MS)
+      beat.unref?.()
+      const unsubscribe = deps.runObservation!.subscribe(
+        { runId: id, seq: after },
+        { sessionId: initial.sessionId, callerPrincipalId: user, scope: 'principal' },
+        (event: TargetRunEvent) => {
+          if (closed) return
+          sseEvent(raw, 'run_observation', event)
+        },
+      )
+      req.raw.on('close', () => {
+        beat.unref?.()
+        clearInterval(beat)
+        unsubscribe()
+      })
+    })
+  }
 
   app.get('/api/sessions', async (req, reply) => {
     const user = authed(req)
