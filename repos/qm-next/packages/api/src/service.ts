@@ -59,7 +59,7 @@ import {
   type CustomProviderStore,
   type ModelCredentialStore,
 } from '@qm/model'
-import { createMemoryScopeMemory } from '@qm/memory'
+import { createMemoryScopeMemory, type ScopeMemory } from '@qm/memory'
 import { createMcpServerStore, createMcpToolService, type McpServerStore, type McpToolService } from '@qm/mcp'
 import {
   createBrowserSessionStore,
@@ -70,7 +70,7 @@ import {
   type OAuthFlowStore,
 } from '@qm/connectors'
 import { createDrainController, createMemorySessionStateBus, createPostgresInstanceRegistry, createReaper, type DrainController, type Reaper } from '@qm/runs'
-import { createMemorySkillStore } from '@qm/skills'
+import { createMemorySkillStore, type SkillStore } from '@qm/skills'
 import type { RuntimeRouteConfig } from '@qm/orchestrator'
 import { createHarnessRouter, createMockHarness, createSandboxToolContext, OrchestratorService } from '@qm/orchestrator'
 import Schema from '@qm/schemastery'
@@ -133,6 +133,42 @@ import type {
 } from '@qm/types'
 import { createApiServer } from './server.ts'
 import { createTurnRunner } from './runner.ts'
+
+export interface ApiConfig {
+  /** Listen port; 0 picks a free port. */
+  port?: number
+  /** Listen host. */
+  host?: string
+}
+
+/**
+ * Late-binding store proxy (parity with cronsRuntime).
+ *
+ * The memory / skill route tables capture the in-memory fallback store at
+ * wire-up time. Tests inject Postgres twins via `api.memoryStore` /
+ * `api.skillStore` *after* boot. To route every call to whichever store is
+ * live at request time, wrap the fallback in a Proxy that resolves
+ * `getCurrent()` per access. Method calls are bound to the live target so
+ * `this`-style implementations (rare on these stores) keep working.
+ *
+ * `close` is intentionally not proxied — the dispose path uses
+ * `this.memoryStore?.close()` directly so it never accidentally closes a
+ * pre-boot fallback.
+ */
+function lateBindingStore<T extends object>(
+  getCurrent: () => T | undefined,
+  fallback: T,
+): T {
+  return new Proxy(fallback, {
+    get(target, prop, _receiver) {
+      if (prop === 'close') return undefined
+      const live = getCurrent() ?? target
+      const value = Reflect.get(live, prop, live)
+      if (typeof value === 'function') return value.bind(live)
+      return value
+    },
+  }) as T
+}
 
 export interface ApiConfig {
   /** Listen port; 0 picks a free port. */
@@ -455,6 +491,18 @@ export class ApiService extends Service<ApiConfig> {
   cronsRuntime?: { crons: CronStore; scheduler?: CronScheduler; deliveries?: ImDeliveryQueue } | undefined
 
   /**
+   * Memory / Skill store injection seam (parity with cronsRuntime).
+   * Production keeps the in-memory defaults; tests inject Postgres twins
+   * via qa-smoke-wave2 to close the S42 SKIPs (memory/skill pg twin).
+   * Late injection (after boot) is fine — the route tables are wired
+   * after [Service.init] returns, and the stores are read on every request.
+   * Dispose closes injected stores (skipped when undefined so production
+   * default lifecycle is unaffected).
+   */
+  memoryStore?: ScopeMemory
+  skillStore?: SkillStore
+
+  /**
    * Ambient ingredients (14.0): the default harness's judge port for the
    * IM ambient slice, plus the judgment/cursor stores (durable when
    * databaseUrl is set) and the shared channel-policy store. The
@@ -710,8 +758,10 @@ export class ApiService extends Service<ApiConfig> {
           orgId: () => orgId,
         })
       : undefined
-    const memoryStore = this.config.memory ? createMemoryScopeMemory() : undefined
-    const skillStore = this.config.skills ? createMemorySkillStore() : undefined
+    const memoryStore: ScopeMemory | undefined = this.memoryStore
+      ?? (this.config.memory ? createMemoryScopeMemory() : undefined)
+    const skillStore: SkillStore | undefined = this.skillStore
+      ?? (this.config.skills ? createMemorySkillStore() : undefined)
     const contextQueue = this.config.context ? createSurfaceContextQueue() : undefined
     const channelPolicyStore =
       this.config.context || this.config.surfaceCache
@@ -935,6 +985,14 @@ export class ApiService extends Service<ApiConfig> {
     const skillPackStore = this.config.skillPacks ? createMemorySkillPackStore() : undefined
     const userModelCredentials = this.config.userModelAuth ? createMemoryUserModelCredentialsStore() : undefined
     const secretDropStore = this.config.secretDrops ? createMemorySecretDropStore() : undefined
+    // Late-binding wrappers (parity with cronsRuntime): tests inject Postgres
+    // twins via this.memoryStore / this.skillStore *after* boot, so the routes
+    // (which captured the in-memory fallback at wire-up time) need a proxy that
+    // resolves the live store on each call. Properties / methods both forward;
+    // `close()` is intentionally NOT proxied — dispose uses this.memoryStore
+    // directly so it never accidentally closes a pre-boot store.
+    const memoryStoreProxy = memoryStore ? lateBindingStore(() => this.memoryStore, memoryStore) : undefined
+    const skillStoreProxy = skillStore ? lateBindingStore(() => this.skillStore, skillStore) : undefined
     const app = createApiServer(
       {
         orchestrator,
@@ -951,8 +1009,8 @@ export class ApiService extends Service<ApiConfig> {
         },
         ...(directoryStore ? { directory: { directory: directoryStore }, reach: { directory: directoryStore } } : {}),
         ...(keychain ? { keychain: { keychain: () => keychain, scopeFor: (actorId) => `personal:${actorId}` } } : {}),
-        ...(memoryStore ? { memory: { memory: memoryStore, scopeFor: () => this.config.scopeId ?? 'org:default' } } : {}),
-        ...(skillStore ? { skills: { skills: skillStore, scopeFor: () => this.config.scopeId ?? 'org:default' } } : {}),
+        ...(memoryStoreProxy ? { memory: { memory: memoryStoreProxy, scopeFor: () => this.config.scopeId ?? 'org:default' } } : {}),
+        ...(skillStoreProxy ? { skills: { skills: skillStoreProxy, scopeFor: () => this.config.scopeId ?? 'org:default' } } : {}),
         ...(contextQueue
           ? {
               context: { queue: contextQueue },
@@ -1160,6 +1218,12 @@ export class ApiService extends Service<ApiConfig> {
         } catch (err) {
           void err
         }
+      }
+      if (this.memoryStore?.close) {
+        try { await this.memoryStore.close() } catch (err) { void err }
+      }
+      if (this.skillStore?.close) {
+        try { await this.skillStore.close() } catch (err) { void err }
       }
       if (pg) await pg.close().catch(() => undefined)
     }

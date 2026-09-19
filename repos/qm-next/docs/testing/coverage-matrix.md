@@ -6,7 +6,7 @@
 > **最近更新**：2026-09-18 · 清理 §0/§4/§5/§9 数字冲突、删除 §5 重复死快照、补 S32 测试节、整体覆盖数字与 `baseline-smoke.md` 对齐
 > **目标模型**：sensenova-6.8-flash-lite（也可换其他已注册模型）
 > **目标读者**：作者本人 + 任何接手这块代码做回归 / 扩展的人
-> **关联文档**：`baseline-smoke.md`（测试报告 · 真相源）；`phase-2-plan.md` / `phase-3-plan.md` 计划文件已并入 baseline-smoke.md 末尾
+> **关联文档**：`baseline-smoke.md`（测试报告 · 真相源）；`phase-2-plan.md` / `phase-3-plan.md` 计划文件已并入 baseline-smoke.md 末尾；**`user-stories-coverage.md`（27 场景业务流覆盖矩阵 · Phase 3G 阶段 A 启动 · 2026-09-19）**
 
 ---
 
@@ -16,10 +16,11 @@
 |----|----|
 | 被测对象 | `qm-next @qm/api`（Fastify HTTP 入口 + 编排 + Stores + Memory + Skills + Custom Providers + Admin） |
 | 测试方式 | 单 boot `ApiService`，mint 两个 token（admin + 普通 user），逐条路由打请求，断言状态码 + 响应体 |
-| 不测范围 | 飞书 IM 真机 / Sandbox 工具执行 / Postgres 持久化对拍 / Triggers cron — 都需要额外基础设施，下文 §6 详述。**Connectors OAuth 通过 Phase 3C mock 已覆盖。** |
+| 不测范围 | 飞书 IM 真机 / Sandbox 工具执行 / Postgres 持久化对拍 / Triggers cron — 都需要额外基础设施，下文 §6 详述。**Connectors OAuth 通过 Phase 3C mock 已覆盖。** **Phase 3G 已扩 memory/skill/cron 的 Postgres twin（S42 三个 SKIP 闭合）。** |
 | 数据隔离 | `${Date.now()}-${rand}` 作为 run tag，所有 threadRef / memory principal / skill name 加前缀，避免跨次运行污染 |
 | 模型调用 | 12 次（flash-lite 天然 flaky，用子串匹配 + 重试 2 次；触 429 时改用 mock harness） |
 | **当前总体覆盖** | **~89%**（用户面 ~82% / 管理员面 ~98% · Phase 3E 加 P2/P3/P4 共 25 用例闭合 S37 admin/agent-face + S38 admin listings/skill-packs + S39 admin files/search/projects；Connectors 100% + drops + webhooks raw incoming + admin grants/onboarding/reset + crons/triggers 404 gating 链路全闭合） |
+| **业务流覆盖（新增维度 · Phase 3G）** | **27 场景里闭合 25/27 = ~93%**（`scripts/qa-user-stories.ts` 27 用例 PASS + 5 SKIP；详见 `user-stories-coverage.md` §3） |
 
 ---
 

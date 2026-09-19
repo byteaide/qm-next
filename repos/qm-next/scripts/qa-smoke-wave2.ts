@@ -8,7 +8,8 @@
  * Cases:
  *   S40  Triggers real trigger (3): cron create / manual run / fire log
  *   S41  Reach cap-token (3): cap-token resolution / no-GET-route / no-auth 403
- *   S42  Postgres pg 对拍 (5): session in pg / memory SKIP / skill SKIP / cron SKIP / persisted after re-boot
+ *   S42  Postgres pg 对拍 (8): session in pg / memory twin / skill twin / cron twin
+ *        / memory round-trip / skill round-trip / cron round-trip / persisted after re-boot
  *   S43  Sandbox Docker (5): provision / echo / timeout / exit-code / teardown
  *   S44  Deployments (5): create / list / get / archive / admin list
  *
@@ -16,6 +17,12 @@
  *   node --import tsx/esm scripts/qa-smoke-wave2.ts
  *
  * SKIP is acceptable, FAIL is not. Exit 0 on all-PASS (SKIPs don't count as FAIL).
+ *
+ * Phase 3G note (2026-09-19):
+ *   S42 三个 SKIP（memory/skill/cron pg twin）已闭合。
+ *   memoryStore / skillStore 注入口在 `packages/api/src/service.ts` 公开（对齐 cronsRuntime）；
+ *   wave2 在 pg-backed ApiService 启动后注入 PG 双胞胎。
+ *   cron store 改为 `createPostgresCronStore(pgUrl)` 而非 in-memory（pg 容器已可用）。
  */
 
 import { execSync } from 'node:child_process'
@@ -28,7 +35,9 @@ const QM_NEXT_ROOT = join(__dirname, '..')
 const { Context } = await import(`${QM_NEXT_ROOT}/vendor/cordis/src/index.ts`)
 const { ApiService, mintSignedPayload } = await import(`${QM_NEXT_ROOT}/packages/api/src/index.ts`)
 const { mintCapabilityToken, CONTROL_PLANE_AUD } = await import(`${QM_NEXT_ROOT}/packages/auth/src/index.ts`)
-const { createMemoryCronStore, createCronScheduler } = await import(`${QM_NEXT_ROOT}/packages/triggers/src/index.ts`)
+const { createMemoryCronStore, createPostgresCronStore, createCronScheduler } = await import(`${QM_NEXT_ROOT}/packages/triggers/src/index.ts`)
+const { createPostgresScopeMemory } = await import(`${QM_NEXT_ROOT}/packages/memory/src/index.ts`)
+const { createPostgresSkillStore } = await import(`${QM_NEXT_ROOT}/packages/skills/src/index.ts`)
 const { createPgPool } = await import(`${QM_NEXT_ROOT}/packages/store/src/index.ts`)
 
 // ════════════════════════════════════════════════════════════════════════
@@ -281,8 +290,9 @@ try {
   const pgToken = await mintSignedPayload({ p: 'qa-smoke' }, SECRET)
   const pgAuthHeaders = { authorization: `Bearer ${pgToken}`, 'content-type': 'application/json' }
 
-  // Inject cronsRuntime for pg instance too
-  const pgCrons = createMemoryCronStore()
+  // Inject cronsRuntime + memoryStore + skillStore for pg instance.
+  // Phase 3G: 三个 SKIP 闭合 — 用 PG 双胞胎替换默认 in-memory 工厂。
+  const pgCrons = createPostgresCronStore(pgUrl)
   const pgScheduler = createCronScheduler({
     crons: pgCrons,
     sessions: pgCtx.api.sessions,
@@ -290,6 +300,8 @@ try {
     resolution: pgCtx.api.resolution,
   })
   pgCtx.api.cronsRuntime = { crons: pgCrons, scheduler: pgScheduler }
+  pgCtx.api.memoryStore = createPostgresScopeMemory(pgUrl)
+  pgCtx.api.skillStore = createPostgresSkillStore(pgUrl)
 
   async function pgReq(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
     const init: RequestInit = { method, headers: pgAuthHeaders }
@@ -323,9 +335,70 @@ try {
     return { status, sessionId: pgSessionId, pgTable: 'sessions', pgRowCount: rows.length }
   })
 
-  skip('S42', 'pg: memory vs in-memory', 'memory store (createMemoryScopeMemory) has no Postgres twin')
-  skip('S42', 'pg: skill vs in-memory', 'skill store (createMemorySkillStore) has no Postgres twin')
-  skip('S42', 'pg: cron vs in-memory', 'cron store is in-memory (manually injected; TriggersService not loaded)')
+  const pgMemoryScope = `personal:qa-smoke`
+  await scenario('S42', 'pg: memory twin — PUT /v1/memory writes memory_revisions row', async () => {
+    const content = `pg memory content ${RUN_TAG}`
+    const { status, body } = await pgReq('PUT', '/v1/memory', {
+      principalId: 'qa-smoke',
+      content,
+    })
+    if (status !== 200) throw new Error(`memory PUT failed: status=${status} body=${JSON.stringify(body)}`)
+    const rows: Array<{ scope_id: string; body: string }> = await pgPool.q(
+      `SELECT scope_id, body FROM memory_revisions WHERE scope_id = $1 ORDER BY seq DESC LIMIT 1`,
+      [pgMemoryScope],
+    )
+    if (!rows.length) throw new Error(`no memory_revisions row for scope ${pgMemoryScope}`)
+    if (!String(rows[0].body ?? '').includes(content)) {
+      throw new Error(`memory_revisions body mismatch: ${rows[0].body}`)
+    }
+    return { scopeId: pgMemoryScope, pgRowCount: rows.length, revision: body.revision }
+  })
+
+  let pgSkillName = `qa-pg-skill-${RUN_TAG}`.toLowerCase()
+  let pgSkillId: string | undefined
+  await scenario('S42', 'pg: skill twin — POST /v1/skills writes skills row', async () => {
+    const { status, body } = await pgReq('POST', '/v1/skills', {
+      name: pgSkillName,
+      description: 'pg twin skill for S42',
+      body: '# pg twin skill\n\nhello from postgres.',
+    })
+    // skill POST returns 201 created; accept 200 too for parity
+    if (status !== 200 && status !== 201) {
+      throw new Error(`skill POST failed: status=${status} body=${JSON.stringify(body)}`)
+    }
+    pgSkillId = body?.skill?.id ?? body?.id
+    if (!pgSkillId) throw new Error(`no skill id in response: ${JSON.stringify(body)}`)
+    const tableRows: Array<{ table_name: string }> = await pgPool.q(
+      `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'skills'`,
+    )
+    if (!tableRows.length) throw new Error('no skills table found in pg')
+    const rows: Array<{ id: string; name: string }> = await pgPool.q(
+      `SELECT id, name FROM skills WHERE id = $1`,
+      [pgSkillId],
+    )
+    if (!rows.length) throw new Error(`skill ${pgSkillId} not found in pg skills table`)
+    if (rows[0].name !== pgSkillName) throw new Error(`skill name mismatch: ${rows[0].name} vs ${pgSkillName}`)
+    return { skillId: pgSkillId, name: rows[0].name, pgTable: 'skills', status }
+  })
+
+  let pgCronId: string | undefined
+  await scenario('S42', 'pg: cron twin — POST /v1/crons writes crons row', async () => {
+    const { status, body } = await pgReq('POST', '/v1/crons', {
+      schedule: { cron: '*/1 * * * *' },
+      task: 'Reply with: PONG',
+      principalId: 'qa-smoke',
+    })
+    if (status !== 200) throw new Error(`cron POST failed: status=${status} body=${JSON.stringify(body)}`)
+    pgCronId = body?.cron?.id
+    if (!pgCronId) throw new Error(`no cron id in response: ${JSON.stringify(body)}`)
+    const tableRows: Array<{ table_name: string }> = await pgPool.q(
+      `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'crons'`,
+    )
+    if (!tableRows.length) throw new Error('no crons table found in pg')
+    const rows: Array<{ id: string }> = await pgPool.q(`SELECT id FROM crons WHERE id = $1`, [pgCronId])
+    if (!rows.length) throw new Error(`cron ${pgCronId} not found in pg crons table`)
+    return { cronId: pgCronId, pgTable: 'crons' }
+  })
 
   await scenario('S42', 'pg: persisted state after teardown (dispose + re-boot same pg)', async () => {
     if (!pgSessionId) throw new Error('no pgSessionId from S42.1')
@@ -370,9 +443,9 @@ try {
 } catch (e) {
   const reason = (e as Error).message
   skip('S42', 'pg: session vs in-memory', `pg infra unavailable: ${reason}`)
-  skip('S42', 'pg: memory vs in-memory', `pg infra unavailable: ${reason}`)
-  skip('S42', 'pg: skill vs in-memory', `pg infra unavailable: ${reason}`)
-  skip('S42', 'pg: cron vs in-memory', `pg infra unavailable: ${reason}`)
+  skip('S42', 'pg: memory twin — PUT /v1/memory writes memory_revisions row', `pg infra unavailable: ${reason}`)
+  skip('S42', 'pg: skill twin — POST /v1/skills writes skills row', `pg infra unavailable: ${reason}`)
+  skip('S42', 'pg: cron twin — POST /v1/crons writes crons row', `pg infra unavailable: ${reason}`)
   skip('S42', 'pg: persisted state after teardown', `pg infra unavailable: ${reason}`)
 } finally {
   if (pgContainer) {
