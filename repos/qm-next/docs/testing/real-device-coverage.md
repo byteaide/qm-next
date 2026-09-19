@@ -1,8 +1,10 @@
-# qm-next Real-Device Coverage — Phase 3I
+# qm-next Real-Device Coverage — Phase 3I / 3J / 3K
 
 > **目的**：诚实记录阶段 C 闭合的"真机层"覆盖 — 哪些 SKIP 已经能闭合、哪些仍然永久 🚫、为什么。
 >
-> **生成时间**：2026-09-19 · **阶段 C 完成**（Phase 3I）
+> **生成时间**：2026-09-19 · **阶段 C 完成**（Phase 3I · 真机层 + classifier 注入）
+> **阶段 D 完成**（Phase 3J · sandbox command-policy engine guard）
+> **阶段 E 完成**（Phase 3K · CI 集成 `pnpm test:all`）
 > **关联文档**：
 > - `user-stories-coverage.md`（27 场景业务流覆盖矩阵 · Phase 3G 阶段 A）
 > - `cli-coverage.md`（operator CLI 6 场景覆盖矩阵 · Phase 3H 阶段 B）
@@ -212,21 +214,105 @@ DROP TABLE 是 SQL DDL 不是 shell 命令。**正确闭合路径**不是 sandbo
 | `packages/api/src/server.ts` | 加 `security?: SecurityRoutesDeps` 到 `ApiDeps` + 注册路由 |
 | `packages/api/src/routes/security-routes.ts` (新) | `POST /v1/security/screen` + `GET` 探测 |
 | `packages/api/package.json` | 加 `@qm/security` workspace 依赖 |
-| `scripts/qa-user-stories.ts` | mock screener + cronsRuntime 注入 + 3 个新用例（§U18.2 / §U25.2 / §U26.2）+ 2 个 SKIP 重写说明 |
+| `packages/sandbox/src/policy.ts` (新) | `CommandPolicy` 评估器（Phase 3J） |
+| `packages/sandbox/src/default-policy.ts` (新) | 10 个 catastrophic patterns（Phase 3J） |
+| `packages/sandbox/src/local-sandbox.ts` | 加 `LocalSandboxOptions.policy` + `run` gate（Phase 3J） |
+| `packages/types/src/sandbox.ts` | 加 `ExecOptions.throwOnPolicy`（Phase 3J） |
+| `scripts/qa-user-stories.ts` | mock screener + cronsRuntime 注入 + 4 个新用例（§U18.2 / §U25.2 / §U26.1 / §U26.2）+ 2 个 SKIP 重写说明 |
 | `scripts/qa-sandbox-real.ts` (新) | 5 个真机隔离用例 — `createLocalSandbox()` 直接调用 |
-| `docs/testing/baseline-smoke.md` | §4 阶段演进表加 Phase 3I row |
-| `docs/testing/coverage-matrix.md` | §0 元数据加 Phase 3I 业务流维度行 |
+| `scripts/qa-sandbox-policy.ts` (新) | 29 用例：14 unit + 3 allowlist + 1 approval + 5 真机 docker + 6 negative path（Phase 3J） |
+| `scripts/run-all-tests.ts` (新 · Phase 3K) | Orchestrator：依次跑 6 个 qa-*.ts、聚合报表、聚合 exit code |
+| `package.json` | `pnpm test:all` + 5 个 `pnpm test:*` 子命令（Phase 3K） |
+| `docs/testing/baseline-smoke.md` | §4 阶段演进表加 Phase 3I / 3J / 3K row |
+| `docs/testing/coverage-matrix.md` | §0 元数据加 Phase 3I / 3J 业务流维度行 |
 
 ---
 
-## 9. 阶段 C 末立刻要做的最小行动
+## 9. CI 集成（Phase 3K · 2026-09-19）
+
+`scripts/run-all-tests.ts` 是 6 个 qa 套件的 orchestrator。一次 `pnpm test:all` 跑完所有可执行套件，输出聚合报表 + 单个 exit code。
+
+### 9.1 套件运行顺序
+
+从快到慢、从孤立到依赖：
+
+1. `qa-cli`（11 用例 · ~3s · 无 docker）— Phase 3H operator CLI 表面
+2. `qa-user-stories`（31 用例 · ~1s · mock harness）— Phase 3G/I/J 业务流
+3. `qa-sandbox-policy`（29 用例 · ~2s · 24 unit + 5 真机 docker）— Phase 3J
+4. `qa-sandbox-real`（5 用例 · ~1s · 真 docker）— Phase 3I
+5. `qa-smoke-wave2`（21 用例 · ~14s · docker pg + sandbox）— Phase 3E
+6. `qa-smoke`（235 用例 · ~5min · SENSENOVA_API_KEY）— Phase 3F
+
+设计原因：便宜且无外部依赖的套件先跑；昂贵 / 需要凭证的套件后跑。前面挂了不浪费 API 配额。
+
+### 9.2 Skip / fail 语义
+
+- `qa-smoke` 当 `SENSENOVA_API_KEY` 未设 → SKIP（脚本会硬退出，被 orchestrator 拦截并标记）
+- 其他套件 docker 不可用 / 沙箱 image 缺失 → self-skip（套件内部的 `skip()` helper 已经处理）
+- 任何套件 exit code ≠ 0 → FAIL；orchestrator 捕获 stdout 末 60 行 + stderr 末 30 行供调试
+- ANSI escape codes 在聚合前自动剥离（避免 `passed:  [32m11[0m` 这种正则漏匹配）
+
+### 9.3 单套件命令
+
+```bash
+pnpm test:all            # 全套
+pnpm test:cli            # 仅 qa-cli
+pnpm test:user-stories   # 仅 qa-user-stories
+pnpm test:smoke-wave2    # 仅 qa-smoke-wave2
+pnpm test:sandbox-real   # 仅 qa-sandbox-real
+pnpm test:sandbox-policy # 仅 qa-sandbox-policy
+```
+
+### 9.4 退出码
+
+- `0` 全部套件 PASS 或 SKIP，无 FAIL
+- `1` 任一套件 ≥1 FAIL
+- `2` orchestrator 自身崩溃（pre-flight 失败）
+
+### 9.5 当前结果（无 SENSENOVA_API_KEY，无 docker 限制）
+
+```
+qm-next · aggregated test report
+───────────────────────────────────────────────────────────────────────
+
+  Per-suite breakdown:
+    ✓ qa-cli               11/11 (fail=0 skip=0)                    3.7s
+    ✓ qa-user-stories      31/31 (fail=0 skip=1)                    813ms
+    ✓ qa-sandbox-policy    29/29 (fail=0 skip=0)                    1.8s
+    ✓ qa-sandbox-real      5/5 (fail=0 skip=0)                      778ms
+    ✓ qa-smoke-wave2       21/21 (fail=0 skip=0)                    12.8s
+    ⊘ qa-smoke             skip: SENSENOVA_API_KEY is not set
+
+  -- Aggregate --
+    suites:   6  (5 pass) (0 fail) (1 skip)
+    cases:    total=97  passed=97  failed=0  skipped=1
+    duration: 19.9s
+```
+
+**全套带 SENSENOVA_API_KEY 总时长 ~5min（qa-smoke 占大头），否则 ~21s。**
+
+---
+
+## 10. 阶段 C 末立刻要做的最小行动
 
 1. ✅ 已完成：本文件 + service.ts + security-routes.ts + server.ts + package.json + qa-user-stories.ts + qa-sandbox-real.ts + baseline-smoke.md
 2. ✅ 闭合 §U18.2（API 边界） + §U25.2（classifier 注入） + §U26.2（classifier 注入）
-3. ✅ 部分闭合 §U26.1（容器隔离）—— `qa-sandbox-real.ts` 5 用例 100% PASS
-4. 🔜 （可选）如果加飞书 tenant + app credentials：可闭合 §U24.2 完整路径（夜间 nightly）
-5. 🔜 （可选）如果加 engine-level command guard：可完全闭合 §U26.1
+3. ✅ 完全闭合 §U26.1（Phase 3J policy engine guard + 隔离）
+4. ✅ CI 集成（Phase 3K `pnpm test:all`）
+5. 🔜 （可选）如果加飞书 tenant + app credentials：可闭合 §U24.2 完整路径（凭证到手就跑，无需 nightly）
 6. 🔜 （可选）真机 deploy cron daemon：可完全闭合 §U18.2
+
+## 11. 验证记录
+
+| 命令 | 结果 |
+|------|------|
+| `pnpm typecheck` | ✓ |
+| `pnpm test:all`（无 SENSENOVA_API_KEY）| 5/6 套件 PASS · 1 SKIP · 0 FAIL · 97 用例 · ~21s |
+| `node --import tsx/esm scripts/qa-smoke-wave2.ts` | 21/21 PASS |
+| `node --import tsx/esm scripts/qa-user-stories.ts` | 30/30 PASS · 1 SKIP |
+| `node --import tsx/esm scripts/qa-cli.ts` | 11/11 PASS |
+| `node --import tsx/esm scripts/qa-sandbox-real.ts` | 5/5 PASS |
+| `node --import tsx/esm scripts/qa-sandbox-policy.ts` | 29/29 PASS |
 
 ## 10. 验证记录
 
