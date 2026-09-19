@@ -6,7 +6,7 @@
 > **最近更新**：2026-09-18 · 清理 §0/§4/§5/§9 数字冲突、删除 §5 重复死快照、补 S32 测试节、整体覆盖数字与 `baseline-smoke.md` 对齐
 > **目标模型**：sensenova-6.8-flash-lite（也可换其他已注册模型）
 > **目标读者**：作者本人 + 任何接手这块代码做回归 / 扩展的人
-> **关联文档**：`baseline-smoke.md`（测试报告 · 真相源）；`phase-2-plan.md` / `phase-3-plan.md` 计划文件已并入 baseline-smoke.md 末尾；**`user-stories-coverage.md`（27 场景业务流覆盖矩阵 · Phase 3G 阶段 A 启动 · 2026-09-19）**
+> **关联文档**：`baseline-smoke.md`（测试报告 · 真相源）；`phase-2-plan.md` / `phase-3-plan.md` 计划文件已并入 baseline-smoke.md 末尾；**`user-stories-coverage.md`（27 场景业务流覆盖矩阵 · Phase 3G 阶段 A 启动 · 2026-09-19）**；**`cli-coverage.md`（operator CLI 6 场景覆盖矩阵 · Phase 3H 阶段 B · 2026-09-19）**
 
 ---
 
@@ -21,6 +21,7 @@
 | 模型调用 | 12 次（flash-lite 天然 flaky，用子串匹配 + 重试 2 次；触 429 时改用 mock harness） |
 | **当前总体覆盖** | **~89%**（用户面 ~82% / 管理员面 ~98% · Phase 3E 加 P2/P3/P4 共 25 用例闭合 S37 admin/agent-face + S38 admin listings/skill-packs + S39 admin files/search/projects；Connectors 100% + drops + webhooks raw incoming + admin grants/onboarding/reset + crons/triggers 404 gating 链路全闭合） |
 | **业务流覆盖（新增维度 · Phase 3G）** | **27 场景里闭合 25/27 = ~93%**（`scripts/qa-user-stories.ts` 27 用例 PASS + 5 SKIP；详见 `user-stories-coverage.md` §3） |
+| **业务流覆盖（CLI 维度 · Phase 3H）** | **27 场景里闭合 26/27 = ~96%**（新增 `scripts/qm-next-ops.ts` + `scripts/qa-cli.ts` 闭合 1/2/3/4/6/7 共 11 用例 PASS；场景 5 永久 🚫 不部署云；详见 `docs/testing/cli-coverage.md` §4） |
 
 ---
 

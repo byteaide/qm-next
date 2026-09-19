@@ -36,7 +36,7 @@
 | 模型调用 | 0（业务流层走 mock harness；模型行为由 qa-smoke.ts 已验证） |
 | 当前业务流覆盖 | **12/27 ≈ 44%**（路由层可达，但部分只到 happy-path 一跳） |
 | 阶段 A 目标 | **25/27 ≈ 93%**（闭合 L2/L3 业务流；剩 2 场景需真机 L6/L7） |
-| 阶段 B 目标 | **26/27 ≈ 96%**（加 CLI 部署类 7 个场景） |
+| 阶段 B 目标 | **26/27 ≈ 96%**（加 CLI 部署类 6 个场景 — 1/2/3/4/6/7；场景 5 永久 🚫 不部署云）|
 | 阶段 C 目标 | **27/27 ≈ 100%**（加飞书真机 + sandbox 真机） |
 
 ---
@@ -75,18 +75,20 @@
 
 ### 2.1 CLI / 部署类（场景 1–7）
 
-qm-next CLI 沿 qm contract（`qm init / check / doctor / plan / up / admin-login / outputs /
-rollback / sandbox build+publish`）。本类全部需 B 阶段新增 `qa-cli.ts`。
+> **关键 finding**：qm-next **没有**继承上游 `qm` CLI 二进制；qm 上游的 `qm init / check /
+> doctor / plan / up / admin-login / outputs / rollback / sandbox build+publish` 9 个命令，
+> qm-next 通过 **`scripts/qm-next-ops.ts`（operator CLI）+ 既有的 `scripts/{check-im-isolation,
+> rescope-check, local-sandbox-build}.sh`** 拼装。详见 `docs/testing/cli-coverage.md`。
 
 | # | 场景 | 现状 | 对应测试节 / 用例 | 验收点 | 阶段 |
 |---|---|---|---|---|---|
-| 1 | **本地冷启动** — `qm up` docker 单机模式 | 🛑 | — | `core` + sandbox 容器 healthy；`qm doctor` 全绿 | B1+B4 |
-| 2 | **部署目录校验** — 改 `qm.config.jsonc` 看 schema 是否破 | ⏳ | `qa-cli.ts §B2` | 改坏时非零退出码 + JSON 错误位置 | B |
-| 3 | **基础设施预览**（无副作用） — `qm plan` / `qm infra render` | ⏳ | `qa-cli.ts §B7` | 生成 Terraform/Fly 配置；secrets 引用、镜像 digest 解析得到 | B |
-| 4 | **管理员登录**（无邮件） — `qm admin-login` 拿 5min URL | 🟨 | `qa-user-stories.ts §U1` | admin-login URL → 用 API 调 admin 路由 → 落 admin 面板（API 层） | A |
-| 5 | **Fly / AWS 部署** | 🛑 | — | 服务 URL 可访问；`qm check --live` 通过 | B4（夜间） |
-| 6 | **回滚** — `qm rollback --to <sha>` | 🛑 | — | 仅回滚代码/配置；AWS 打印对应 RDS snapshot ID | B5 |
-| 7 | **沙箱镜像重建并发布** | 🛑 | — | digest 写回 `qm.config.jsonc` 或部署 manifest | B6 |
+| 1 | **本地冷启动** — `qm up` docker 单机模式 | ✅ | `qa-cli.ts §B1` + §B4（doctor） | boot + /healthz 200；mounted 含 api | B（已闭合）|
+| 2 | **部署目录校验** — 改 profile YAML 看 schema 是否破 | ✅ | `qa-cli.ts §B2 / §B2.b / §B2.c` | 好 profile → exit 0；坏 → exit 1 + 行号；duplicate id → exit 1 | B（已闭合）|
+| 3 | **基础设施预览**（无副作用） — `qm plan` / `qm infra render` | ✅ | `qa-cli.ts §B3` | dryRun=true；wouldBoot 列 entries + configKeys | B（已闭合）|
+| 4 | **管理员登录**（无邮件） — `qm admin-login` 拿 5min URL | ✅ | `qa-cli.ts §B5 / §B5.b` + `qa-user-stories.ts §U1` | seal 出 `k='admin-login'` claim；坏 email → exit 1 | A + B（已闭合）|
+| 5 | **Fly / AWS 部署** | 🚫 | — | qm-next 不部署云；无对应代码 | N/A（永久 🚫）|
+| 6 | **回滚** — `qm rollback --to <sha>` | 🟨 | `qa-cli.ts §B6` | git checkout 旧版 + boot + /healthz 200 + 文件字节级还原 + .bak 清理；**无**真 AWS RDS snapshot | B（轻量闭合）|
+| 7 | **沙箱镜像重建并发布** | 🟨 | `qa-cli.ts §B7 / §B7.b` | `computeSandboxImageFingerprint` 出 64-hex digest；docker build/push 留给 `scripts/local-sandbox-build.sh` | B（轻量闭合）|
 
 ### 2.2 个人 Workspace 类（场景 8–12）
 
@@ -247,13 +249,14 @@ qm-next 安全姿态沿 qm（Strict / Auto / Dangerous）+ predeclared policy。
 | 文件 | 现状 | 阶段 A 改动 |
 |---|---|---|
 | `scripts/qa-smoke.ts` | 235 用例 · 模型调用 · Phase 3F | 不动 |
-| `scripts/qa-smoke-wave2.ts` | 18 用例 + 3 SKIP | **闭合 S42 三个 SKIP**（见 §6） |
-| `scripts/qa-user-stories.ts` | — | **新增 · 28 用例** |
-| `scripts/qa-cli.ts` | — | （阶段 B 新增） |
-| `docs/testing/baseline-smoke.md` | Phase 3F 真相源 | 在 §4 阶段演进表加 Phase 3G row |
-| `docs/testing/coverage-matrix.md` | 路由覆盖矩阵 | 在 §0 元数据加指向 user-stories-coverage.md |
-| `docs/testing/user-stories-coverage.md` | — | **本文件** |
-| `docs/testing/cli-coverage.md` | — | （阶段 B 新增） |
+| `scripts/qa-smoke-wave2.ts` | 18 用例 + 3 SKIP → 21/21 | **闭合 S42 三个 SKIP**（见 §6） |
+| `scripts/qa-user-stories.ts` | 27 用例 · 5 SKIP | **新增 · 27 用例**（阶段 A 已完成） |
+| `scripts/qm-next-ops.ts` | — | **新增 · operator CLI 7 命令**（阶段 B） |
+| `scripts/qa-cli.ts` | — | **新增 · 11 用例**（阶段 B） |
+| `docs/testing/baseline-smoke.md` | Phase 3G 真相源 | 在 §4 阶段演进表加 Phase 3H row |
+| `docs/testing/coverage-matrix.md` | 路由覆盖矩阵 | 在 §0 元数据加指向 user-stories-coverage.md + cli-coverage.md |
+| `docs/testing/user-stories-coverage.md` | — | **本文件**（阶段 A） |
+| `docs/testing/cli-coverage.md` | — | **新增 · CLI 场景覆盖矩阵**（阶段 B） |
 | `docs/testing/real-device-coverage.md` | — | （阶段 C 新增） |
 
 ---
@@ -357,7 +360,7 @@ pgCtx.api.cronsRuntime = { crons: pgCrons, scheduler: pgScheduler }
 | 性能 / 压力 / 负载 | 不是功能测试 |
 | 视觉 / UI 回归 | web-ui / portal / admin-ui 在 vite 端；另起 Playwright 套件 |
 | 模糊测试 / 渗透 | 不是 QA functional 范围 |
-| CLI 部署类（场景 1/3/5/6/7） | 阶段 B 单独立 qa-cli.ts |
+| CLI 部署类（场景 1/2/3/4/6/7） | 阶段 B 单独立 qa-cli.ts；场景 5 永久 🚫（qm-next 不部署云） |
 
 ---
 

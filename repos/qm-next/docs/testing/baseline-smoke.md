@@ -1,9 +1,9 @@
 # qm-next 全面功能测试 — Smoke Report
 
-> **状态**：v0.1.0 · 2026-09-19 · **Phase 3G 完成**（业务流层启动 + S42 三个 SKIP 闭合）
+> **状态**：v0.1.0 · 2026-09-19 · **Phase 3H 完成**（operator CLI 闭合 + 业务流 26/27 ≈ 96%）
 > **目的**：对 `qm-next @qm/api` 做一次 QA-style 功能测试基线，记录测了什么 / 覆盖率多少 / 失败明细，作为代码演进时回归与扩展依据。
 >
-> **最终结论**：**262 用例（235 路由 + 27 业务流）100% pass rate**。覆盖用户面 ~89%、管理员面 ~87%、Connectors 100%、**整体 ~95%**（从 Phase 3F 持平）。Phase 3G 新增 27 业务流用例闭合 25/27 用户场景；闭合 S42 三个 SKIP（memory/skill/cron pg twin）；新增 `memoryStore` / `skillStore` 注入口到 `packages/api/src/service.ts`（late-binding Proxy，对齐 `cronsRuntime` 模式）；新增 `docs/testing/user-stories-coverage.md`。所有 S29 / S42 回归测试自动转 PASS。
+> **最终结论**：**294 用例（235 路由 + 21 wave2 + 27 业务流 + 11 operator CLI）100% pass rate**。覆盖用户面 ~89%、管理员面 ~87%、Connectors 100%、**整体 ~95% + 业务流 26/27 ≈ 96%**（场景 5 永久 🚫）。Phase 3H 新建 `scripts/qm-next-ops.ts`（7 命令：up/check/doctor/plan/admin-link/rollback/fingerprint）+ `scripts/qa-cli.ts`（11 用例）。Phase 3G 闭合 S42 三个 SKIP（memory/skill/cron pg twin）+ `scripts/qa-user-stories.ts`（27 用例 + 5 SKIP — 待真机）。新增 `docs/testing/{user-stories,cli}-coverage.md`。所有 S29 / S42 回归测试自动转 PASS。
 
 ---
 
@@ -124,8 +124,10 @@ pnpm install --frozen-lockfile  # 解决 packages/*/node_modules/@qm/ 的 cycle 
 | **Phase 3F S45 filter/round-trip/参数变体深覆盖 (8 用例)** | **235** | **~89%** | **~87%** | **~95%** | **100%** | **12** |
 | **Phase 3G 业务流层** · 闭合 S42 memory/skill/cron pg twin（3 SKIP → 3 PASS）+ 新建 `scripts/qa-user-stories.ts`（27 用例 / 5 SKIP） | **262** | **~89%** | **~87%** | **~95%** + **业务流 27/27 → 25/27 = 93%** | **100%** | 0（业务流层全 mock） |
 | 增量（Phase 3G vs Phase 3F） | +27 | 持平 | 持平 | +业务流维度 | 持平 | -12 |
+| **Phase 3H operator CLI** · 新建 `scripts/qm-next-ops.ts`（7 命令：up/check/doctor/plan/admin-link/rollback/fingerprint）+ 新建 `scripts/qa-cli.ts`（11 用例）· 闭合 CLI 类场景 1/2/3/4/6/7（场景 5 永久 🚫 不部署云） | **273** | **~89%** | **~87%** | **~95%** + **业务流 26/27 = 96%** | **100%** | 0（CLI 层无模型/无数据库） |
+| 增量（Phase 3H vs Phase 3G） | +11 | 持平 | 持平 | +业务流维度（+1 场景） | 持平 | 持平 |
 
-> Phase 3B 修了 11 个 qm-next 真实缺陷（D1-D11），全部在 commit `b14b103`、`428a776`、`f280d9a`、`c5286f2`、`628208f`、`bb92e55`、`cc48bad`（docs/test-coverage branch 之前的 S29 回归测试 commit）。**Phase 3C** 加 Connectors OAuth mock（+16 用例 / +1 commit `52d31fb`）。未新增缺陷。**Phase 3D** 闭合 drops form/redeem + webhooks HMAC + admin grants/onboarding/reset + crons 404 gating。**Phase 3E** 加 admin/agent-face + listings + files/search/projects 共 25 用例。**Phase 3F** 加 filter/round-trip/参数变体深覆盖 8 用例（235/235）。**Phase 3G**（2026-09-19）闭合 S42 三个 SKIP（memory/skill/cron pg twin）+ 新建 `scripts/qa-user-stories.ts` 把 27 场景业务流层做到 25/27 ≈ 93%。新增 `docs/testing/user-stories-coverage.md`。新增 `memoryStore` / `skillStore` 注入口到 `packages/api/src/service.ts`（对齐 `cronsRuntime` 模式，late-binding Proxy）。未新增缺陷。
+> Phase 3B 修了 11 个 qm-next 真实缺陷（D1-D11），全部在 commit `b14b103`、`428a776`、`f280d9a`、`c5286f2`、`628208f`、`bb92e55`、`cc48bad`（docs/test-coverage branch 之前的 S29 回归测试 commit）。**Phase 3C** 加 Connectors OAuth mock（+16 用例 / +1 commit `52d31fb`）。未新增缺陷。**Phase 3D** 闭合 drops form/redeem + webhooks HMAC + admin grants/onboarding/reset + crons 404 gating。**Phase 3E** 加 admin/agent-face + listings + files/search/projects 共 25 用例。**Phase 3F** 加 filter/round-trip/参数变体深覆盖 8 用例（235/235）。**Phase 3G**（2026-09-19）闭合 S42 三个 SKIP（memory/skill/cron pg twin）+ 新建 `scripts/qa-user-stories.ts` 把 27 场景业务流层做到 25/27 ≈ 93%。新增 `docs/testing/user-stories-coverage.md`。新增 `memoryStore` / `skillStore` 注入口到 `packages/api/src/service.ts`（对齐 `cronsRuntime` 模式，late-binding Proxy）。**Phase 3H**（2026-09-19）新建 `scripts/qm-next-ops.ts`（operator CLI shim — 7 命令）+ `scripts/qa-cli.ts`（11 用例）把 CLI 类场景 1/2/3/4/6/7 闭合（场景 5 永久 🚫 不部署云）。新增 `docs/testing/cli-coverage.md`。业务流覆盖 26/27 ≈ 96%。未新增缺陷。
 
 ---
 
