@@ -1,7 +1,22 @@
 # qm-next Architecture
 
-中文为主（英文版后补）。状态：**Draft v1**（M0 实施基线）。
+中文为主（英文版后补）。状态：**Draft v1 + 2026-09-19 架构评审 target**。本文同时标注“当前现状”与“评审 target”；ADR 记录决策原因。
 配套：PRD 与任务分解见 `aa` 仓 `todo/tasks/`（prd-qm-next.md / tasks-qm-next.md）。
+
+## 0. 2026-09-19 架构评审决定
+
+本节是 target summary；详细决策见 `docs/adr/`。
+
+| 领域 | 当前问题 | Target | ADR |
+|------|----------|--------|-----|
+| Run lifecycle | `done` 混淆成功/拒绝/静默/等待审批；event bus 先关闭再写状态 | Run State 为 `queued/running/awaiting_approval/succeeded/failed/cancelled`；Attempt 可 `suspended`；Run 拥有 durable event history | 0001, 0010, 0011, 0013 |
+| Observation | 内存 bus、polling 补偿、无统一 cursor/授权 | source-neutral snapshot + cursor replay/live；Run Visibility 继承 Session；90 天默认保留 | 0001, 0014 |
+| Admission | security screen 是 route diagnostics；依赖面泄漏 | Orchestrator 内部固定 Admission Waterfall；Screen 首期 Shadow，后显式 Enforce | 0004, 0006, 0007 |
+| Command Gate | production policy 可缺省，deny/approval 被压平 | side-effecting operation 必过 Gate；结构化 decision；生产必须显式选择 Baseline Policy | 0002 |
+| Approval | pending approval 被写成 done；Web/IM 创建 successor run | 同 Run suspended/resumed；requester-only；24h 默认 TTL；durable idempotent continuation | 0010, 0012 |
+| IM intake | 文档说 fan-out，实现单 sink；dedup 进程内 | durable Inbox + independent subscriber cursors + retry/dead-letter | 0008, 0015 |
+| Trigger | trigger ↔ API 循环和 late write | `packages/types` 中最小 `TriggerRuntime` contract；composition 注入 | 0003 |
+| Connector OAuth | route 内存 pendingLinks；durable store 未接线 | Connector context owns lifecycle；HTTP 只是 adapter | 0009, 0016 |
 
 ## 1. 设计原则
 
@@ -114,40 +129,79 @@ interface ImProvider {
 - 交互（审批）：`interaction` 事件的 `action.value` 经 `@qm/approvals` codec 往返（对象或 JSON 串）；决策状态机 pending→approved/rejected 单次迁移、仅请求者可决、双击去重。
 - 审批卡（M4）：渲染归 provider 自带（`approvalCardRenderer`），bridge 解析顺序为注入覆盖 → provider 自带 → 中性文本兜底；core 侧零平台符号（`pnpm check:im` 门禁）。
 
-## 6. 核心类型（@qm/types，M1 串行门冻结）
+## 6. 核心生命周期类型（现状 vs target）
+
+M1/M3 已实现的 legacy 形状仍存在于代码中；迁移期间不得新增使用。Target 契约如下：
 
 ```ts
-interface TurnInput {
-  surface: string            // ChannelInstance.id；无默认值，必填
-  scopeId: string
-  userId: string
-  text: string
-  sessionId?: string
-  files?: InFile[]
+type RunOutcome = 'succeeded' | 'failed' | 'cancelled'
+type FailureReason =
+  | 'execution_failed' | 'timeout' | 'cancelled'
+  | 'command_refused' | 'approval_denied'
+  | 'approval_expired' | 'approval_continuation_unavailable'
+
+type RunState =
+  | 'queued' | 'running' | 'awaiting_approval'
+  | 'succeeded' | 'failed' | 'cancelled'
+
+type AttemptState =
+  | 'queued' | 'running' | 'suspended'
+  | 'succeeded' | 'failed' | 'cancelled'
+
+interface RunSnapshot {
+  id: string
+  sessionId: string
+  state: RunState
+  outcome?: RunOutcome
+  failureReason?: FailureReason
+  attempts: number
 }
-interface TurnResult { status: 'done' | 'failed'; sessionId: string; reply?: OutMessage }
-interface Run { id: string; status: 'pending' | 'running' | 'done' | 'failed'; lease?: string; attempts: number }
-interface SessionStore { /* CRUD + entries + participants */ }
-interface RunStore {
-  enqueue(run: Run): Promise<void>
-  claim(workerId: string): Promise<Run | undefined>
-  heartbeat(id: string, lease: string): Promise<boolean>
-  complete(id: string, result: TurnResult): Promise<void>
-  fail(id: string, error: Error): Promise<void>
-  onTerminal(listener: (run: Run) => void): () => void
+
+interface RunObservation {
+  snapshot(): Promise<RunSnapshot>
+  replay(from: EventCursor): RunEventBatch
+  subscribe(from: EventCursor, listener: (event: RunEvent) => void): () => void
 }
 ```
 
-## 7. Turn 生命线（端到端时序）
+Rules:
+
+- `done` is legacy-only. `succeeded` means useful success; `failed` carries a Failure Reason.
+- Attempt suspension is not Run terminality.
+- Run Events are durable, immutable, per-Run monotonic, and committed with state transitions.
+- Admission Records are not Run Events; rejected work never creates a Run.
+
+## 7. Turn 生命线（target）
 
 ```
-飞书 WS 事件 → im-feishu(normalize) → registry(去重) → im-bridge
-  → runs.enqueue（surface='feishu'，threadRef 会话解析）
-      → TurnRunner claim → orchestrator.handleTurn（限流/预算/身份）
-      → harnesses.route() → provider.runTurn
-  → runs.onTerminal → bridge → delivery 入队（幂等键 run:<id>）
-  → 认领循环 → im-feishu.outbound(send) → 飞书 API（线程内回复）
+IM delivery
+  → durable Intake Inbox（Intake Key 去重）
+  → independent subscribers：bridge / mirror / audit
+  → Admission Waterfall：
+      identity + authorization → rate limit → budget
+      → Security Screen（shadow first）→ resolution + session lease → dispatch
+  → Runs enqueue
+  → executor claim + heartbeat/renew
+  → harness execution
+      → Command Gate（side effects / sensitive reads）
+      → allow 执行；deny 失败；approval required → suspend + release executor
+  → durable RunEvent + state transition（同一 transaction）
+  → post-commit Run Observation notification
 ```
+
+Approval:
+
+```
+Command Gate approval.required
+  → Approval Request + Approval Continuation
+  → Run=awaiting_approval，Attempt=suspended，executor lease released
+  → Session Continuation Reservation 阻止同 Session 冲突 Run
+  → requester approve/reject（一次状态转移）
+  → approved：同 Run continuation Attempt
+  → rejected/expired：同 Run failed（approval_denied / approval_expired）
+```
+
+Current implementation note: today’s legacy path may close the in-memory event stream, mark `done`, and create surface-specific successor runs; migration must remove those paths after the target contract passes gate tests.
 
 新 provider 同构接入：实现 `ImProvider`（入站 mapper 诚实寻址 + 出站 + `format` + 目录拉取 + 自带审批卡渲染）注册进同一 registry 即可——投递按 `Destination.type` 认领到对应 adapter，core 零改动（`pnpm check:im` 门禁保证）。v1 只随包发布飞书；slack（历史实现见 git）/钉钉/企微延期。
 
@@ -182,24 +236,31 @@ HTTP 入口同构：`POST /v1/turns`（`@qm/api`）→ 同一 `runs.enqueue`，�
 
 环境差异用 profile 变体表达（内存 store/无 IM 的 cordis.yml 为默认；im-smoke/im-e2e 挂真渠道）。
 
-## 9. 事件契约（声明合并，@mode 标注）
+## 9. 事件与订阅契约（target）
 
-| 事件 | 派发模式 | 语义 |
-|------|---------|------|
-| `im/inbound` | parallel | 入站事件扇出（桥接、镜像、审计） |
-| `im/interaction` | bail | 卡片交互，认领者拥有决策（审批） |
-| `orchestrator/turn-started` / `turn-completed` | emit | 观测（日志/指标/镜像） |
-| `orchestrator/authorize` | waterfall | 策略链（限流/预算/权限），监听器必须 `next()` 除非拥有决策 |
+| 通道 | 所有权 | 语义 |
+|------|--------|------|
+| IM Intake | `im-core` durable Inbox | 按 Intake Key 去重；bridge/mirror/audit 是独立 Intake Subscriber |
+| IM Subscriber progress | 每 subscriber | independent cursor、retry/backoff、dead-letter；互不阻塞 |
+| Run Event log | Runs | state + event 同事务；`(run_id, seq)` 唯一；post-commit notification |
+| Run Observation | Runs | snapshot + Event Cursor replay/live；Session Visibility 授权；secret 双层脱敏 |
+| Cordis observability events | publisher-specific | metrics/log 用途，不作为 Run truth 或 audit truth |
+| Admission | Orchestrator internal seam | fixed waterfall；rejection 写 Admission Record，不创建 Run |
+
+Legacy Cordis `orchestrator/authorize` 与 `orchestrator/turn-completed` 不是 target lifecycle owner。
 
 ## 10. 进程拓扑
 
 M0-M2 单进程（in-process 插件，一 profile 一进程）。M3 视资源隔离需求决定 web-ui/admin 是否拆独立进程（qm 的 chassis HTTP 签名方案保留为拆分预案，不在 v1 实施）。
 
-## 11. 安全
+## 11. 安全（target）
 
-- 飞书/平台凭据：env 注入（`!!js` 读 process.env），不写入 yml 字面量；`ctx.credentials` 统一引用。
-- 入站信任分级：消息文本为不可信输入；卡片回调校验操作者身份 + 实例归属（防重放/越权）。
-- 文件：上传大小/类型白名单；下载走平台 API，禁直接外链抓取（沿用 qm SSRF 防护思路）。
+- **Admission**：固定 waterfall；Identity/authz → rate limit → budget → Security Screen → resolution/session lease → dispatch。
+- **Security Screen**：首期 Shadow Mode，保存 structured Shadow Record；Enforce 是显式 cutover，screen unavailable 时 fail closed。
+- **Command Gate**：所有 Side-Effecting Operation 和 Sensitive Read 必过；decision 是 `allow/deny/require_approval`，不得压平成 exit code。
+- **Approval**：requester-only；默认 24h TTL；same-run suspended/resumed；duplicate decision 幂等。
+- **Secrets**：OAuth/platform credentials 加密存储；只在 Connector 或 adapter 短周期使用；observation/log/admission/admin diagnostics 不得包含 token。
+- **Observation**：producer schema allowlist + observation deny-by-default filtering/secret scanning；UI 渲染不是 redaction boundary。
 
 ## 12. 门禁
 
@@ -209,3 +270,4 @@ M0-M2 单进程（in-process 插件，一 profile 一进程）。M3 视资源隔
 | `pnpm rescope-check` | vendor 无 `@deepseek-ai` 残留 |
 | `pnpm typecheck` | strict TS 全仓 |
 | `pnpm test` / `pnpm test:pg` | 单测 + e2e（无 PG / 一次性 PG 容器全量对拍） |
+| Target lifecycle gates | retry 不关闭 event log；terminal post-commit；long run 不被 reap；approval same-run resume；legacy pending projection |
