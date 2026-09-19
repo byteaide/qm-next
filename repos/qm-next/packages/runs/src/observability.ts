@@ -105,6 +105,8 @@ export const RUN_METRICS = {
   LEASE_REAP_NEWER_SESSION_TOTAL: 'lease_reaper_newer_session_total',
   LEASE_OWNERSHIP_CONFLICT_TOTAL: 'run_lease_ownership_conflict_total',
   REDACTION_HIT_TOTAL: 'redaction_hit_total',
+  // Phase 4 — Trigger Runtime (plan §4 observability).
+  TRIGGER_SUBMIT_TOTAL: 'trigger_submit_total',
 } as const
 
 /**
@@ -133,6 +135,23 @@ export function bumpReaperNewerSessionCounter(count: number): void {
  *  test cases. Production code MUST NOT use this. */
 export function _resetDefaultRunMetricsRegistryForTests(): void {
   defaultRegistry.reset()
+}
+
+/**
+ * Phase 4 §4 observability — Trigger submit outcome.
+ * Labels: `outcome={accepted,rejected,unavailable}`. The runtime ticks
+ * `accepted` on successful enqueue, `rejected` on validation errors,
+ * and `unavailable` on connection / health failures.
+ */
+export function bumpTriggerSubmit(
+  metrics: RunMetricsRegistry | undefined,
+  outcome: 'accepted' | 'rejected' | 'unavailable',
+): void {
+  if (metrics) {
+    metrics.inc(RUN_METRICS.TRIGGER_SUBMIT_TOTAL, { outcome })
+    return
+  }
+  defaultRegistry.inc(RUN_METRICS.TRIGGER_SUBMIT_TOTAL, { outcome })
 }
 
 /**
