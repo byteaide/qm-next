@@ -10,6 +10,7 @@ This plan deliberately separates behavior changes into phases. A phase is comple
 ### Execution rules
 
 1. Each phase uses a conventional-commit branch:
+   - `chore/architecture-gates`
    - `feat/run-lifecycle`
    - `feat/command-gate`
    - `feat/turn-admission`
@@ -19,15 +20,26 @@ This plan deliberately separates behavior changes into phases. A phase is comple
    - `chore/architecture-cutover`
 2. Each PR keeps rollback possible. Long-lived dual writes are prohibited; temporary rollout flags are acceptable only when they have an explicit removal task.
 3. New behavior must be represented by the target contracts in `@qm/types`. Do not extend the legacy `done` model.
-4. A phase may ship behind a flag only if the old and new paths do not become competing sources of truth.
+4. A phase may ship behind a flag only if the old and new paths do not become competing sources of truth. Rollout flags must be declared through the `RolloutFlag` port introduced in Phase 0; reading a flag from anywhere else is an architecture violation.
+
+### Gate enforcement and test impact
+
+- Every gate in this plan is enforced as described in `docs/gate-enforcement.md`. That document is the source of truth for gate taxonomy, coverage thresholds, flaky-test handling, waiver process, and release blockers.
+- Each phase opens with a Test Impact Assessment at `docs/test-impact/<phase>.md`. The template lives at `docs/test-impact/template.md`. The assessment must be merged before the phase's first PR is opened and is reviewed together with the Phase Gate.
+- Closing a phase without a matching test impact assessment is rejected at review.
+- Per-phase ADR references (Phase N → ADR-XXXX) are recorded in both the Phase section and in the matching test impact assessment.
 
 ### Global gates for every PR
 
-Required:
+Per `docs/gate-enforcement.md`, the gates below are **strict** (always on, always blocking) and **phase-conditional** (required by area or phase). All are mandatory to merge.
+
+Required on every PR:
 
 ```bash
 pnpm typecheck
 pnpm test
+pnpm test:architecture   # introduced in Phase 0; non-waivable per gate-enforcement.md §6
+pnpm test:pg
 pnpm check:im
 pnpm rescope-check
 ```
@@ -35,8 +47,8 @@ pnpm rescope-check
 Required before merging a phase:
 
 ```bash
-pnpm test:pg
 pnpm test:all
+pnpm test:sandbox-policy
 ```
 
 Additional gates by touched area:
@@ -46,11 +58,16 @@ Additional gates by touched area:
 | API / CLI | `pnpm test:cli` |
 | User stories | `pnpm test:user-stories` |
 | Wave 2 smoke | `pnpm test:smoke-wave2` |
-| Sandbox policy | `pnpm test:sandbox-policy` |
-| Real sandbox cutover | `pnpm test:sandbox-real` |
-| Architecture boundaries | `pnpm test:architecture` (new in Phase 0) |
 
-The Phase 0 work adds `pnpm test:architecture`. Until then, architecture checks are manual review gates.
+The following are **release blockers** (per `docs/gate-enforcement.md` §7), tracked on the release checklist rather than on individual PRs:
+
+- Real-sandbox cutover rehearsal evidence
+- OAuth token redaction scan
+- Memory/Postgres contract parity on the release commit
+- Migration projections on a production-size data sample
+- On-call alert wiring for the metric and alert families listed in `docs/gate-enforcement.md` §7
+
+A release blocker is **never** conditional on "if infrastructure is available". If the underlying infrastructure is missing, the release is paused.
 
 ---
 
@@ -74,13 +91,21 @@ The Phase 0 work adds `pnpm test:architecture`. Until then, architecture checks 
    - `AdmissionRecord`
    - `ApprovalContinuation`
    - minimal `TriggerRuntime`
+   - concurrency primitive ports:
+     - `LeaseStore` (acquire / renew / release by token)
+     - `SequenceAllocator` (monotonic `(run_id, seq)`)
+     - `SessionReservationStore` (Session Continuation Reservation)
+   - `RolloutFlag` port (single registered location for rollout flags)
 2. Add deterministic lifecycle test fixtures:
    - fake clock
    - in-memory durable event log
-   - Postgres-compatible store contract suite
+   - Postgres-compatible store contract suite covering `LeaseStore`, `SequenceAllocator`, `SessionReservationStore`, `RolloutFlag`
    - event subscriber harness
 3. Add `pnpm test:architecture` as a static and contract-oriented gate.
 4. Record current-versus-target checks without deleting legacy paths.
+5. Submit `docs/test-impact/phase-0.md` filled from `docs/test-impact/template.md`.
+6. Submit `docs/known-violations.md` seeded with at least: legacy `done` writes, late `api.cronsRuntime` writes, route-local OAuth pending Maps, IM platform symbols in `im-core`, command-policy collapsed into exit codes. Each entry maps to the phase that resolves it.
+7. Establish ADR traceability: the contracts in this phase carry JSDoc references to the ADRs they implement (ADR-0001, ADR-0003, ADR-0010, ADR-0013).
 
 ### Boundary checks
 
@@ -92,15 +117,25 @@ The architecture gate should fail when:
 - Triggers late-write `api.cronsRuntime`;
 - Security Screening is imported only from an HTTP route on a production Turn path;
 - OAuth pending state is stored in a route-local Map;
-- command policy results are collapsed into ordinary exit codes on target paths.
+- command policy results are collapsed into ordinary exit codes on target paths;
+- the memory and PG implementations diverge on the contract suite (assertions are bit-identical given the same seed);
+- `LeaseStore` is acquired without a token;
+- `(run_id, seq)` is generated outside `SequenceAllocator`;
+- a rollout flag is read from anywhere other than the registered `RolloutFlag` port;
+- `SessionReservationStore` releases a reservation before the owning Run reaches durable terminal state.
 
 ### Phase gate
 
-- [ ] `pnpm test:architecture` exists and runs in CI.
+- [ ] `pnpm test:architecture` exists, runs in CI, and is non-waivable per `docs/gate-enforcement.md` §6.
 - [ ] Target type contracts compile.
 - [ ] Legacy code still passes existing tests.
-- [ ] Known violations are inventoried and mapped to later phases.
+- [ ] `docs/known-violations.md` exists with seeded entries mapped to later phases.
+- [ ] `docs/test-impact/phase-0.md` is merged.
+- [ ] Memory and PG implementations of `LeaseStore`, `SequenceAllocator`, `SessionReservationStore`, `RolloutFlag` pass the same contract suite.
+- [ ] Concurrency primitive ports carry ADR references in their JSDoc.
 - [ ] No runtime behavior changes.
+
+**Linked ADRs:** 0001, 0003, 0010, 0013.
 
 ---
 
@@ -157,8 +192,31 @@ Make Run execution the single owner of state transitions, terminal outcomes, dur
   - refused result → `failed` with `command_refused`
   - failed result → `failed` with the available failure reason
   - pending approval without continuation context → `failed` with `approval_continuation_unavailable`
-- Add an explicit rollout flag for the new observation path.
+- Add an explicit rollout flag for the new observation path, declared through the `RolloutFlag` port.
 - Remove the old observation path at cutover; do not retain dual sources of truth.
+
+#### 1.6 Observability baseline
+
+Observability must be in place **before** this phase merges so that subsequent phases have operational signal. This is the metric and alert baseline; later phases extend the same metric families rather than introducing parallel ones.
+
+**Metrics (counters unless noted):**
+
+- `run_event_commit_total{outcome=terminal|non_terminal}` — terminal vs non-terminal commit count.
+- `run_event_transaction_failures_total` — explicit failure counter.
+- `run_seq_conflict_total` — duplicate `(run_id, seq)` rejections.
+- `run_attempt_retry_total` — Attempt requeue count.
+- `run_lease_renew_total`, `run_lease_reap_total` — ownership traffic.
+- `run_lease_ownership_conflict_total` — reaper rejects of newer-session leases.
+- `redaction_hit_total{boundary}` — secret-shaped strings caught at log/observation boundaries.
+
+**Alerts (must page on-call):**
+
+- `run_event_transaction_failures_total` rate above threshold.
+- `run_seq_conflict_total` non-zero over a 15-minute window.
+- `run_lease_ownership_conflict_total` non-zero.
+- `redaction_hit_total` non-zero (this indicates a producer is leaking secrets).
+
+**Logs:** structured; never include secrets (see §1.4). Each metric and alert has a runbook entry in `docs/operations.md` before Phase 1 merges.
 
 ### Phase gate
 
@@ -213,6 +271,8 @@ pnpm test:architecture
 pnpm test:pg
 pnpm test:user-stories
 ```
+
+**Linked ADRs:** 0001, 0005, 0011, 0013, 0014.
 
 ---
 
@@ -288,6 +348,44 @@ Turn policy decisions into a production invariant and make Pending Approval a no
 - Default TTL is 24 hours and must be stored on the Approval Request.
 - A durable sweep expires undecided requests.
 
+#### 2.5 Approval TTL lifecycle
+
+The default TTL is 24 hours. The TTL lifecycle must be explicit so that historical replay and audit remain correct:
+
+- TTL is stored on the Approval Request at creation time and never mutated except by:
+  - a successful decision (terminal path; the decision time is recorded on the Run Event);
+  - a renewal by the original requester (records `approval.renewed`; renewal does **not** extend past the absolute expiry, which is `created_at + max_ttl`).
+- A renewal attempt after absolute expiry returns a structured `approval_expired` response and does not create an `approval.renewed` event.
+- The durable sweep is the only authority for expiry events. Lazy expiry during a decision attempt is forbidden — the sweep must run, the event must persist, then a subsequent decision sees `approval_expired`.
+- `max_ttl` is configurable per deployment but is recorded on the Approval Request so historical replay remains correct.
+
+#### 2.6 Session Continuation Reservation release order
+
+The Reservation prevents another Run from silently mutating the same Session while one is awaiting approval. The release order must be unambiguous:
+
+1. Decision (approval / rejection / expiry) is processed and the Run state transition is **durable**.
+2. Terminal Run Event (`approval.decided` or `approval.expired`) is persisted.
+3. The Session Continuation Reservation is released **only after** step 2.
+4. Only after step 3 does any new same-Session Run leave `queued`.
+
+Releasing the Reservation before step 2 would leave a window where another Run observes an empty reservation but the Awaiting Approval Run is not yet terminal. This is a Phase 2 boundary check.
+
+#### 2.7 Observability
+
+Reuse the metrics from §1.6. Add:
+
+- `approval_request_total{outcome=requested|approved|rejected|expired}`.
+- `approval_renewal_total{outcome=accepted|rejected}`.
+- `approval_ttl_sweep_total{outcome=expired|no_op}`.
+- `session_reservation_release_order_violation_total` — must always be zero; non-zero is an incident.
+- `command_gate_decision_total{decision=allow|deny|require_approval}`.
+
+**Alerts (must page on-call):**
+
+- `command_gate_decision_total{decision="deny"}` rate spike over a 15-minute window.
+- `approval_ttl_sweep_total{outcome="no_op"}` sustained over more than 2× the sweep interval (suggests the sweep is dead).
+- Any non-zero `session_reservation_release_order_violation_total`.
+
 ### Phase gate
 
 Required tests:
@@ -342,6 +440,8 @@ pnpm test:user-stories
 pnpm test:pg
 ```
 
+**Linked ADRs:** 0002, 0010, 0012.
+
 ---
 
 ## Phase 3 — Turn Admission and Security Screen
@@ -389,6 +489,21 @@ Make Admission a named orchestrator seam and Security Screen a real production s
 - Enforce Mode requires explicit operator cutover.
 - Cutover requires predeclared sample size, false-positive review, latency, availability, and security-review criteria.
 
+#### 3.3 Observability
+
+Add:
+
+- `admission_decision_total{stage,decision}` for each waterfall stage (`identity`, `rate_limit`, `budget`, `screen`, `session`, `dispatch`).
+- `admission_record_total{outcome=accepted|rejected}`.
+- `security_screen_decision_total{mode,decision=allow|deny|unavailable}`.
+- `security_screen_unavailable_total{mode}` — Shadow mode records unavailability; Enforce mode does not (fail-closed behavior is recorded as a rejection).
+
+**Alerts (must page on-call):**
+
+- Any Enforce-mode rejection on a production Turn.
+- `security_screen_unavailable_total{mode="enforce"}` — must always be zero; non-zero indicates the screener failed in production and the Turn was rejected, which is correct behavior but indicates a screener outage.
+- Rate of `admission_decision_total{stage="identity",decision="deny"}` exceeding baseline by 3×.
+
 ### Phase gate
 
 Required tests:
@@ -429,6 +544,8 @@ pnpm test:user-stories
 pnpm test:pg
 ```
 
+**Linked ADRs:** 0004, 0006, 0007.
+
 ---
 
 ## Phase 4 — Trigger Runtime decoupling
@@ -467,7 +584,7 @@ Required tests:
    - Health and identity checks work.
    - Cron slot fires once per slot under duplicate delivery.
    - Lease recovery does not duplicate completed work.
-   - Trigger observer sees the same Run identity as API-originated Runs.
+    - Run Observation subscribers in Triggers see the same Run identity as API-originated Runs (the Run is the only identity that crosses the boundary; Triggers do not import `ApiService`).
 
 3. **Failure tests**
    - Runtime submission failure produces a structured Trigger error.
@@ -481,6 +598,8 @@ pnpm test:architecture
 pnpm test:cli
 pnpm test:pg
 ```
+
+**Linked ADRs:** 0003.
 
 ---
 
@@ -503,8 +622,23 @@ Make documented IM fan-out real, durable, restart-safe, and independently recove
    - audit
 5. Give each subscriber an independent durable cursor.
 6. Retry failed subscribers with backoff.
-7. Dead-letter exhausted subscribers while keeping them observable.
+7. Dead-letter exhausted subscribers while keeping them observable. Dead-letter records carry an admin-only `redelivery_url` (operator tool, not exposed to end users) and a `last_error` field that must never contain secrets. Dead-letter operations (list / inspect / replay) are admin-only, audited, and never auto-replayed.
 8. Preserve platform-agnostic core; provider details remain in `im-*` adapters.
+
+#### 5.5 Observability
+
+Add:
+
+- `im_intake_dedup_total{result=new|duplicate}`.
+- `im_subscriber_lag{subscriber}` (gauge, in events).
+- `im_subscriber_retry_total{subscriber,outcome=ok|fail}`.
+- `im_subscriber_dead_letter_total{subscriber}`.
+
+**Alerts (must page on-call):**
+
+- Any dead-letter event.
+- Subscriber lag exceeding N× the expected cadence (N is configured per subscriber).
+- Subscriber retry exhausted.
 
 ### Phase gate
 
@@ -542,6 +676,8 @@ pnpm test:pg
 pnpm test:smoke-wave2
 ```
 
+**Linked ADRs:** 0008, 0015.
+
 ---
 
 ## Phase 6 — Connector OAuth lifecycle
@@ -565,6 +701,27 @@ Move OAuth ownership out of HTTP translation and make flows restart/multi-instan
 5. Encrypt OAuth tokens at rest.
 6. Restrict token decryption to short-lived Connector provider calls.
 7. Exclude token values from logs, Run Events, Observation, Admission Records, and admin diagnostics.
+8. Phase 6 may not open its first PR until a **new ADR** has been merged covering OAuth token encryption at rest. The ADR (number assigned by the architecture owner at the time of authorship) must address:
+   - KEK / DEK model and key separation.
+   - Rotation cadence and rotation procedure (online + offline scenarios).
+   - Behavior when the key is absent at startup: **fail-closed**, treated like the missing production policy case in §2.2.
+   - Audit log of decryption events, payload-free.
+   - Key escrow and disaster recovery procedure.
+   The ADR's review must complete before Phase 6's first PR is opened. This plan does not pre-assign the ADR number; numbering is the architecture owner's call at the time the ADR is authored.
+9. Provide a runbook entry for OAuth rotation and key-absence incidents in `docs/operations.md`.
+
+#### 6.5 Observability
+
+Add:
+
+- `oauth_flow_total{step=start|callback|complete,outcome=ok|fail}`.
+- `oauth_token_decrypt_total{provider,outcome=ok|error}`.
+- `oauth_redaction_hit_total` — count of token-shaped strings caught at the observation/log boundary. Distinct from the generic `redaction_hit_total{boundary}` so that an OAuth-specific incident is unambiguous.
+
+**Alerts (must page on-call):**
+
+- Any non-zero `oauth_token_decrypt_total{outcome="error"}`.
+- Any non-zero `oauth_redaction_hit_total`.
 
 ### Phase gate
 
@@ -606,6 +763,8 @@ pnpm test:pg
 pnpm test:user-stories
 ```
 
+**Linked ADRs:** 0009, 0016. (A new ADR on OAuth token encryption at rest is required by §8 of this phase; its number is assigned when the ADR is authored.)
+
 ---
 
 ## Phase 7 — Legacy cutover and cleanup
@@ -629,51 +788,72 @@ Remove obsolete paths and make the target model the only production model.
 - [ ] Remove temporary rollout flags after their cutover gate passes.
 - [ ] Update `docs/architecture.md` from “current vs target” to current target behavior.
 - [ ] Mark superseded ADRs only if applicable.
+- [ ] Verify `done` is **physically absent** on target paths: `rg "term:\s*['\"]done['\"]" packages/` returns zero hits in target runtime code (legacy compatibility shims under `legacy/` are excluded by their location; the grep is in `pnpm test:architecture`).
+- [ ] Verify every rollout flag registered in Phase 0 has a removal PR linked or is removed.
 
 ### Phase gate
 
-1. **Static gates**
-   - `pnpm typecheck`
-   - `pnpm test`
-   - `pnpm test:architecture`
-   - `pnpm check:im`
-   - `pnpm rescope-check`
+#### 1. Static gates
 
-2. **Persistence gates**
-   - `pnpm test:pg`
-   - Memory/Postgres contract parity passes.
-   - Migration projections pass.
+```bash
+pnpm typecheck
+pnpm test
+pnpm test:architecture
+pnpm check:im
+pnpm rescope-check
+pnpm test:pg
+```
 
-3. **Integration gates**
-   - `pnpm test:all`
-   - `pnpm test:cli`
-   - `pnpm test:user-stories`
-   - `pnpm test:smoke-wave2`
+#### 2. Persistence gates
 
-4. **Safety gates**
-   - `pnpm test:sandbox-policy`
-   - Real-sandbox cutover rehearsal if infrastructure is available.
-   - OAuth token redaction scan.
-   - Admission rejection audit test.
-   - Approval suspend/resume/reject/expiry tests.
+- Memory/Postgres contract parity suite green.
+- Migration projections pass on the production-size data sample (release blocker; see §5).
 
-5. **Operational gates**
-   - Rollout flags are removed.
-   - Metrics exist for:
-     - Run state transitions
-     - Attempt retries
-     - lease renews and reaps
-     - Command Gate decisions
-     - Approval outcomes
-     - Security Screen decisions
-     - IM subscriber lag/dead letters
-   - Alerts exist for:
-     - Run Event transaction failures
-     - duplicate sequence conflicts
-     - expired lease ownership conflicts
-     - approval continuation failures
-     - dead-lettered IM subscribers
-     - secret redaction hits
+#### 3. Integration gates
+
+```bash
+pnpm test:all
+pnpm test:cli
+pnpm test:user-stories
+pnpm test:smoke-wave2
+```
+
+#### 4. Safety gates (per-PR)
+
+```bash
+pnpm test:sandbox-policy
+```
+
+Plus per-PR safety tests:
+
+- OAuth token redaction scan (CI gate).
+- Admission rejection audit test.
+- Approval suspend / resume / reject / expiry tests.
+
+#### 5. Release blockers
+
+Per `docs/gate-enforcement.md` §7, the following must be evidenced on the release PR, **not** on individual cleanup PRs. None of these are conditional on infrastructure availability; if the underlying infrastructure is missing, the release is paused.
+
+- [ ] **Real-sandbox cutover rehearsal evidence attached.** If real-sandbox infrastructure is unavailable, the release does not ship; the rehearsal is a hard prerequisite, not an option.
+- [ ] **OAuth token redaction scan report attached.**
+- [ ] **Memory/Postgres contract parity green on the release commit.**
+- [ ] **Migration projections green on a production-size data sample.**
+- [ ] **On-call alert wiring verified** for the metric and alert families accumulated across phases:
+  - Run Event transaction failures, duplicate seq conflicts, expired lease ownership conflicts, redaction hits (Phase 1)
+  - Command Gate decisions, approval outcomes, approval continuation failures, session reservation release-order violations (Phase 2)
+  - Security Screen decisions and Enforce-mode rejections (Phase 3)
+  - IM subscriber lag / dead letters (Phase 5)
+  - OAuth redaction hits and decryption errors (Phase 6)
+
+#### 6. Operational gates
+
+- [ ] Rollout flags are removed.
+- [ ] Metrics and alerts added in §1.6 / §2.7 / §3.3 / §5.5 / §6.5 are wired to the on-call rotation with dashboards and runbooks.
+- [ ] `docs/architecture.md` updated to current target behavior (no "current vs target" framing).
+- [ ] `docs/known-violations.md` is empty (all entries resolved).
+- [ ] Every cleanup item has at least one test that fails without the cleanup and passes after — the regression-basket discipline from each phase's Test Impact Assessment remains intact.
+
+**Linked ADRs:** all of 0001–0016 plus any ADRs introduced during execution (e.g. the OAuth token encryption at rest ADR required by Phase 6 §8).
 
 ---
 
@@ -692,15 +872,20 @@ Remove obsolete paths and make the target model the only production model.
 
 ## Definition of done
 
-The architecture review is implementation-complete only when all of the following are true:
+The architecture review is implementation-complete only when **all** of the following are true:
 
 1. Run is the sole owner of terminal state and Run Event history.
-2. `done` no longer exists on target production paths.
-3. State and events are transactionally consistent.
+2. `done` is **physically absent** on target production paths (verified by the Phase 7 grep gate, not just by rejection-on-write).
+3. State and events are transactionally consistent; Session Continuation Reservation release order is enforced (see §2.6).
 4. Observation is cursor-based, authorized, and redacted.
 5. Approval suspends and resumes the same Run.
-6. Production policy cannot run without an explicit Command Gate baseline.
+6. Production policy cannot run without an explicit Command Gate baseline; production cannot start without an OAuth encryption strategy declared in a merged ADR (the one required by Phase 6 §8).
 7. Admission rejects are auditable without becoming Runs.
 8. Trigger, IM, and Connector OAuth boundaries match their ADRs.
 9. All required memory and Postgres gates pass.
 10. Legacy compensation paths and temporary rollout flags are removed.
+11. Every phase has a merged Test Impact Assessment at `docs/test-impact/<phase>.md`.
+12. All release blockers in `docs/gate-enforcement.md` §7 are evidenced on the final release PR.
+13. Observability from §1.6 / §2.7 / §3.3 / §5.5 / §6.5 is wired to the on-call rotation with dashboards and runbooks; alerts page for the families listed in Phase 7 §5.
+14. `docs/known-violations.md` is empty.
+15. `docs/architecture.md` describes current target behavior, not "current vs target".
