@@ -42,8 +42,12 @@ test('every t("...") literal used in app/src is registered in ui.en.ts', () => {
       }
       if (!name.endsWith('.ts')) continue
       const text = readFileSync(p, 'utf8')
-      for (const m of text.matchAll(/\bt\("((?:[^"\\]|\\.)*)"/g)) used.add(unescapeLiteral(m[1]))
-      for (const m of text.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)) used.add(unescapeLiteral(m[1]))
+      for (const m of text.matchAll(/\bt\("((?:[^"\\]|\\.)*)"/g)) {
+        if (m[1]) used.add(unescapeLiteral(m[1]))
+      }
+      for (const m of text.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)) {
+        if (m[1]) used.add(unescapeLiteral(m[1]))
+      }
     }
   }
   walk(srcDir)

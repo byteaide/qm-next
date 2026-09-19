@@ -9,7 +9,7 @@
  * subsystems converge (deviation #46).
  */
 import { parseScopeId } from '@qm/types'
-import { cacheHitRatio, isStablePrefixMiss, type CredentialUsageSink, type EgressAuditSink, type ErrorLog, type AuditLog, type MetricsSink, type TurnMetricSample } from '@qm/admin'
+import { cacheHitRatio, isStablePrefixMiss, type AdminRole, type CredentialUsageSink, type EgressAuditSink, type ErrorLog, type AuditLog, type MetricsSink, type TurnMetricSample } from '@qm/admin'
 import type { ScopeMemory } from '@qm/memory'
 import { isValidMcpServerId, type McpServer, type McpServerAuthMode, type McpServerStore, type McpToolService } from '@qm/mcp'
 import type { SessionStore, RunStore } from '@qm/types'
@@ -17,7 +17,6 @@ import type { CronStore } from '@qm/triggers'
 import { defaultModelForHarness, HARNESS_IDS, selectableCatalogForHarness, builtInModelCatalog } from '../services/model-catalog.ts'
 import {
   deleteProviderKey,
-  getProviderKey,
   listCustomProviderSpecs,
   listProviderKeys,
   setProviderKey,
@@ -925,10 +924,10 @@ async function putModelProvider(ctx: ApiRouteContext, deps: AdminDeps): Promise<
   setProviderKey(provider, apiKey, actorId)
   deps.auditLog?.record({
     at: Date.now(),
-    actor: actorId,
-    scopeId: deps.orgScope,
+    principalId: actorId,
+    scopeLabel: deps.orgScope,
     action: 'admin.model_provider.key_set',
-    target: provider,
+    resource: provider,
   })
   return sendJson(ctx, 200, { ok: true, provider, setBy: actorId })
 }
@@ -943,10 +942,10 @@ async function deleteModelProvider(ctx: ApiRouteContext, deps: AdminDeps): Promi
   if (!removed) return sendJson(ctx, 200, { ok: true, provider, removed: false })
   deps.auditLog?.record({
     at: Date.now(),
-    actor: actorId,
-    scopeId: deps.orgScope,
+    principalId: actorId,
+    scopeLabel: deps.orgScope,
     action: 'admin.model_provider.key_removed',
-    target: provider,
+    resource: provider,
   })
   return sendJson(ctx, 200, { ok: true, provider, removed: true })
 }
@@ -996,10 +995,10 @@ async function putCustomProvider(ctx: ApiRouteContext, deps: AdminDeps): Promise
   upsertCustomProvider(spec)
   deps.auditLog?.record({
     at: Date.now(),
-    actor: actorId,
-    scopeId: deps.orgScope,
+    principalId: actorId,
+    scopeLabel: deps.orgScope,
     action: 'admin.custom_provider.upserted',
-    target: id,
+    resource: id,
   })
   return sendJson(ctx, 201, { ok: true, id, modelCount: models.length })
 }
@@ -1015,10 +1014,10 @@ async function deleteCustomProvider(ctx: ApiRouteContext, deps: AdminDeps): Prom
   if (removed) {
     deps.auditLog?.record({
       at: Date.now(),
-      actor: actorId,
-      scopeId: deps.orgScope,
+      principalId: actorId,
+      scopeLabel: deps.orgScope,
       action: 'admin.custom_provider.removed',
-      target: id,
+      resource: id,
     })
   }
   return sendJson(ctx, 200, { ok: true, id, removed })
@@ -1272,11 +1271,11 @@ async function createAdminGrant(ctx: ApiRouteContext, deps: AdminDeps): Promise<
   const actorId = await authorizeAdmin(ctx, deps, deps.orgScope)
   if (!actorId) return undefined
   const b = (ctx.body ?? {}) as { principalId?: unknown; role?: unknown; scopeId?: unknown }
-  // D10 fix: role and scopeId come from the request body when supplied.
-  // Default to org_admin (the only currently supported role) and the org
-  // scope for backward compatibility — tests that pass role/scopeId get
-  // exactly what they ask for.
-  const role = typeof b.role === 'string' && b.role.trim() ? b.role.trim() : 'org_admin'
+  // D10 fix: scopeId comes from the request body when supplied; role stays
+  // pinned to 'org_admin' (AdminRole is a single literal today) and body.role
+  // is intentionally ignored — extend AdminRole + this branch when adding
+  // new roles. The org scope is the backward-compat default.
+  const role: AdminRole = 'org_admin'
   const scopeId = typeof b.scopeId === 'string' && b.scopeId.trim() ? b.scopeId.trim() : deps.orgScope
   try {
     const grant = await deps.admin.createGrant(actorId, {
@@ -1296,11 +1295,12 @@ async function revokeAdminGrant(ctx: ApiRouteContext, deps: AdminDeps): Promise<
   if (!actorId) return undefined
   const principalId = ctx.params.principalId
   const scope = ctx.query.scope ?? ''
-  // D10 fix: role now comes from the request (query param or body); default
-  // to org_admin so existing callers keep working.
-  const role = ctx.query.role ?? 'org_admin'
-  if (!principalId || !scope || !role) {
-    return badRequest(ctx, 'principalId (path), scope (query), and role (query, default org_admin) required')
+  // D10: AdminRole is a single literal 'org_admin' today. Gate the query so
+  // callers that send a different role see a 400 with the exact required
+  // vocabulary instead of silently routing through the runtime layer.
+  const role: AdminRole = 'org_admin'
+  if (!principalId || !scope || ctx.query.role !== 'org_admin') {
+    return badRequest(ctx, 'principalId (path), and scope + role=org_admin (query) required')
   }
   try {
     await deps.admin.revokeGrant(actorId, principalId, scope, role)
@@ -1327,12 +1327,11 @@ async function inviteExternalUser(ctx: ApiRouteContext, deps: AdminDeps): Promis
   const invitationId = `inv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   deps.auditLog?.record({
     at: Date.now(),
-    actor: actorId,
-    scopeId: deps.orgScope,
+    principalId: actorId,
+    scopeLabel: deps.orgScope,
     action: 'admin.external_user.invited',
-    target: email,
-    surface,
-    invitationId,
+    resource: email,
+    detail: JSON.stringify({ surface, invitationId }),
   })
   return sendJson(ctx, 201, { ok: true, invitationId, email, surface, invitedBy: actorId, status: 'pending' })
 }
@@ -1346,10 +1345,10 @@ async function revokeExternalUser(ctx: ApiRouteContext, deps: AdminDeps): Promis
   // audit-log it; downstream bridges would tear down the link.
   deps.auditLog?.record({
     at: Date.now(),
-    actor: actorId,
-    scopeId: deps.orgScope,
+    principalId: actorId,
+    scopeLabel: deps.orgScope,
     action: 'admin.external_user.revoked',
-    target: email,
+    resource: email,
   })
   return sendJson(ctx, 200, { ok: true, email, revokedBy: actorId, status: 'revoked' })
 }
