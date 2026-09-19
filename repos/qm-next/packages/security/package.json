@@ -10,6 +10,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@qm/admission": "workspace:^",
     "@qm/store": "workspace:^",
     "@qm/types": "workspace:^"
   }

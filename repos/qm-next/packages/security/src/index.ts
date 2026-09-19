@@ -7,7 +7,8 @@
  * contract, the verdict parser, the payload assembler, and the rendered
  * policy prompt. The screener module owns the chunking, retry, and
  * reduction logic for a single security-screen call against a remote
- * proxy.
+ * proxy. Phase 3 adds the Security Screen Adapter (off/shadow/enforce)
+ * and the Shadow Record store (ADR-0004, plan §3.2).
  */
 export {
   composeSecurityPosture,
@@ -37,3 +38,29 @@ export {
   type SecurityScreenProbe,
   type SecurityScreener,
 } from './security-screener.ts'
+export {
+  createMemoryShadowRecordStore,
+  allocateShadowRecordId,
+  type ShadowRecord,
+  type ShadowRecordStore,
+  type ShadowScreenMode,
+  type ShadowScreenDecision,
+  type MemoryShadowRecordStoreOptions,
+} from './shadow-record-store.ts'
+export {
+  createSecurityScreenAdapter,
+  SecurityScreenAdapterError,
+  type ScreenAdapterOptions,
+  type ScreenMode,
+} from './screen-adapter.ts'
+export {
+  resolveScreenConfig,
+  isScreenMode,
+  parseScreenMode,
+  SCREEN_MODE_VALUES,
+  type SecurityScreenConfig,
+  type ResolveScreenConfigOptions,
+  type ScreenConfigResult,
+  type ResolvedScreenConfig,
+  type RejectedScreenConfig,
+} from './screen-config.ts'
