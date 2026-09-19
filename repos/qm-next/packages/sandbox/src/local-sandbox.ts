@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { readdir, readFile as fsReadFile } from 'node:fs/promises'
 import type {
   AgentComputerProfile,
+  CommandPolicy,
   ExecOptions,
   ExecResult,
   ProvisionOptions,
@@ -12,8 +13,11 @@ import type {
   TeardownOptions,
   WorkspaceLayer,
 } from '@qm/types'
+import { CommandDenied, NeedsApproval } from '@qm/types'
 import { ephemeralCredLinkPaths, ephemeralCredLinkScript, errMessage, shq, shortHash } from '@qm/credentials'
 import { nonInteractiveShellPrefix } from './sandbox-env.ts'
+import { evaluateCommandPolicy } from './policy.ts'
+import { defaultDenylistPolicy } from './default-policy.ts'
 import { createExecProcessSessions, type ExecProcessIo } from './exec-process-session.ts'
 import { materializeRoLayers, type RoLayerData } from './ro-layers.ts'
 import { createExecBackup, createExecFileOps, posixJoin } from './exec-file-ops.ts'
@@ -44,6 +48,15 @@ export interface LocalSandboxOptions {
   orgId?: () => string
   layerData?: (layers: WorkspaceLayer[]) => Promise<RoLayerData[]> | RoLayerData[]
   onError?: (e: { category: string; code: string; message: string; scopeLabel?: string }) => void
+  /**
+   * Phase 3J command-policy. When set, every `Sandbox.run` call evaluates
+   * the command against the policy before the docker exec. `'default-denylist'`
+   * is the production-friendly preset (catastrophic shell + SQL DDL); pass
+   * a custom `CommandPolicy` to override the rule set or switch to
+   * allowlist mode. Undefined = no policy check (matches the prior behaviour;
+   * tests that wire the sandbox by hand keep working).
+   */
+  policy?: CommandPolicy | 'default-denylist'
 }
 
 const FINGERPRINT_FIXED_SOURCES = ['fly/Dockerfile', 'local/Dockerfile', 'aws/microvm-agent/agent.mjs']
@@ -91,6 +104,32 @@ export function createLocalSandbox(opts: LocalSandboxOptions = {}): Sandbox {
   const homeDir = opts.homeDir ?? HOME_DIR
   const workspaceDir = `${homeDir}/${WORKSPACE_DIRNAME}`
   const provisionQueue = createKeyedQueue<string>()
+
+  // Phase 3J command-policy: resolved once at sandbox construction. The
+  // shortcut `'default-denylist'` materializes the built-in catastrophic
+  // pattern set; callers may pass any custom `CommandPolicy` to override.
+  const resolvedPolicy: CommandPolicy | undefined = opts.policy === undefined
+    ? undefined
+    : opts.policy === 'default-denylist'
+      ? defaultDenylistPolicy()
+      : opts.policy
+
+  function policyDeniedResult(command: string, reason: string): ExecResult {
+    return {
+      code: 1,
+      stdout: '',
+      stderr: `[policy denied: ${reason}] ${command}`,
+      timedOut: false,
+    }
+  }
+  function policyApprovalRequiredResult(command: string, reason: string): ExecResult {
+    return {
+      code: 2,
+      stdout: '',
+      stderr: `[policy requires approval: ${reason}] ${command}`,
+      timedOut: false,
+    }
+  }
 
   const portByName = new Map<string, number>()
   const scopeByContainer = new Map<string, string>()
@@ -422,6 +461,22 @@ export function createLocalSandbox(opts: LocalSandboxOptions = {}): Sandbox {
     },
 
     async run(handle, command, execOpts?: ExecOptions): Promise<ExecResult> {
+      // Phase 3J command-policy gate: refuse before the docker exec so
+      // `rm -rf /` never reaches the container. The policy is resolved
+      // once at sandbox construction; here we just consult it.
+      if (resolvedPolicy) {
+        const verdict = evaluateCommandPolicy(command, resolvedPolicy)
+        if (verdict.decision !== 'allow') {
+          const reason = verdict.reason ?? verdict.matched ?? 'policy denied'
+          if (verdict.decision === 'deny') {
+            if (execOpts?.throwOnPolicy) throw new CommandDenied(command, reason)
+            return policyDeniedResult(command, reason)
+          }
+          // require_approval
+          if (execOpts?.throwOnPolicy) throw new NeedsApproval(command, reason)
+          return policyApprovalRequiredResult(command, reason)
+        }
+      }
       const timeoutSec = execOpts?.timeoutMs ? Math.ceil(execOpts.timeoutMs / 1000) : defaultTimeoutSec
       await ensureRunning(handle.id)
       const exports = Object.entries(handle.env ?? {})

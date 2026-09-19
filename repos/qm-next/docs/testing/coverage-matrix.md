@@ -23,6 +23,7 @@
 | **业务流覆盖（新增维度 · Phase 3G）** | **27 场景里闭合 25/27 = ~93%**（`scripts/qa-user-stories.ts` 27 用例 PASS + 5 SKIP；详见 `user-stories-coverage.md` §3） |
 | **业务流覆盖（CLI 维度 · Phase 3H）** | **27 场景里闭合 26/27 = ~96%**（新增 `scripts/qm-next-ops.ts` + `scripts/qa-cli.ts` 闭合 1/2/3/4/6/7 共 11 用例 PASS；场景 5 永久 🚫 不部署云；详见 `docs/testing/cli-coverage.md` §4） |
 | **业务流覆盖（真机层 · Phase 3I）** | **27 场景里闭合 27/27 = 100%**（加 `screener` DI seam + `POST /v1/security/screen` + `scripts/qa-sandbox-real.ts` 5 真机隔离用例；闭合 §U18.2 / §U25.2 / §U26.2 + 部分闭合 §U26.1；剩余 2 SKIP 永久化：§U24.2 飞书 IM 真机 / §U26.1 sandbox engine guard；详见 `docs/testing/real-device-coverage.md` §4） |
+| **sandbox policy guard（Phase 3J）** | **完全闭合 §U26.1**（`packages/sandbox/src/{policy,default-policy}.ts` + `LocalSandboxOptions.policy` + `ExecOptions.throwOnPolicy` + `scripts/qa-sandbox-policy.ts` 29 用例全 PASS；engine guard 在 docker exec 之前拒绝 10 个 catastrophic patterns）；剩余 1 SKIP 永久化：§U24.2 飞书 IM 真机 |
 
 ---
 

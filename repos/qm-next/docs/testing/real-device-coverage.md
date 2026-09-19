@@ -106,17 +106,24 @@ qm-next 有 `approvals` store（`@qm/approvals` package）+ screener + bridge，
 
 完全验证 classifier 层的判定 + 传输 + 序列化。
 
-### 2.4 §U26.1 sandbox execute rm -rf / → 拒绝（**部分闭合 —— 隔离而非引擎拒绝**）
+### 2.4 §U26.1 sandbox execute rm -rf / → 拒绝（**完全闭合 —— 引擎 guard + 容器隔离** · Phase 3J）
 
-qm-next 沙箱 `Sandbox.run(handle, command)` 接受任意命令字符串，**没有 engine-level guard**。所以"引擎拒绝"字面意义是 false。
+qm-next 沙箱 `Sandbox.run(handle, command)` 在 Phase 3J 之前接受任意命令字符串，没有 engine-level guard。Phase 3J 加了 `CommandPolicy` 注入 + 默认 denylist，`run` 在 docker exec 之前先评估 verdict。
 
-**阶段 C 闭合**：验证**容器隔离**作为安全边界。新增 `qa-sandbox-real.ts` 5 用例：
-- 真 docker daemon + `qm-sandbox-local:latest` image
-- 直接调 `createLocalSandbox()` (不通过 ApiService) — 测试隔离本身
-- `rm -rf /` 在容器内：coreutils 拒绝或容器保护 → 容器仍 alive
-- **主机 fixture 文件**（测试开始时写入 `/tmp/qm-sandbox-real-host-<ts>/must-survive.txt`）始终存在 → 隔离正确
+**阶段 C 闭合**：验证**容器隔离**作为第一层边界（`scripts/qa-sandbox-real.ts`）。
 
-**永久 🚫 部分**：engine-level command guard。这要单独做 policy engine（parity with `tools.ts` `CommandDecision` 类型已存在，但 runtime guard 没接）。
+**阶段 J 闭合**：验证**引擎 guard**作为第二层边界（**新增** `scripts/qa-sandbox-policy.ts`）：
+- 14 unit 用例（`evaluateCommandPolicy` against `defaultDenylistPolicy`）：每个 denylist pattern 命中 + 每个 benign command 通过
+- 3 集成用例（allowlist mode + require_approval decision）
+- 5 真机用例（OrbStack 真 docker）：`rm -rf /` 触发 deny 不进容器 + `echo hello` 通过 + `throwOnPolicy=true` 抛 `CommandDenied` + `throwOnPolicy=true` 抛 `NeedsApproval`
+- 10 default-denylist patterns: rm -rf /, mkfs, dd to /dev/sd?, fork bomb, dd from /dev/zero, chown -R, chmod -R, DROP DATABASE/TABLE/SCHEMA/INDEX, TRUNCATE TABLE
+- `qa-user-stories.ts §U26.1` 单元验证：`evaluateCommandPolicy('rm -rf /', defaultDenylistPolicy())` → `{decision: 'deny'}`
+- API: `LocalSandboxOptions.policy?: CommandPolicy | 'default-denylist'`；`ExecOptions.throwOnPolicy?: boolean`（当 true 时 throw `CommandDenied` / `NeedsApproval`，默认 false 返 ExecResult）
+- `packages/sandbox/src/policy.ts` —— evaluator + assertPolicyAllows + escapeForRegex
+- `packages/sandbox/src/default-policy.ts` —— built-in catastrophic patterns
+- `packages/types/src/sandbox.ts` —— `ExecOptions.throwOnPolicy?: boolean`
+
+**剩余 🚫 部分**：无。引擎 guard + 隔离两层都闭合。
 
 ### 2.5 §U26.2 sandbox execute DROP TABLE → 拒绝（**完全闭合 —— classifier 层**）
 
@@ -135,26 +142,27 @@ DROP TABLE 是 SQL DDL 不是 shell 命令。**正确闭合路径**不是 sandbo
 | `qa-user-stories.ts` | 30 用例 · 业务流 · mock harness | **30/30 PASS** · 2 SKIP（永久 🚫） | `scripts/qa-user-stories.ts` |
 | `qa-cli.ts` | 11 用例 · operator CLI 表面 | **11/11 PASS** · 0 SKIP | `scripts/qa-cli.ts` |
 | `qa-sandbox-real.ts` (新) | 5 用例 · 真 docker 容器隔离 | **5/5 PASS** · 0 SKIP | `scripts/qa-sandbox-real.ts` |
-| **合计** | **302 用例** · **300/302 PASS** · **2 SKIP（永久 🚫）** · 0 FAIL | | |
+| `qa-sandbox-policy.ts` (新 · Phase 3J) | 29 用例 · engine policy guard（14 unit + 3 allowlist + 1 approval + 5 真机 + 6 negative path）| **29/29 PASS** · 0 SKIP | `scripts/qa-sandbox-policy.ts` |
+| **合计** | **331 用例** · **330/331 PASS** · **1 SKIP（永久 🚫）** · 0 FAIL | | |
 
-剩余 2 个 SKIP（永久）：
+剩余 1 个 SKIP（永久）：
 - §U24.2 飞书卡片送达 — 需 tenant + app credentials
-- §U26.1 sandbox engine guard — qm-next 没有这层代码
 
 ---
 
 ## 4. 业务流覆盖（阶段 C 末 vs 阶段 B 末）
 
-| 度量 | 阶段 B 末（Phase 3H） | 阶段 C 末（Phase 3I） |
-|------|------------------------|------------------------|
-| 业务流覆盖（27 场景） | 26/27 ≈ 96% | **27/27 = 100%** |
-| 闭合 SKIP 数 | 0 | **3**（§U18.2 + §U25.2 + §U26.2）+ 1 部分（§U26.1） |
-| 真机层测试用例 | 0 | **5**（docker 容器隔离） |
-| 新增 API 路由 | 7（CLI 子命令）+ 1 `/v1/security/screen` 探测 = 8 | + 1 真机 (`POST /v1/security/screen` 完整) = 9 |
-| 新增 DI seam | 0 | **1**（`screener` late-binding） |
-| SKIP 永久化说明 | 0 | **2**（§U24.2 飞书 / §U26.1 engine guard） |
+| 度量 | 阶段 B 末（Phase 3H） | 阶段 C 末（Phase 3I） | 阶段 J 末（Phase 3J） |
+|------|------------------------|------------------------|------------------------|
+| 业务流覆盖（27 场景） | 26/27 ≈ 96% | **27/27 = 100%** | **27/27 = 100%** |
+| 闭合 SKIP 数 | 0 | **3**（§U18.2 + §U25.2 + §U26.2）+ 1 部分（§U26.1） | **3 + 1 完全闭合（§U26.1）** |
+| 真机层测试用例 | 0 | **5**（docker 容器隔离） | **5 + 5 真机 policy guard = 10** |
+| 总测试用例 | 294 | 302 | **331** |
+| Pass rate | 100% | 99.3% (300/302 · 2 SKIP) | **99.7% (330/331 · 1 SKIP)** |
+| 新增 DI seam | 0 | 1（`screener` late-binding） | +1（`policy` opt-in `LocalSandboxOptions`） |
+| 永久 SKIP 说明 | 0 | 2（§U24.2 飞书 / §U26.1 engine guard） | **1**（§U24.2 飞书） |
 
-**最终业务流 27/27 = 100%**。
+**最终业务流 27/27 = 100%** · **剩余 SKIP 1 个**（飞书卡片送达 — 需运营方凭证）
 
 ---
 

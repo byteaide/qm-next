@@ -703,7 +703,29 @@ await scenario('U26', 'memory 写入含 rm -rf 子串 → 路由可达（classif
   const searchBody = await res.json().catch(() => ({}))
   return { memoryPutStatus: status, searchStatus: res.status }
 })
-skip('U26', 'U26.1 sandbox execute rm -rf / → 拒绝 (sandbox engine guard)', 'qm-next 沙箱无 engine-level command guard;qa-sandbox-real.ts 验证容器隔离(Phase 3I)')
+// Phase 3J §U26.1: command-policy guard refuses catastrophic shell
+// primitives before they reach the container. We test the pure-function
+// `evaluateCommandPolicy` here (no docker required); the real-docker
+// integration coverage (Sandbox.run gate + container isolation) lives in
+// `scripts/qa-sandbox-policy.ts` §P5. We assert the built-in
+// `defaultDenylistPolicy` flags `rm -rf /` as deny, while a benign
+// `echo hello` flows through as allow.
+await scenario('U26', 'sandbox policy guard: `rm -rf /` → deny; `echo hello` → allow', async () => {
+  const sandboxMod = await import(`${QM_NEXT_ROOT}/packages/sandbox/src/index.ts`)
+  const { evaluateCommandPolicy, defaultDenylistPolicy } = sandboxMod
+  const pol = defaultDenylistPolicy()
+  const denyVerdict = evaluateCommandPolicy('rm -rf /', pol)
+  if (denyVerdict.decision !== 'deny') throw new Error(`expected deny for rm -rf /, got ${denyVerdict.decision}`)
+  if (!denyVerdict.reason || !/catastrophic/.test(denyVerdict.reason)) {
+    throw new Error(`expected catastrophic reason, got: ${denyVerdict.reason}`)
+  }
+  const allowVerdict = evaluateCommandPolicy('echo hello', pol)
+  if (allowVerdict.decision !== 'allow') throw new Error(`expected allow for echo, got ${allowVerdict.decision}`)
+  return {
+    rmVerdict: { decision: denyVerdict.decision, reason: denyVerdict.reason },
+    echoVerdict: { decision: allowVerdict.decision },
+  }
+})
 // Phase 3I U26.2: DROP TABLE is a SQL DDL primitive; the classifier
 // layer (screener) flags it as `strict` so downstream code can refuse to
 // run it. We assert the screener returns strict + the SQL-DDL outcome,

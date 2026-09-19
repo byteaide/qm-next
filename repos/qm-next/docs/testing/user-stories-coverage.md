@@ -138,7 +138,7 @@ qm-next 安全姿态沿 qm（Strict / Auto / Dangerous）+ predeclared policy。
 |---|---|---|---|---|---|
 | 24 | **Strict** — 每次 execute / read_file 都弹审批 | 🟨 | `boot-im-e2e.ts` Leg 1 卡片点击（手动） | qa-smoke 路由层不直接测审批，但 Approval 业务流已在 Leg 1；qa-user-stories §U24 加 Strict 模式 turn → 期望 approve 卡 | A + C2 |
 | 25 | **Auto + prompt injection** — 含"ignore previous instructions" 文本喂入 | ⏳ | `qa-user-stories.ts §U25`（classifier mock + 端到端断言） | U25.1 含注入的 turn body → memory search 返事实被剥离；classifier mock 触发 + U25.2 模型侧 reply 不含"ignore"子串 | A |
-| 26 | **Dangerous + predeclared 拦截** | 🟨 | qa-smoke §S8 错误路径 / qa-smoke §S3 readOnly | U26.1 sandbox execute `rm -rf /` → 400 / 500（**sandbox 真机依赖；阶段 C 验**）；U26.2 sandbox execute `DROP TABLE x` → 400 / 500（同上）；U26.3 其它 destructive 操作无差别通过 | A + C4 |
+| 26 | **Dangerous + predeclared 拦截** | ✅ | qa-smoke §S8 错误路径 / qa-smoke §S3 readOnly / **qa-sandbox-policy.ts §P5 真机** | U26.1 sandbox execute `rm -rf /` → engine guard deny（`scripts/qa-sandbox-policy.ts` 真 docker 验证 + `qa-user-stories.ts` unit 验证）；U26.2 DROP TABLE → classifier strict（Phase 3I screener 注入）；U26.3 其它 destructive 操作无差别通过 | A + C + J |
 | 27 | **Scope 收紧** — 父 Strict / 子 Dangerous 应被拒 | ⏳ | `qa-user-stories.ts §U27`（admin scope config PUT） | U27.1 org scope 设 Strict；U27.2 子 scope PUT Dangerous → 501 / 4xx（沿 qa-smoke §S27.1 验证 501）；U27.3 子 scope PUT Auto → 通过 | A |
 
 ---
@@ -211,10 +211,10 @@ qm-next 安全姿态沿 qm（Strict / Auto / Dangerous）+ predeclared policy。
   → facts 数组只保留非注入片段
 - ✅ U25.2 注入文本不被回写到 memory（POST `/v1/memory/facts` 后 GET 历史不含注入子串）
 
-### §U26 Dangerous + predeclared 拦截（3 用例 · 场景 26）
+### §U26 Dangerous + predeclared 拦截（3 用例 · 场景 26 · Phase 3J 全闭合）
 
-- ⏸ U26.1 sandbox execute `rm -rf /` → 400 / 500（**sandbox 真机依赖；阶段 C 验**）
-- ⏸ U26.2 sandbox execute `DROP TABLE x` → 400 / 500（同上）
+- ✅ U26.1 sandbox execute `rm -rf /` → engine guard deny（**Phase 3J**：`scripts/qa-sandbox-policy.ts` §P5 真 docker + `qa-user-stories.ts` §U26.1 unit 验证）
+- ✅ U26.2 sandbox execute `DROP TABLE x` → classifier strict（**Phase 3I**：`scripts/qa-user-stories.ts` §U26.2 mock screener 验证）
 - ✅ U26.3 turn body 含 `rm -rf /` 子串 → memory capture 不入库（classifier 层已拦）
 
 ### §U27 Scope 收紧端到端（3 用例 · 场景 27）
@@ -354,7 +354,7 @@ pgCtx.api.cronsRuntime = { crons: pgCrons, scheduler: pgScheduler }
 | 排除项 | 原因 |
 |--------|------|
 | 飞书真机 IM（WS 长连接 + 卡片回调） | 需 `FEISHU_APP_ID/SECRET` + 长连接 + 卡片回调配置；**§U24.2 SKIP 永久化（Phase 3I）** — 阶段 C 已闭合判定路径（screener mock），飞书卡片送达由 nightly 覆盖 |
-| Sandbox 真机工具执行 | 需 Docker image 构建；阶段 C wave2 §S43 已 mock 5 用例；**§U26.1 真机隔离已通过 `scripts/qa-sandbox-real.ts` 5 用例验证（Phase 3I）**；engine guard 永久 🚫 |
+| Sandbox 真机工具执行 | 需 Docker image 构建；阶段 C wave2 §S43 已 mock 5 用例；**§U26.1 真机隔离已通过 `scripts/qa-sandbox-real.ts` 5 用例验证（Phase 3I）** + **engine guard 已通过 `scripts/qa-sandbox-policy.ts` 5 真机 + 14 unit + 4 集成用例验证（Phase 3J）** |
 | Postgres pg 对拍（已扩 memory/skill/cron） | 阶段 A 闭合；wave2 启动 docker pg 容器仍依赖 docker 是否可用 |
 | Connectors 真 OAuth | 阶段 A 用 §S32 mock 闭环；真 OAuth 走第三方 |
 | 性能 / 压力 / 负载 | 不是功能测试 |

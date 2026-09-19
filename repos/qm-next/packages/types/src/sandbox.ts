@@ -102,6 +102,14 @@ export interface ExecResult {
 export interface ExecOptions {
   timeoutMs?: number
   signal?: AbortSignal
+  /**
+   * Phase 3J command-policy: when true, the sandbox throws `CommandDenied`
+   * (for `decision === 'deny'`) or `NeedsApproval` (for `decision ===
+   * 'require_approval'`) instead of returning an `ExecResult` with a
+   * non-zero code. Default is `false` so callers that only care about the
+   * exit code see a uniform `{code: 1, ...}` shape.
+   */
+  throwOnPolicy?: boolean
 }
 
 export type AgentComputerBackupArea = 'workspace' | 'home'
