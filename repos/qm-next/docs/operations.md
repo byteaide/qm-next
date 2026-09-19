@@ -135,3 +135,61 @@ const reaper = createReaper(runs, sessions, {
 - Backfill 工具：Phase 1 假设新写入已走 target 路径；旧 legacy 行的回填不在本 slice。
 
 **回滚路径：** §4.6 — 摘流 → 回退镜像 → `databaseUrl` 不动（schema 向后兼容）。`target.run-observation` flag 切回 `false` 即可让所有新写入走 legacy 路径。
+
+## 11. Phase 3 Turn Admission 与 Security Screen 指标（slice 3.3）
+
+**范围:** Phase 3 §3.3 落地的 Turn Admission Waterfall 决策、Admission Record 落盘、Security Screen 决策与可用性、Screener unavailable 计数；告警阈值；on-call 5min 响应路径。
+
+**接线入口:** `packages/runs/src/observability.ts` 的 `RUN_METRICS` 常量 + 默认 `RunMetricsRegistry` + helper（`bumpAdmissionDecision`/`bumpAdmissionRecord`/`bumpSecurityScreenDecision`/`bumpSecurityScreenUnavailable`）。生产通过环境 profile 注入后端实现（Prometheus / OTel / Sentry 任选其一）；未注入时降级到默认内存 registry。
+
+**指标清单（Phase 3 新增）：**
+
+| 常量 | 指标名 | labels | 含义 |
+|------|--------|--------|------|
+| `ADMISSION_DECISION_TOTAL` | `admission_decision_total` | `stage={identity,rate_limit,budget,screen,session,dispatch}` × `decision={allow,deny,error,skipped}` | Turn Admission Waterfall 每阶段的决策计数 |
+| `ADMISSION_RECORD_TOTAL` | `admission_record_total` | `outcome={accepted,rejected}` | Admission Record 落盘计数 |
+| `SECURITY_SCREEN_DECISION_TOTAL` | `security_screen_decision_total` | `mode={off,shadow,enforce}` × `decision={allow,deny,unavailable}` | Security Screen 每次评估的决策 |
+| `SECURITY_SCREEN_UNAVAILABLE_TOTAL` | `security_screen_unavailable_total` | `mode={shadow,enforce}` | Screener unavailable 计数 |
+
+**Unavailable 计数策略（plan §3.3 重要约束）：**
+
+- **Shadow 模式**：Screener unavailable 时**记录**该计数，但 Turn 仍然放行（plan §3.2 Shadow Mode 测试）。
+- **Enforce 模式**：Screener unavailable 时**不**记录该计数。Turn 被拒绝（fail-closed），原因记录在 `admission_decision_total{stage="screen",decision="deny"}` 和 `admission_record_total{outcome="rejected"}` 上。
+
+**告警阈值（必须 page on-call，plan §3.3）：**
+
+| 指标 | 阈值 | 排查 |
+|------|------|------|
+| 任意 Enforce-mode rejection | 任意 > 0（production Turn） | incident：检查 screener + policy + rule 变更；查 `closingStage="screen"` 的 Admission Record |
+| `security_screen_unavailable_total{mode="enforce"}` | **必须始终为 0**（plan §3.3 强约束）| screener outage indicator；Enforce 模式下 unavailable 表现为 Turn reject + Admission Record，但 unavailable counter 自身不归零说明计数器逻辑 bug |
+| `admission_decision_total{stage="identity",decision="deny"}` | 速率超过 baseline × 3 | identity 层流量突增；可能是凭证泄露 / 自动化攻击 / 配置回滚 |
+| `admission_record_total{outcome="rejected"}` | 持续 spike | 检查 `closingStage` 分布；rejected 落 Admission Record 不落 Run（ADR-0006） |
+
+**On-call 5min 响应：**
+
+1. **Enforce-mode rejection** → `grep closingStage=screen` 查 Admission Record → 读 `ruleId`/`reason` → 决定是否紧急调整 policy。
+2. **`security_screen_unavailable_total{mode="enforce"}` 非零** → incident：立刻查 `@qm/security/screen-adapter.ts` 的 unavailable 路径；计数逻辑 bug 或 screener 全局故障。
+3. **Identity deny spike** → grep 拒绝的 actor；可能是同一 principal 的重试风暴（rate-limit 应当先于 identity deny 拦截，但 identity 是 waterfall 第一阶段）→ 必要时收紧 identity port 的输入过滤。
+4. **Admission Record rejected spike** → 看 `closingStage` 分布：
+   - `identity`/`rate_limit`/`budget` → 对应端口策略变更；
+   - `screen` → Security Screen rule 变更或 screener 状态；
+   - `session` → lease 竞争或 conversation 路径异常；
+   - `dispatch` → orchestrator-level 拒绝（plan §3.1 step 6）。
+
+**Enforce 模式上线 checklist（plan §3.2 Cutover Gate）：**
+
+- [ ] operator declaration 已就绪：`sampleSize`/`falsePositiveReview`/`latencyMs`/`availabilityPercent`/`securityReview`
+- [ ] 至少 `securityReview=true` 且 `cutoverDeclared=true`
+- [ ] shadow 阶段的 Shadow Records 已 review（per ADR-0004 §3 sample size criteria）
+- [ ] screener 健康检查 + 可用性达标
+- [ ] 回滚路径：把 `mode` 切回 `shadow`（无需重启服务，热切即可）
+
+**Phase 3 不在 §3.3 范围内（Phase 4+ 留）：**
+
+- 业务 SLO 看板（Phase 3 只覆盖 on-call 指标）
+- Admission Record 的查询 API（admin-only，Phase 4 计划）
+- Security Screen 与 Phase 4 Trigger Runtime 的整合（Trigger 进 Admission 路径）
+
+**回滚路径：** §4.6 — flag 切回 baseline；`mode` 切回 `off`/`shadow` 不会破坏 invariants；Enforce 模式唯一的回滚路径是切回 Shadow，不是直接禁掉 Security Screen。
+
+**Linked ADRs:** 0004 (Security Screen Shadow Mode), 0006 (rejections do not create Runs), 0007 (orchestrator seam with fixed waterfall)。

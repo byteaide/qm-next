@@ -24,7 +24,13 @@ import type {
   AdmissionStage,
   AdmissionStageRecord,
 } from '@qm/types'
-import { _resetDefaultRunMetricsRegistryForTests as _reset } from '@qm/runs'
+import {
+  _resetDefaultRunMetricsRegistryForTests as _reset,
+  bumpAdmissionDecision,
+  bumpAdmissionRecord,
+  bumpSecurityScreenDecision,
+  bumpSecurityScreenUnavailable,
+} from '@qm/runs'
 import {
   allocateAdmissionRecordId,
   type AdmissionRecordStore,
@@ -166,6 +172,13 @@ export async function runAdmissionWaterfall(
     if (screenOutcome.mode === 'shadow' && screenOutcome.decision === 'unavailable') {
       bumpScreenUnavailableMetric(metrics, 'shadow')
     }
+    if (screenOutcome.mode === 'enforce' && screenOutcome.decision === 'unavailable') {
+      // Plan §3.3: Shadow mode records unavailability; Enforce mode does
+      // not. The waterfall rejects the Turn, and the rejection is
+      // surfaced as `admission_decision_total{stage="screen",decision="deny"}`
+      // — the unavailable counter is reserved for the Shadow path.
+      // (No-op here, deliberately.)
+    }
   } else {
     history.records.push({
       stage: 'screen',
@@ -291,10 +304,7 @@ function bumpStageMetric(
   stage: AdmissionStage,
   decision: 'allow' | 'deny' | 'error' | 'skipped',
 ): void {
-  if (!metrics) return
-  // Lazy import keeps the seam decoupled from `@qm/runs` in tests.
-  // Phase 3.3 wires the real counters via `bumpAdmissionDecision`.
-  metrics.inc('admission_decision_total', { stage, decision })
+  bumpAdmissionDecision(metrics, stage, decision)
 }
 
 function bumpScreenDecisionMetric(
@@ -302,24 +312,21 @@ function bumpScreenDecisionMetric(
   mode: 'off' | 'shadow' | 'enforce',
   decision: 'allow' | 'deny' | 'unavailable',
 ): void {
-  if (!metrics) return
-  metrics.inc('security_screen_decision_total', { mode, decision })
+  bumpSecurityScreenDecision(metrics, mode, decision)
 }
 
 function bumpScreenUnavailableMetric(
   metrics: WaterfallOptions['metrics'] | undefined,
   mode: 'shadow' | 'enforce',
 ): void {
-  if (!metrics) return
-  metrics.inc('security_screen_unavailable_total', { mode })
+  bumpSecurityScreenUnavailable(metrics, mode)
 }
 
 function bumpRecordMetric(
   metrics: WaterfallOptions['metrics'] | undefined,
   outcome: 'accepted' | 'rejected',
 ): void {
-  if (!metrics) return
-  metrics.inc('admission_record_total', { outcome })
+  bumpAdmissionRecord(metrics, outcome)
 }
 
 // Re-export for tests (clear default-registry between cases).
