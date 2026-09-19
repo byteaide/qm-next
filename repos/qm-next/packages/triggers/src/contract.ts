@@ -151,11 +151,12 @@ export interface CronStore {
  * Tick lease: only one `hold` per key runs at a time; concurrent holders
  * get null. Backs the scheduler tick so multiple scheduler instances
  * coordinate without double-firing (the durable gate is `claimSlot`).
+ *
+ * Phase 4 §4.6 — the canonical interface lives in `@qm/concurrency`
+ * so neither `@qm/api` nor `@qm/triggers` needs to import the other
+ * just to share a leader-lease primitive.
  */
-export interface LeaderLease {
-  hold<T>(key: string, fn: () => Promise<T>): Promise<T | null>
-  close?(): Promise<void>
-}
+export type { LeaderLease } from '@qm/concurrency'
 
 /** Canonical fire key for a scheduled slot. */
 export function cronFireKey(cronId: string, scheduledAt: number): string {

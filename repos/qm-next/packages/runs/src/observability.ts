@@ -122,6 +122,8 @@ export const RUN_METRICS = {
   ADMISSION_RECORD_TOTAL: 'admission_record_total',
   SECURITY_SCREEN_DECISION_TOTAL: 'security_screen_decision_total',
   SECURITY_SCREEN_UNAVAILABLE_TOTAL: 'security_screen_unavailable_total',
+  // Phase 4 — Trigger Runtime (plan §4 observability).
+  TRIGGER_SUBMIT_TOTAL: 'trigger_submit_total',
 } as const
 
 /**
@@ -237,6 +239,23 @@ export function bumpSecurityScreenUnavailable(
     return
   }
   defaultRegistry.inc(RUN_METRICS.SECURITY_SCREEN_UNAVAILABLE_TOTAL, { mode })
+}
+
+/**
+ * Phase 4 §4 observability — Trigger submit outcome.
+ * Labels: `outcome={accepted,rejected,unavailable}`. The runtime ticks
+ * `accepted` on successful enqueue, `rejected` on validation errors,
+ * and `unavailable` on connection / health failures.
+ */
+export function bumpTriggerSubmit(
+  metrics: RunMetricsRegistry | undefined,
+  outcome: 'accepted' | 'rejected' | 'unavailable',
+): void {
+  if (metrics) {
+    metrics.inc(RUN_METRICS.TRIGGER_SUBMIT_TOTAL, { outcome })
+    return
+  }
+  defaultRegistry.inc(RUN_METRICS.TRIGGER_SUBMIT_TOTAL, { outcome })
 }
 
 /**

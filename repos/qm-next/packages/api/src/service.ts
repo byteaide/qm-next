@@ -118,7 +118,7 @@ import {
 import { createAmbientCursorStore, createPostgresAckEmojiPickStore, createPostgresAgentRequestStore, createPostgresAmbientJudgmentStore } from './services/ambient-stores.ts'
 import type { ChannelPolicyStore as ApiChannelPolicyStore } from './services/channel-policy-store.ts'
 import type { CronScheduler, CronStore } from '@qm/triggers'
-import { createMemoryLeaderLease } from '@qm/triggers'
+import { createMemoryLeaderLease } from '@qm/concurrency'
 import type {
   Harness,
   IdentityService,

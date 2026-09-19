@@ -1,27 +1,14 @@
 /**
- * Tick leases. Memory: single-process holder set (one holder per key).
- * Postgres: `pg_try_advisory_lock` on a dedicated connection, dropped when
- * the connection dies (its locks auto-release). Both back the scheduler
- * tick; the durable once-per-slot gate remains `CronStore.claimSlot`.
+ * Tick leases (cron scheduler seam).
+ *
+ * Phase 4 §4.6 — the memory lease primitive lives in `@qm/concurrency`
+ * so neither API nor Triggers needs to import the other. The Postgres
+ * lease uses the `@qm/store` pg pool; it stays behind the Trigger
+ * boundary because pg-pool lifecycle is Trigger-managed.
  */
 import { createPgPool, errMessage, type PgPool, type PoolClient } from '@qm/store'
-import type { LeaderLease } from './contract.ts'
-
-export function createMemoryLeaderLease(): LeaderLease {
-  const held = new Set<string>()
-  return {
-    async hold<T>(key: string, fn: () => Promise<T>): Promise<T | null> {
-      if (held.has(key)) return null
-      held.add(key)
-      try {
-        return await fn()
-      } finally {
-        held.delete(key)
-      }
-    },
-    async close() {},
-  }
-}
+import type { LeaderLease } from '@qm/concurrency'
+export { createMemoryLeaderLease, type LeaderLease } from '@qm/concurrency'
 
 export function createPostgresLeaderLease(connectionString: string): LeaderLease {
   const pool: PgPool = createPgPool(connectionString, [])

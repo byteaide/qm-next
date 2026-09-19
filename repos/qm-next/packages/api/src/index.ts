@@ -5,6 +5,22 @@ export type { ApiConfig } from './service.ts'
 export { Context, Service } from '@qm/cordis'
 export { createApiServer, type ApiDeps, type ApiServerOptions } from './server.ts'
 export { createTurnRunner, type TurnRunner, type TurnRunnerOptions } from './runner.ts'
+export {
+  createTriggerRuntimeFromApi,
+  TriggerRuntimeError,
+  type TriggerRuntimeImpl,
+  type TriggerRuntimeDeps,
+  type TriggerRuntimeImplOptions,
+} from './trigger-runtime-impl.ts'
+export {
+  TriggerRuntimeCordisService,
+  default as TriggerRuntimeCordisDefault,
+} from './trigger-runtime-cordis.ts'
+export {
+  WireCronRuntimeService,
+  default as WireCronRuntimeDefault,
+  type TriggersServiceSurface,
+} from './wire-cron-runtime.ts'
 export { authenticateBearer, type TurnTokenClaims } from './auth.ts'
 export { mintSignedPayload, signingKeyId, verifySignedPayload } from './signed-token.ts'
 export { registerRouteTable, sendJson, type ApiRouteContext, type Route, type RouteAuth } from './routes/framework.ts'
