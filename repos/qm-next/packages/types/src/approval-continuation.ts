@@ -74,3 +74,65 @@ export type ApprovalDecisionOutcome =
   | { outcome: 'forbidden'; request: ApprovalRequest }
   | { outcome: 'expired'; request: ApprovalRequest }
   | { outcome: 'not_found' }
+
+/** Input for creating an Approval Request (slice 2.3). */
+export interface ApprovalRequestInput {
+  /** Stable id; default allocator in `ApprovalStore.create`. */
+  id?: string
+  runId: string
+  attemptId: string
+  /** Original requester principal id — only they may decide (ADR-0012). */
+  requesterPrincipalId: string
+  /** TTL the request is created with; default `APPROVAL_DEFAULT_TTL_MS`. */
+  ttlMs?: number
+  /** Snapshot of the Suspended Attempt the Approval resumes (ADR-0010). */
+  attemptState: AttemptState
+  /** Stable command-request id; the resumer MUST replay by `commandRequestId`, not raw text. */
+  commandRequestId: string
+  /** Identifier of the pending tool call (if the command is a tool invocation). */
+  pendingToolCallId?: string
+  /** Agent/Session context reference for the Continuation Attempt. */
+  sessionRef: string
+  /** Command class the gate evaluated; preserved for audit. */
+  commandClass: string
+  /** Raw command text, when one exists; absent for purely structured calls. */
+  commandRawText?: string
+}
+
+/**
+ * Slice 2.3 — durable Approval Request registry.
+ *
+ * Implements ADR-0010 (Approval suspends the same Run) and ADR-0012
+ * (Approvals are requester-scoped and expire). The store MUST:
+ *
+ *   - allocate a stable `requestId` per request (idempotent on input.id);
+ *   - record the absolute expiry at creation time and never mutate it
+ *     except on a successful decision (slice 2.5);
+ *   - reject decisions from anyone other than `requesterPrincipalId`;
+ *   - dedupe duplicate decisions to `already_decided`.
+ *
+ * `decide` lives on this port even though slice 2.4 is the deliverable;
+ * placing it on the port now keeps the parity contract stable across
+ * memory and Postgres implementations.
+ */
+export interface ApprovalStore {
+  /** Create a new Approval Request. Returns the persisted record. */
+  create(input: ApprovalRequestInput): Promise<ApprovalRequest>
+  /** Fetch by id; null when missing. */
+  get(requestId: string): Promise<ApprovalRequest | null>
+  /** List pending requests whose `absoluteExpiry` is still in the future. */
+  listPending(opts?: { limit?: number; now?: number }): Promise<readonly ApprovalRequest[]>
+  /**
+   * Apply a decision. Only the original requester may decide.
+   * Decisions are idempotent — duplicate calls return `already_decided`.
+   * `now` defaults to wall-clock; tests inject a deterministic clock.
+   */
+  decide(requestId: string, decision: { approved: boolean; decidedBy: string; now?: number }): Promise<ApprovalDecisionOutcome>
+  /**
+   * Mark a pending request as expired. Called exclusively by the durable
+   * TTL sweep (slice 2.5); lazy expiry during a decision attempt is
+   * forbidden (ADR-0010 §2.5).
+   */
+  expire(requestId: string, now?: number): Promise<ApprovalDecisionOutcome>
+  close?(): Promise<void>
+}

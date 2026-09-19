@@ -36,3 +36,7 @@ export {
 } from './agent-requests.ts'
 export { createMemoryApprovalStore } from './memory-approval-store.ts'
 export { APPROVALS_SCHEMA_STATEMENTS, createPostgresApprovalStore } from './postgres-approval-store.ts'
+export {
+  createMemoryTargetApprovalStore,
+  type MemoryTargetApprovalStoreOptions,
+} from './target-memory-approval-store.ts'
