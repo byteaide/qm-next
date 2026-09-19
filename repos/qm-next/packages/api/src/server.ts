@@ -33,6 +33,7 @@ import { deploymentLayerRoutes, type DeploymentLayerDeps } from './routes/deploy
 import { connectorRoutes, connectorMatchRoutes, type ConnectorDeps } from './routes/connector-routes.ts'
 import { webhookRoutes, webhookRawRoutes, type WebhookDeps } from './routes/webhook-routes.ts'
 import { blobRoutes, type BlobDeps } from './routes/blob-routes.ts'
+import { securityRoutes, type SecurityRoutesDeps } from './routes/security-routes.ts'
 import { registerRawRouteTable } from './routes/raw-framework.ts'
 import { adminRoutes, type AdminDeps } from './routes/admin-routes.ts'
 import { skillPackRoutes, type SkillPackDeps } from './routes/skill-pack-routes.ts'
@@ -92,6 +93,8 @@ export interface ApiDeps {
   webhooks?: WebhookDeps
   /** Parity surface (11.0): raw blob staging put/get. */
   blobs?: BlobDeps
+  /** Phase 3I: screener surface (POST /v1/security/screen). Always wired; route 503s when the getter returns undefined. */
+  security?: SecurityRoutesDeps
   /** Parity surface (11.0): the qm admin surface over lane-A stores. */
   admin?: AdminDeps
   /** Parity surface (16.0): MCP server registry + tool service, surfaced through `/v1/admin/mcp-servers`. */
@@ -280,6 +283,9 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
   }
   if (deps.blobs) {
     registerRawRouteTable(app, opts, blobRoutes(deps.blobs, opts.secrets))
+  }
+  if (deps.security) {
+    registerRouteTable(app, opts, securityRoutes(deps.security))
   }
   if (deps.admin) {
     if (deps.mcp && !deps.admin.mcp) {

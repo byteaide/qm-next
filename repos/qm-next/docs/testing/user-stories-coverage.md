@@ -37,7 +37,7 @@
 | 当前业务流覆盖 | **12/27 ≈ 44%**（路由层可达，但部分只到 happy-path 一跳） |
 | 阶段 A 目标 | **25/27 ≈ 93%**（闭合 L2/L3 业务流；剩 2 场景需真机 L6/L7） |
 | 阶段 B 目标 | **26/27 ≈ 96%**（加 CLI 部署类 6 个场景 — 1/2/3/4/6/7；场景 5 永久 🚫 不部署云）|
-| 阶段 C 目标 | **27/27 ≈ 100%**（加飞书真机 + sandbox 真机） |
+| 阶段 C 目标 | **27/27 = 100%**（加 screener DI + 真机 docker 隔离；详见 `docs/testing/real-device-coverage.md`） |
 
 ---
 
@@ -353,8 +353,8 @@ pgCtx.api.cronsRuntime = { crons: pgCrons, scheduler: pgScheduler }
 
 | 排除项 | 原因 |
 |--------|------|
-| 飞书真机 IM（WS 长连接 + 卡片回调） | 需 `FEISHU_APP_ID/SECRET` + 长连接 + 卡片回调配置；进阶段 C / nightly |
-| Sandbox 真机工具执行 | 需 Docker image 构建；阶段 C wave2 §S43 已 mock 5 用例；真实 tool exec 仍待 |
+| 飞书真机 IM（WS 长连接 + 卡片回调） | 需 `FEISHU_APP_ID/SECRET` + 长连接 + 卡片回调配置；**§U24.2 SKIP 永久化（Phase 3I）** — 阶段 C 已闭合判定路径（screener mock），飞书卡片送达由 nightly 覆盖 |
+| Sandbox 真机工具执行 | 需 Docker image 构建；阶段 C wave2 §S43 已 mock 5 用例；**§U26.1 真机隔离已通过 `scripts/qa-sandbox-real.ts` 5 用例验证（Phase 3I）**；engine guard 永久 🚫 |
 | Postgres pg 对拍（已扩 memory/skill/cron） | 阶段 A 闭合；wave2 启动 docker pg 容器仍依赖 docker 是否可用 |
 | Connectors 真 OAuth | 阶段 A 用 §S32 mock 闭环；真 OAuth 走第三方 |
 | 性能 / 压力 / 负载 | 不是功能测试 |

@@ -60,6 +60,7 @@ import {
   type ModelCredentialStore,
 } from '@qm/model'
 import { createMemoryScopeMemory, type ScopeMemory } from '@qm/memory'
+import type { SecurityScreener } from '@qm/security'
 import { createMcpServerStore, createMcpToolService, type McpServerStore, type McpToolService } from '@qm/mcp'
 import {
   createBrowserSessionStore,
@@ -168,6 +169,19 @@ function lateBindingStore<T extends object>(
       return value
     },
   }) as T
+}
+
+/**
+ * Late-binding screener getter (Phase 3I). The /v1/security/screen route
+ * table captures a fallback `undefined` at wire-up time; tests inject a
+ * mock screener via `api.screener` *after* boot. Returning `undefined`
+ * while absent lets the route answer 503 ("screener not wired") so callers
+ * can distinguish "service not configured" from a real verdict. The route
+ * calls `getCurrent()` per request so post-boot injection takes effect
+ * immediately without a re-boot.
+ */
+function lateBindingScreener(getCurrent: () => SecurityScreener | undefined): () => SecurityScreener | undefined {
+  return () => getCurrent()
 }
 
 export interface ApiConfig {
@@ -557,6 +571,15 @@ export class ApiService extends Service<ApiConfig> {
 
   /** Instance registry id (21.0); also the run-claim worker id. */
   instanceId?: string
+
+  /**
+   * Security screener instance (Phase 3I). Set via the
+   * `ApiConfig.screener` factory or late-bound via `api.screener = ...`
+   * after boot. The /v1/security/screen route reads it lazily per request.
+   * Public so the test harness can assign it directly; production code
+   * should use the config factory so dispose ordering stays correct.
+   */
+  screener?: SecurityScreener
 
   constructor(ctx: Context, public config: ApiConfig) {
     super(ctx, 'api')
@@ -993,6 +1016,11 @@ export class ApiService extends Service<ApiConfig> {
     // directly so it never accidentally closes a pre-boot store.
     const memoryStoreProxy = memoryStore ? lateBindingStore(() => this.memoryStore, memoryStore) : undefined
     const skillStoreProxy = skillStore ? lateBindingStore(() => this.skillStore, skillStore) : undefined
+    // Late-binding screener getter (Phase 3I): the route table captures
+    // `undefined` at wire-up time; tests inject a mock via api.screener
+    // post-boot. The route calls `getCurrent()` per request so late
+    // injection takes effect without a re-boot.
+    const screenerGetter = lateBindingScreener(() => this.screener)
     const app = createApiServer(
       {
         orchestrator,
@@ -1011,6 +1039,11 @@ export class ApiService extends Service<ApiConfig> {
         ...(keychain ? { keychain: { keychain: () => keychain, scopeFor: (actorId) => `personal:${actorId}` } } : {}),
         ...(memoryStoreProxy ? { memory: { memory: memoryStoreProxy, scopeFor: () => this.config.scopeId ?? 'org:default' } } : {}),
         ...(skillStoreProxy ? { skills: { skills: skillStoreProxy, scopeFor: () => this.config.scopeId ?? 'org:default' } } : {}),
+        // Phase 3I screener route. Always wired; the route answers 503
+        // when `getScreener()` returns undefined (screener not wired).
+        // The lazy getter lets tests inject a mock via `api.screener = ...`
+        // after boot without touching this code path.
+        security: { screener: screenerGetter },
         ...(contextQueue
           ? {
               context: { queue: contextQueue },

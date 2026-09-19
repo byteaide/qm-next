@@ -33,6 +33,7 @@
     "@qm/runs": "workspace:^",
     "@qm/sandbox": "workspace:^",
     "@qm/schemastery": "workspace:^",
+    "@qm/security": "workspace:^",
     "@qm/skills": "workspace:^",
     "@qm/store": "workspace:^",
     "@qm/triggers": "workspace:^",
