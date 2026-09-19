@@ -7,6 +7,11 @@ export {
   type PostgresSessionStore,
   type PostgresStoreOptions,
 } from './postgres-session-store.ts'
+export {
+  createPostgresRunEventLog,
+  type PostgresRunEventLog,
+  type PostgresRunEventLogOptions,
+} from './postgres-run-event-log.ts'
 export { RUN_SCHEMA_STATEMENTS, SESSION_SCHEMA_STATEMENTS } from './schema.ts'
 export { createPgPool, withPgTransaction, withSchemaLock, errMessage } from './pg-pool.ts'
 export type { PgPool, Pool, PoolClient, Rows } from './pg-pool.ts'

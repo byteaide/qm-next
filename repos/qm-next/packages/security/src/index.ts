@@ -37,3 +37,41 @@ export {
   type SecurityScreenProbe,
   type SecurityScreener,
 } from './security-screener.ts'
+
+/**
+ * Slice 2.1 — Command Gate runtime. See `command-policy.ts` for the
+ * rules-engine interface and the production configuration contract
+ * (ADR-0002). The Baseline Policy is `default-denylist` /
+ * `baseline-deny`; the operator-tightened alternative is `allowlist`.
+ */
+export {
+  CommandPolicyNotConfigured,
+  createCommandPolicyRegistry,
+  type CommandPolicy,
+  type CommandPolicyContext,
+  type CommandPolicyRegistry,
+} from './command-policy.ts'
+export {
+  createCommandGate,
+  registerDefaultPolicies,
+  type CreateCommandGateOptions,
+} from './command-gate.ts'
+export {
+  configureProductionCommandPolicy,
+  PRODUCTION_DEFAULT_POLICY_ID,
+  QM_COMMAND_POLICY_ENV,
+  type ConfigureProductionCommandPolicyOptions,
+} from './command-policy-config.ts'
+export {
+  BASELINE_DENY_POLICY_ID,
+  DEFAULT_DENYLIST_POLICY_ID,
+  classRequiresGate,
+  createDefaultDenylistPolicy,
+  createDefaultDenylistPolicyAlias,
+} from './policies/default-denylist.ts'
+export {
+  ALLOWLIST_POLICY_ID,
+  createAllowlistPolicy,
+  type AllowlistPolicyOptions,
+  type AllowlistRule,
+} from './policies/allowlist.ts'
