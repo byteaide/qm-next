@@ -78,3 +78,35 @@ test('architecture: @qm/triggers re-exports createMemoryLeaderLease from @qm/con
   const src = readFileSync(join(ROOT, 'packages/triggers/src/lease.ts'), 'utf8')
   assert.match(src, /export\s*\{[^}]*createMemoryLeaderLease[^}]*\}\s*from\s+['"]@qm\/concurrency['"]/)
 })
+
+test('architecture: WireCronRuntimeService is the only writer of api.cronsRuntime', () => {
+  // Triggers no longer writes; the composition seam (WireCronRuntimeService)
+  // owns the write. Verify there is exactly one writer in the API package.
+  const fs = require('node:fs') as typeof import('node:fs')
+  const path = require('node:path') as typeof import('node:path')
+  const apiSrc = join(ROOT, 'packages/api/src')
+  const writers: string[] = []
+  function walk(dir: string): void {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        walk(full)
+        continue
+      }
+      if (!entry.name.endsWith('.ts')) continue
+      const content = fs.readFileSync(full, 'utf8')
+      if (/api\.cronsRuntime\s*=/.test(content) || /cronsRuntime:\s*\{/.test(content) || /cronsRuntime\s*=\s*\{/.test(content)) {
+        writers.push(full)
+      }
+    }
+  }
+  walk(apiSrc)
+  // The wire-cron-runtime service is the legitimate writer. Service.ts may
+  // declare the type/shape. Other files must not write.
+  const allowedWriters = new Set([
+    path.join(apiSrc, 'wire-cron-runtime.ts'),
+    path.join(apiSrc, 'service.ts'),
+  ])
+  const offenders = writers.filter((w) => !allowedWriters.has(w))
+  assert.deepEqual(offenders, [], `Only wire-cron-runtime.ts may write api.cronsRuntime; offenders: ${offenders.join(', ')}`)
+})
