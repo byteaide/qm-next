@@ -104,6 +104,10 @@ export const RUN_METRICS = {
   LEASE_REAP_TOTAL: 'run_lease_reap_total',
   LEASE_REAP_NEWER_SESSION_TOTAL: 'lease_reaper_newer_session_total',
   LEASE_OWNERSHIP_CONFLICT_TOTAL: 'run_lease_ownership_conflict_total',
+  /** Slice 2.6 — increment when a Session Reservation is released
+   *  before its terminal Run Event is durable. Must always be 0; any
+   *  non-zero value is an incident (plan §2.7 alerts). */
+  SESSION_RESERVATION_RELEASE_ORDER_VIOLATION_TOTAL: 'session_reservation_release_order_violation_total',
   REDACTION_HIT_TOTAL: 'redaction_hit_total',
 } as const
 
@@ -127,6 +131,16 @@ const defaultRegistry = createRunMetricsRegistry()
 export function bumpReaperNewerSessionCounter(count: number): void {
   if (count <= 0) return
   defaultRegistry.add(RUN_METRICS.LEASE_REAP_NEWER_SESSION_TOTAL, count, { outcome: 'skipped_newer_session' })
+}
+
+/**
+ * Slice 2.6 — increment the release-order violation counter. The
+ * boundary rule is durable transition → event → release; this counter
+ * MUST stay at zero in production. Any non-zero value pages on-call.
+ */
+export function bumpReservationReleaseOrderViolation(count = 1): void {
+  if (count <= 0) return
+  defaultRegistry.add(RUN_METRICS.SESSION_RESERVATION_RELEASE_ORDER_VIOLATION_TOTAL, count)
 }
 
 /** Exposed for tests so the in-memory registry can be reset between
