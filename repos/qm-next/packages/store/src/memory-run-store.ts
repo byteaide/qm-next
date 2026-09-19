@@ -161,6 +161,57 @@ export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
       return true
     },
 
+    /**
+     * Slice 2.4 — start a Continuation Attempt in the same Run. The
+     * Run transitions back to `running`; the Suspended Attempt stays
+     * in the history (the helper above already mutates `currentAttempt`
+     * by tracking `attempts`). Idempotent on the same `commandRequestId`:
+     * duplicate calls return `false` so repeated delivery cannot
+     * create a second Continuation Attempt (ADR-0010).
+     */
+    async beginContinuationAttempt(runId, newAttemptId, commandRequestId) {
+      const run = runs.get(runId)
+      if (!run) return false
+      if (isTerminal(run.status)) return false
+      // Idempotency guard: repeated delivery of the same approval
+      // decision must not create a second Continuation Attempt.
+      const lastReq = (run.deliveryState as { lastCommandRequestId?: string } | null)?.lastCommandRequestId
+      if (lastReq === commandRequestId) return false
+      run.attempts += 1
+      run.startedAt = run.startedAt ?? Date.now()
+      run.status = 'running'
+      run.targetState = 'running'
+      run.leaseToken = null
+      run.leaseExpiresAt = null
+      run.workerId = null
+      run.deliveryState = { ...(run.deliveryState ?? {}), lastCommandRequestId: commandRequestId, currentAttemptId: newAttemptId }
+      assertTargetRunInvariant(run)
+      return true
+    },
+
+    /**
+     * Slice 2.4 — fail the same Run because the Approval was rejected
+     * or expired. The rejected/expired command never executes; the
+     * Run is terminal after this call. Idempotent.
+     */
+    async failFromApproval(runId, failureReason) {
+      const run = runs.get(runId)
+      if (!run) return false
+      if (isTerminal(run.status)) return false
+      if (run.runSource === 'legacy') {
+        run.status = 'failed'
+      }
+      run.targetState = 'failed'
+      run.failureReason = failureReason
+      run.leaseToken = null
+      run.leaseExpiresAt = null
+      run.workerId = null
+      run.finishedAt = Date.now()
+      assertTargetRunInvariant(run)
+      settle(run)
+      return true
+    },
+
     onTerminal(listener) {
       terminalListeners.push(listener)
     },

@@ -74,6 +74,34 @@ export interface RunStore {
 
   setDeliveryState(runId: string, leaseToken: string | null, state: RunDeliveryState): Promise<boolean>
 
+  /**
+   * Slice 2.4 — create a Continuation Attempt in the SAME Run (no
+   * successor Run). The Run transitions back to `running`. The
+   * Suspended Attempt stays in the Run's history; this method only
+   * advances the active Attempt pointer.
+   *
+   * Returns `false` when the Run does not exist, is already in a
+   * terminal state, or the new attempt id collides with an existing
+   * one. Idempotent on the same `(runId, commandRequestId)` pair —
+   * duplicate calls return `false` so repeated delivery cannot create
+   * a second Continuation Attempt (ADR-0010 §"Repeated delivery").
+   */
+  beginContinuationAttempt?(
+    runId: string,
+    newAttemptId: string,
+    commandRequestId: string,
+  ): Promise<boolean>
+
+  /**
+   * Slice 2.4 — fail the same Run with `approval_denied` or
+   * `approval_expired` (ADR-0010). The rejected/expired command never
+   * executes; the Run is terminal after this call.
+   *
+   * Returns `false` when the Run does not exist or is already
+   * terminal. Idempotent — duplicate calls return `false`.
+   */
+  failFromApproval?(runId: string, failureReason: 'approval_denied' | 'approval_expired'): Promise<boolean>
+
   onTerminal(listener: (run: Run) => void): void
 
   get(runId: string): Promise<Run | null>
