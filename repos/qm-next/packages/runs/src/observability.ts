@@ -117,6 +117,11 @@ export const RUN_METRICS = {
   /** Slice 2.7 — TTL sweep outcome counter. */
   APPROVAL_TTL_SWEEP_TOTAL: 'approval_ttl_sweep_total',
   REDACTION_HIT_TOTAL: 'redaction_hit_total',
+  // Phase 3 — Turn Admission + Security Screen (plan §3.3).
+  ADMISSION_DECISION_TOTAL: 'admission_decision_total',
+  ADMISSION_RECORD_TOTAL: 'admission_record_total',
+  SECURITY_SCREEN_DECISION_TOTAL: 'security_screen_decision_total',
+  SECURITY_SCREEN_UNAVAILABLE_TOTAL: 'security_screen_unavailable_total',
 } as const
 
 /**
@@ -175,6 +180,63 @@ export function bumpApprovalTtlSweep(outcome: 'expired' | 'no_op'): void {
  *  test cases. Production code MUST NOT use this. */
 export function _resetDefaultRunMetricsRegistryForTests(): void {
   defaultRegistry.reset()
+}
+
+/**
+ * Phase 3 §3.3 — Admission stage decision bumpers. The labels are
+ * `stage` and `decision`. Plan §3.3 enumerates `stage` ∈ {identity,
+ * rate_limit, budget, screen, session, dispatch} and `decision` ∈
+ * {allow, deny, error, skipped}.
+ *
+ * `metrics` is optional: when omitted, the call goes to the default
+ * in-memory registry. Production deployments inject a Prometheus /
+ * OTel / Sentry backend via `ReaperOptions.metrics` or service
+ * composition.
+ */
+export function bumpAdmissionDecision(
+  metrics: RunMetricsRegistry | undefined,
+  stage: 'identity' | 'rate_limit' | 'budget' | 'screen' | 'session' | 'dispatch',
+  decision: 'allow' | 'deny' | 'error' | 'skipped',
+): void {
+  if (metrics) {
+    metrics.inc(RUN_METRICS.ADMISSION_DECISION_TOTAL, { stage, decision })
+    return
+  }
+  defaultRegistry.inc(RUN_METRICS.ADMISSION_DECISION_TOTAL, { stage, decision })
+}
+
+export function bumpAdmissionRecord(
+  metrics: RunMetricsRegistry | undefined,
+  outcome: 'accepted' | 'rejected',
+): void {
+  if (metrics) {
+    metrics.inc(RUN_METRICS.ADMISSION_RECORD_TOTAL, { outcome })
+    return
+  }
+  defaultRegistry.inc(RUN_METRICS.ADMISSION_RECORD_TOTAL, { outcome })
+}
+
+export function bumpSecurityScreenDecision(
+  metrics: RunMetricsRegistry | undefined,
+  mode: 'off' | 'shadow' | 'enforce',
+  decision: 'allow' | 'deny' | 'unavailable',
+): void {
+  if (metrics) {
+    metrics.inc(RUN_METRICS.SECURITY_SCREEN_DECISION_TOTAL, { mode, decision })
+    return
+  }
+  defaultRegistry.inc(RUN_METRICS.SECURITY_SCREEN_DECISION_TOTAL, { mode, decision })
+}
+
+export function bumpSecurityScreenUnavailable(
+  metrics: RunMetricsRegistry | undefined,
+  mode: 'shadow' | 'enforce',
+): void {
+  if (metrics) {
+    metrics.inc(RUN_METRICS.SECURITY_SCREEN_UNAVAILABLE_TOTAL, { mode })
+    return
+  }
+  defaultRegistry.inc(RUN_METRICS.SECURITY_SCREEN_UNAVAILABLE_TOTAL, { mode })
 }
 
 /**

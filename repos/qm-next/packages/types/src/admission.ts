@@ -8,6 +8,7 @@
  * contracts.
  */
 import type { CommandRequest } from './command-gate.ts'
+import type { Conversation } from './conversation.ts'
 import type { Principal, ScopeId } from './identity.ts'
 
 /**
@@ -94,6 +95,13 @@ export interface AdmissionInput {
   commandRequest?: CommandRequest
   /** Scope to evaluate against, when already resolved. */
   scopeId?: ScopeId
+  /**
+   * Optional conversation reference for the session stage. The orchestrator
+   * passes this through from `TurnInput.conversation` so the session port
+   * can resolve a session without leaking the conversation type into
+   * `@qm/types`.
+   */
+  conversation?: Conversation
 }
 
 export type AdmissionOutcome =

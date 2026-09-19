@@ -6,9 +6,16 @@
  * rate limit, budget), session resolution, entry log, harness dispatch and
  * result mapping. Every turn states its surface explicitly; no default
  * surface exists.
+ *
+ * Phase 3 — Admission Waterfall seam (ADR-0007): handleTurn now delegates
+ * the identity / rate-limit / budget / screen / session stages to
+ * `runAdmissionWaterfall` from `@qm/admission`. Rejected work produces an
+ * Admission Record (never a Run, ADR-0006) and is surfaced as a refused
+ * `TurnResult`.
  */
 import { Context, Service } from '@qm/cordis'
 import type {
+  AdmissionInput,
   Conversation,
   Orchestrator,
   OrchestratorDeps,
@@ -21,6 +28,9 @@ import type {
   TurnInput,
   TurnResult,
 } from '@qm/types'
+import { createMemoryAdmissionRecordStore, runAdmissionWaterfall } from '@qm/admission'
+import type { AdmissionRecordStore } from '@qm/admission'
+import { buildStagePorts } from './admission-integration.ts'
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -31,34 +41,62 @@ function sessionTypeOf(conversation: Conversation): Conversation['kind'] {
 }
 
 export class OrchestratorService extends Service implements Orchestrator {
-  constructor(ctx: Context, public deps: OrchestratorDeps) {
+  /**
+   * Optional explicit admission record store. When omitted, a process-wide
+   * memory store is created on first use. Production composition wires a
+   * Postgres twin (slice 3.1 follow-up) here.
+   */
+  private _admissionStore: AdmissionRecordStore | undefined
+
+  constructor(ctx: Context, public deps: OrchestratorDeps, opts?: { admissionRecordStore?: AdmissionRecordStore }) {
     super(ctx, 'orchestrator')
+    if (opts?.admissionRecordStore) {
+      this._admissionStore = opts.admissionRecordStore
+    }
+  }
+
+  private admissionStore(): AdmissionRecordStore {
+    if (!this._admissionStore) {
+      this._admissionStore = createMemoryAdmissionRecordStore()
+    }
+    return this._admissionStore
   }
 
   async handleTurn(input: TurnInput): Promise<TurnResult> {
     const { deps } = this
-    const { actor, conversation } = input
-    if (!deps.identity.isInternal(actor)) {
-      return { status: 'refused', reason: 'internal-only: non-internal principals cannot interact' }
+    const store = this.admissionStore()
+
+    // Phase 3 — Admission Waterfall (ADR-0007). The fixed waterfall lives
+    // in `@qm/admission`; the orchestrator is the seam that wires ports.
+    const admissionInput: AdmissionInput = {
+      surface: input.surface,
+      actor: input.actor,
+      ...(input.scopeId !== undefined ? { scopeId: input.scopeId } : {}),
+      ...(input.conversation !== undefined ? { conversation: input.conversation } : {}),
     }
-    const rl = await deps.rateLimiter.check(actor.id)
-    if (!rl.allowed) {
+    const ports = buildStagePorts({ deps, store })
+    const outcome = await runAdmissionWaterfall({ ports, store }, admissionInput)
+    if (outcome.decision === 'rejected') {
       return {
         status: 'refused',
-        reason: `rate limit exceeded — try again in ${Math.ceil((rl.retryAfterMs ?? 0) / 1000)}s`,
+        reason: outcome.record.reason ?? `${outcome.record.closingStage ?? 'unknown'} rejected`,
       }
     }
-    if (deps.budget) {
-      const b = await deps.budget.check(actor.id)
-      if (!b.allowed) {
-        return {
-          status: 'refused',
-          reason: `budget exceeded ($${b.spentUsd.toFixed(2)} of $${b.limitUsd}); try again later`,
-        }
-      }
-    }
-    const resolution = await deps.resolution.resolve(conversation, actor)
-    const scopeId = deps.resolution.scopeFor(conversation, actor)
+    const { sessionId, scopeId, leaseToken, systemPrompt, orgScopeId } = outcome.resolved
+    const conversation = input.conversation
+    const session = {
+      id: sessionId,
+      threadRef: conversation.threadRef,
+      kind: conversation.kind,
+      scopeId,
+      surface: input.surface,
+      channelName: conversation.channelName,
+      participants: [input.actor],
+      createdAt: 0,
+      updatedAt: 0,
+    } as Conversation
+    const lease = leaseToken as never
+
     let harness
     let choiceModel: string | undefined
     try {
@@ -74,23 +112,7 @@ export class OrchestratorService extends Service implements Orchestrator {
     } catch (err) {
       return { status: 'refused', reason: errMessage(err) }
     }
-    const session = await deps.sessions.getOrCreateByThread(
-      conversation.threadRef,
-      sessionTypeOf(conversation),
-      scopeId,
-      input.surface,
-      conversation.channelName,
-    )
-    // D1 fix: register the actor as a session participant so that subsequent
-    // /v1/sessions?principalId=... lookups (which use listByParticipant) include
-    // the session, and POST /v1/sessions/:id/{fork,patch} (which gate on
-    // sessionForViewer) accept the actor.
-    await deps.sessions.addParticipant(session.id, actor.id)
-    const leaseAttempt = await deps.sessions.acquireLease(session.id, 'turn')
-    if (!leaseAttempt.lease) {
-      return { status: 'refused', reason: 'another turn is active for this session' }
-    }
-    const lease = leaseAttempt.lease
+
     const events = deps.runEvents && input.runId ? deps.runEvents : undefined
     let seq = 0
     const publish = (event: LegacyRunEventDraft): void => {
@@ -102,7 +124,7 @@ export class OrchestratorService extends Service implements Orchestrator {
       const history = await deps.sessions.getEntries(session.id)
       const userEntry = await deps.sessions.append(lease, {
         type: 'user',
-        payload: { text: input.text, author: actor.id },
+        payload: { text: input.text, author: input.actor.id },
         scopeLabel: scopeId,
       })
       const emitted: SessionEntry[] = []
@@ -119,7 +141,7 @@ export class OrchestratorService extends Service implements Orchestrator {
         ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
         ...(input.readOnly ? { readOnly: true } : {}),
         ...(tools ? { tools } : {}),
-        systemPrompt: resolution.systemPrompt,
+        systemPrompt,
         history,
         emit: async (entry) => {
           const full = await deps.sessions.append(lease, entry)
@@ -127,7 +149,7 @@ export class OrchestratorService extends Service implements Orchestrator {
           return full
         },
         scopeLabel: scopeId,
-        orgScopeId: resolution.orgScopeId,
+        orgScopeId,
         recordModelCall: (rec) => {
           deps.modelGateway?.recordCall({
             at: Date.now(),
