@@ -260,8 +260,12 @@ async claimById(runId, workerId, ttlMs): Promise<Run | null> {
 
     async reapExpired(
       onRetired?: (sessionIds: string[]) => Promise<void>,
-      opts?: { maxAgeMs?: number; onReap?: (event: ReapEvent) => void },
-    ): Promise<{ requeued: number; parked: number }> {
+      opts?: {
+        maxAgeMs?: number
+        onReap?: (event: ReapEvent) => void
+        isNewerSession?: (run: Run) => Promise<boolean>
+      },
+    ): Promise<{ requeued: number; parked: number; skippedNewerSession: number }> {
       const now = Date.now()
       const { rows } = await query(
         "SELECT * FROM runs WHERE status='running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= $1",
@@ -270,8 +274,26 @@ async claimById(runId, workerId, ttlMs): Promise<Run | null> {
       const expired = rows.map(rowToRun)
       let requeued = 0
       let parked = 0
+      let skippedNewerSession = 0
       const retiredSessionIds: string[] = []
       for (const run of expired) {
+        // Slice 1.3 — newer-Session overlap detection. See
+        // `memory-run-store.reapExpired` for the rationale; both
+        // implementations share the same `isNewerSession` callback
+        // contract so a reaper that wires `SessionReservationStore` in
+        // one place works against either backend.
+        if (opts?.isNewerSession && (await opts.isNewerSession(run))) {
+          skippedNewerSession++
+          opts.onReap?.({
+            runId: run.id,
+            sessionId: run.sessionId,
+            workerId: run.workerId,
+            attempts: run.attempts,
+            errorAttempts: run.errorAttempts,
+            outcome: 'skipped_newer_session',
+          })
+          continue
+        }
         const tooOld = opts?.maxAgeMs !== undefined && run.startedAt !== null && now - run.startedAt > opts.maxAgeMs
         const reason = tooOld ? 'run exceeded max age (reaped)' : 'lease expired (reaped)'
         const r = await retire(run, reason, !tooOld, { ifExpiredAt: now })
@@ -289,7 +311,7 @@ async claimById(runId, workerId, ttlMs): Promise<Run | null> {
         })
       }
       if (onRetired && retiredSessionIds.length) await onRetired(retiredSessionIds)
-      return { requeued, parked }
+      return { requeued, parked, skippedNewerSession }
     },
 
     waitFor(runId, timeoutMs = 60_000): Promise<Run> {

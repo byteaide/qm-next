@@ -102,9 +102,38 @@ export const RUN_METRICS = {
   ATTEMPT_RETRY_TOTAL: 'run_attempt_retry_total',
   LEASE_RENEW_TOTAL: 'run_lease_renew_total',
   LEASE_REAP_TOTAL: 'run_lease_reap_total',
+  LEASE_REAP_NEWER_SESSION_TOTAL: 'lease_reaper_newer_session_total',
   LEASE_OWNERSHIP_CONFLICT_TOTAL: 'run_lease_ownership_conflict_total',
   REDACTION_HIT_TOTAL: 'redaction_hit_total',
 } as const
+
+/**
+ * Process-wide counter registry used by callers that do not inject
+ * their own. Production deployments inject a backend-backed registry
+ * via `ReaperOptions.metrics`; this default is the in-memory fallback
+ * so unit tests and small-scale deployments do not have to wire one
+ * up just to compile.
+ */
+const defaultRegistry = createRunMetricsRegistry()
+
+/**
+ * Slice 1.3 — increment the `lease_reaper_newer_session_total`
+ * counter for `count` skipped Runs. Called by the reaper when no
+ * `metrics` registry is injected. The `outcome` label is fixed at
+ * `skipped_newer_session` because that is the only event the reaper
+ * emits on this counter; other reaper outcomes (`requeued`, `parked`)
+ * roll up into `LEASE_REAP_TOTAL` instead.
+ */
+export function bumpReaperNewerSessionCounter(count: number): void {
+  if (count <= 0) return
+  defaultRegistry.add(RUN_METRICS.LEASE_REAP_NEWER_SESSION_TOTAL, count, { outcome: 'skipped_newer_session' })
+}
+
+/** Exposed for tests so the in-memory registry can be reset between
+ *  test cases. Production code MUST NOT use this. */
+export function _resetDefaultRunMetricsRegistryForTests(): void {
+  defaultRegistry.reset()
+}
 
 /**
  * Boundary helper: record a `redaction_hit` whenever a secret-shaped

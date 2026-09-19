@@ -50,7 +50,18 @@ export interface ReapEvent {
   workerId: string | null
   attempts: number
   errorAttempts: number
-  outcome: 'requeued' | 'parked'
+  /**
+   * Slice 1.3 — outcome of a reap pass on a single Run.
+   *   - `requeued` — lease expired or max-age reached; the Run is
+   *     restored to `pending` so a worker can re-claim it.
+   *   - `parked` — lease expired AND the Run has exhausted its retry
+   *     budget; the Run is moved to `failed`.
+   *   - `skipped_newer_session` — the lease expired but a newer
+   *     Session has an active continuation reservation on the same
+   *     Session id (ADR-0010 / ADR-0001); the reaper leaves the Run
+   *     row alone so the newer Session's Run can complete.
+   */
+  outcome: 'requeued' | 'parked' | 'skipped_newer_session'
 }
 
 export interface RunDeliveryState {
@@ -144,8 +155,21 @@ export interface RunStore {
 
   reapExpired(
     onRetired?: (sessionIds: string[]) => Promise<void>,
-    opts?: { maxAgeMs?: number; onReap?: (event: ReapEvent) => void },
-  ): Promise<{ requeued: number; parked: number }>
+    opts?: {
+      maxAgeMs?: number
+      onReap?: (event: ReapEvent) => void
+      /**
+       * Slice 1.3 — newer-Session overlap check. Called for every
+       * candidate Run whose lease has expired. When it returns `true`,
+       * the reaper emits a `skipped_newer_session` event and leaves
+       * the Run row alone. The RunStore does not import
+       * `@qm/concurrency` directly; the caller (typically the reaper)
+       * wraps `SessionReservationStore.listActiveForSession` into this
+       * callback.
+       */
+      isNewerSession?: (run: Run) => Promise<boolean>
+    },
+  ): Promise<{ requeued: number; parked: number; skippedNewerSession: number }>
 
   waitFor(runId: string, timeoutMs?: number): Promise<Run>
 

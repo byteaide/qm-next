@@ -220,14 +220,39 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
 
     async reapExpired(
       onRetired?: (sessionIds: string[]) => Promise<void>,
-      opts?: { maxAgeMs?: number; onReap?: (event: ReapEvent) => void },
+      opts?: {
+        maxAgeMs?: number
+        onReap?: (event: ReapEvent) => void
+        isNewerSession?: (run: Run) => Promise<boolean>
+      },
     ) {
       const now = Date.now()
       const expired = [...runs.values()].filter((run) => leaseLapsed(run, now))
       let requeued = 0
       let parked = 0
+      let skippedNewerSession = 0
       const retiredSessionIds: string[] = []
       for (const run of expired) {
+        // Slice 1.3 — newer-Session overlap detection. When the caller
+        // passes `isNewerSession` (typically wrapping
+        // `SessionReservationStore.listActiveForSession`) and it
+        // returns `true`, the Run is part of an approval-continuation
+        // chain: a newer Session already has an active reservation on
+        // the same Session id, so the older Run's lease must NOT be
+        // reaped (ADR-0010 / ADR-0001). The Run row stays as-is and a
+        // `skipped_newer_session` event is emitted.
+        if (opts?.isNewerSession && (await opts.isNewerSession(run))) {
+          skippedNewerSession++
+          opts.onReap?.({
+            runId: run.id,
+            sessionId: run.sessionId,
+            workerId: run.workerId,
+            attempts: run.attempts,
+            errorAttempts: run.errorAttempts,
+            outcome: 'skipped_newer_session',
+          })
+          continue
+        }
         const tooOld = opts?.maxAgeMs !== undefined && run.startedAt !== null && now - run.startedAt > opts.maxAgeMs
         const reason = tooOld ? 'run exceeded max age (reaped)' : 'lease expired (reaped)'
         const workerId = run.workerId
@@ -246,7 +271,7 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
         })
       }
       if (onRetired && retiredSessionIds.length) await onRetired(retiredSessionIds)
-      return { requeued, parked }
+      return { requeued, parked, skippedNewerSession }
     },
 
     waitFor(runId, timeoutMs = 60_000) {
