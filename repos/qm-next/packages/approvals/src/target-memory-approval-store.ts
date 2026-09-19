@@ -18,6 +18,11 @@ import type {
   ApprovalStore,
 } from '@qm/types'
 import { APPROVAL_DEFAULT_TTL_MS } from '@qm/types'
+import {
+  bumpApprovalRequestOutcome,
+  bumpApprovalRenewal,
+  bumpApprovalTtlSweep,
+} from '@qm/runs'
 
 /** Optional Clock injection so tests stay deterministic. */
 export interface MemoryTargetApprovalStoreOptions {
@@ -104,6 +109,8 @@ export function createMemoryTargetApprovalStore(
       }
       const request = buildRequest(input, id)
       records.set(id, { request })
+      // Slice 2.7 — count every newly created Approval Request.
+      bumpApprovalRequestOutcome('requested')
       return snapshot(records.get(id)!)
     },
 
@@ -154,6 +161,8 @@ export function createMemoryTargetApprovalStore(
         decidedAt: decision.now ?? clock.now(),
         decidedBy: decision.decidedBy,
       }
+      // Slice 2.7 — count approved/rejected decisions.
+      bumpApprovalRequestOutcome(decision.approved ? 'approved' : 'rejected')
       return { outcome: 'decided', approved: decision.approved, request: snapshot(rec) }
     },
 
@@ -169,6 +178,8 @@ export function createMemoryTargetApprovalStore(
         }
       }
       rec.request = { ...rec.request, status: 'expired', decidedAt: t }
+      // Slice 2.7 — count expirations driven by the durable sweep.
+      bumpApprovalRequestOutcome('expired')
       return { outcome: 'decided', approved: false, request: snapshot(rec) }
     },
 
@@ -208,6 +219,8 @@ export function createMemoryTargetApprovalStore(
         ttlMs: newExpiry - rec.request.createdAt,
         renewalCount: (rec.request.renewalCount ?? 0) + 1,
       }
+      // Slice 2.7 — count accepted renewals.
+      bumpApprovalRenewal('accepted')
       return { outcome: 'renewed', request: snapshot(rec) }
     },
   }
@@ -248,6 +261,14 @@ export async function runApprovalTTLSweep(
     if (outcome.outcome === 'decided') {
       expired.push(outcome.request)
     }
+  }
+  if (expired.length === 0) {
+    // Slice 2.7 — track the no-op tick so the runbook alert (§10) can
+    // detect a dead sweep: "approval_ttl_sweep_total{outcome=no_op}
+    // sustained over more than 2× the sweep interval".
+    bumpApprovalTtlSweep('no_op')
+  } else {
+    bumpApprovalTtlSweep('expired')
   }
   return expired
 }

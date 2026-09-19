@@ -135,3 +135,43 @@ const reaper = createReaper(runs, sessions, {
 - Backfill 工具：Phase 1 假设新写入已走 target 路径；旧 legacy 行的回填不在本 slice。
 
 **回滚路径：** §4.6 — 摘流 → 回退镜像 → `databaseUrl` 不动（schema 向后兼容）。`target.run-observation` flag 切回 `false` 即可让所有新写入走 legacy 路径。
+
+## 10. Phase 2 Command Gate 与 Approval 指标（slice 2.7）
+
+**范围:** Phase 2 §2.7 落地的 Command Gate 决策、Approval 生命周期、TTL sweep、Reservation release order 的指标、告警阈值、排查路径。
+
+**接线入口:** `packages/runs/src/observability.ts` 的 `RUN_METRICS` 常量 + 默认 `RunMetricsRegistry`。生产通过环境 profile 注入后端实现（Prometheus / OTel / Sentry 任选其一）；未注入时降级到默认内存 registry。
+
+**指标清单（Phase 2 新增）：**
+
+| 常量 | 指标名 | labels | 含义 |
+|------|--------|--------|------|
+| `COMMAND_GATE_DECISION_TOTAL` | `command_gate_decision_total` | `decision={allow,deny,require_approval}` | Command Gate 决策计数 |
+| `APPROVAL_REQUEST_TOTAL` | `approval_request_total` | `outcome={requested,approved,rejected,expired}` | Approval Request 生命周期计数 |
+| `APPROVAL_RENEWAL_TOTAL` | `approval_renewal_total` | `outcome={accepted,rejected}` | TTL 续期结果 |
+| `APPROVAL_TTL_SWEEP_TOTAL` | `approval_ttl_sweep_total` | `outcome={expired,no_op}` | TTL sweep 每次 tick 的结果 |
+| `SESSION_RESERVATION_RELEASE_ORDER_VIOLATION_TOTAL` | `session_reservation_release_order_violation_total` | (无) | Release order 违反（durable→event→release 边界） |
+
+**告警阈值（必须 page on-call，§2.7 plan）：**
+
+| 指标 | 阈值 | 排查 |
+|------|------|------|
+| `command_gate_decision_total{decision="deny"}` | 15min 窗口速率 spike | 某 policy 触发 deny 风暴 → 查 policy 配置 + 命令来源 |
+| `approval_ttl_sweep_total{outcome="no_op"}` | 持续 > 2× sweep interval（sweep 死了） | 检查 sweep cron/leader lease → 找 leader 切换日志 |
+| `session_reservation_release_order_violation_total` | 任意 > 0 | **Incident**：违反 §2.6 边界；立刻 grep release 调用方，看是否有直接绕过 helper 的路径 |
+
+**On-call 5min 响应：**
+
+1. `approval_request_total{outcome="expired"}` 持续 spike → 检查 sweep 周期是否够短；可能是 maxTtlMs 配错导致 approval 在过期窗口里堆积。
+2. `approval_request_total{outcome="rejected"}` 持续 spike → 检查 gate 配置；operator 是否误把 allowlist 收紧。
+3. `session_reservation_release_order_violation_total > 0` → 立即停服务读路径，grep `releaseApprovalReservation` 调用点；此 counter 必须永远为 0。
+4. `command_gate_decision_total{decision="deny"}` spike → grep 命令来源 + 查 policy 变更记录；可能是一次策略升级的回滚信号。
+
+**Phase 2 不在 §2.7 范围内（Phase 3+ 留）：**
+
+- Decision UI 渲染（`packages/web-ui` 已就绪的决策入口 — slice 2.4 已埋点）
+- Approval card 渲染（§U26.x 计划）
+- 业务 SLO 看板（Phase 2 只覆盖 on-call 指标）
+- Session-level authorization lookup（Phase 2 留 §3）
+
+**回滚路径：** §4.6 — flag 切回 baseline + sweep 周期调长不会破坏 invariants；`session_reservation_release_order_violation_total` 不归零时需要紧急回退到上一版本（incident）。

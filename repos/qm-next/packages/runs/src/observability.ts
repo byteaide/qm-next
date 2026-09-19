@@ -108,6 +108,14 @@ export const RUN_METRICS = {
    *  before its terminal Run Event is durable. Must always be 0; any
    *  non-zero value is an incident (plan §2.7 alerts). */
   SESSION_RESERVATION_RELEASE_ORDER_VIOLATION_TOTAL: 'session_reservation_release_order_violation_total',
+  /** Slice 2.7 — Command Gate decision counter. */
+  COMMAND_GATE_DECISION_TOTAL: 'command_gate_decision_total',
+  /** Slice 2.7 — Approval Request outcome counter. */
+  APPROVAL_REQUEST_TOTAL: 'approval_request_total',
+  /** Slice 2.7 — Approval renewal outcome counter. */
+  APPROVAL_RENEWAL_TOTAL: 'approval_renewal_total',
+  /** Slice 2.7 — TTL sweep outcome counter. */
+  APPROVAL_TTL_SWEEP_TOTAL: 'approval_ttl_sweep_total',
   REDACTION_HIT_TOTAL: 'redaction_hit_total',
 } as const
 
@@ -141,6 +149,26 @@ export function bumpReaperNewerSessionCounter(count: number): void {
 export function bumpReservationReleaseOrderViolation(count = 1): void {
   if (count <= 0) return
   defaultRegistry.add(RUN_METRICS.SESSION_RESERVATION_RELEASE_ORDER_VIOLATION_TOTAL, count)
+}
+
+/** Slice 2.7 — Command Gate decision increments. */
+export function bumpCommandGateDecision(decision: 'allow' | 'deny' | 'require_approval'): void {
+  defaultRegistry.inc(RUN_METRICS.COMMAND_GATE_DECISION_TOTAL, { decision })
+}
+
+/** Slice 2.7 — Approval Request outcome increments. */
+export function bumpApprovalRequestOutcome(outcome: 'requested' | 'approved' | 'rejected' | 'expired'): void {
+  defaultRegistry.inc(RUN_METRICS.APPROVAL_REQUEST_TOTAL, { outcome })
+}
+
+/** Slice 2.7 — Approval renewal outcome increments. */
+export function bumpApprovalRenewal(outcome: 'accepted' | 'rejected'): void {
+  defaultRegistry.inc(RUN_METRICS.APPROVAL_RENEWAL_TOTAL, { outcome })
+}
+
+/** Slice 2.7 — TTL sweep outcome increments. */
+export function bumpApprovalTtlSweep(outcome: 'expired' | 'no_op'): void {
+  defaultRegistry.inc(RUN_METRICS.APPROVAL_TTL_SWEEP_TOTAL, { outcome })
 }
 
 /** Exposed for tests so the in-memory registry can be reset between

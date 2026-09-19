@@ -32,6 +32,7 @@ import { randomUUID } from 'node:crypto'
 import { CommandPolicyNotConfigured, type CommandPolicyRegistry } from './command-policy.ts'
 import { createAllowlistPolicy } from './policies/allowlist.ts'
 import { createDefaultDenylistPolicy, createDefaultDenylistPolicyAlias } from './policies/default-denylist.ts'
+import { bumpCommandGateDecision } from '@qm/runs'
 
 export interface CreateCommandGateOptions {
   /** Optional allocator for `requestId` (test injection). Default
@@ -78,6 +79,9 @@ export function createCommandGate(
         )
       }
       const decision = await policy.evaluate(effectiveRequest)
+      // Slice 2.7 — tick `command_gate_decision_total{decision}` so
+      // the runbook §10 alert has a backing signal.
+      bumpCommandGateDecision(decision.decision)
       // Stamp the canonical requestId back onto the decision so
       // producers can correlate without re-reading the request.
       return { ...decision, requestId: effectiveRequest.id }
