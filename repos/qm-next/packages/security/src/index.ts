@@ -57,6 +57,12 @@ export {
   type CreateCommandGateOptions,
 } from './command-gate.ts'
 export {
+  configureProductionCommandPolicy,
+  PRODUCTION_DEFAULT_POLICY_ID,
+  QM_COMMAND_POLICY_ENV,
+  type ConfigureProductionCommandPolicyOptions,
+} from './command-policy-config.ts'
+export {
   BASELINE_DENY_POLICY_ID,
   DEFAULT_DENYLIST_POLICY_ID,
   classRequiresGate,
