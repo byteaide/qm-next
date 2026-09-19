@@ -65,3 +65,73 @@
 - **surface-cache / channel_messages 等缓存类**：not-carried，重同步可重建。
 - **webhooks**：PG twin 已落（同名 `webhooks` 表），但 qm 与 qm-next 记录形状不同——**数据走 export-seed，不做行级拷贝**。
 - **S3 字节后端**：v1 仅 local-FS `DurableByteStore`；S3 变体平移延后（偏差记录 `parity-deviations.md` §P5 20.0）。
+
+## 9. Phase 1 Run Lifecycle 指标（slice 1.6）
+
+**范围:** Phase 1 §1.6 落地的 Run Event 日志、Lease 调度、新er-Session 跳过与脱敏指标的接线、告警阈值、排查路径。
+
+**接线入口:** `packages/runs/src/observability.ts` 的 `RUN_METRICS` 常量是权威命名。`createRunMetricsRegistry()` 默认是 in-memory 实现（测试用）；生产环境通过 `ReaperOptions.metrics: { inc(name, labels) }` 注入后端实现（Prometheus / OTel / Sentry metrics 任选其一）。未注入时 reaper 走 fallback helper `bumpReaperNewerSessionCounter` 把数据打到 `@qm/runs` 内部默认 registry。
+
+**集成示例（生产入口，伪代码）：**
+
+```ts
+import { createReaper, createRunMetricsRegistry, RUN_METRICS } from '@qm/runs'
+
+const registry = createRunMetricsRegistry()
+// 后端接入（伪代码）：wireBackend(registry, { pushgateway: process.env.PUSHGATEWAY_URL })
+
+const reaper = createReaper(runs, sessions, {
+  intervalMs: 10_000,
+  reservations: sessionReservations,        // slice 1.3: 跳过 newer-Session overlap
+  metrics: registry,                          // slice 1.6: 注入 metrics registry
+  errors: errorSink,                          // 结构化错误日志（run_reap_* codes）
+})
+```
+
+**指标清单（`RUN_METRICS`）：**
+
+| 常量 | 指标名 | labels | 含义 |
+|------|--------|--------|------|
+| `EVENT_COMMIT_TOTAL` | `run_event_commit_total` | `outcome={succeeded,failed,cancelled}` | Run Event 日志成功 commit 计数 |
+| `EVENT_TX_FAILURES_TOTAL` | `run_event_transaction_failures_total` | `stage={append,commit}` | Event 写入事务失败计数 |
+| `SEQ_CONFLICT_TOTAL` | `run_seq_conflict_total` | (无) | `(run_id, seq)` 重复分配冲突（Phase 0 boundary） |
+| `ATTEMPT_RETRY_TOTAL` | `run_attempt_retry_total` | (无) | Attempt 被 requeue 计数 |
+| `LEASE_RENEW_TOTAL` | `run_lease_renew_total` | `outcome={ok,token_mismatch,expired,not_found}` | Lease renew 结果 |
+| `LEASE_REAP_TOTAL` | `run_lease_reap_total` | `outcome={requeued,parked}` | Reaper 实际 retire 计数 |
+| `LEASE_REAP_NEWER_SESSION_TOTAL` | `lease_reaper_newer_session_total` | `outcome={skipped_newer_session}` | Reaper 跳过（newer-Session overlap） |
+| `LEASE_OWNERSHIP_CONFLICT_TOTAL` | `run_lease_ownership_conflict_total` | (无) | token 不匹配 / ownership 冲突 |
+| `REDACTION_HIT_TOTAL` | `redaction_hit_total` | `sink={observation,log}` | 边界脱敏命中 |
+
+**Reaper 错误码（`ReaperErrorSink.record`，§1.6 配套）：**
+
+| Code | 触发条件 | 排查 |
+|------|---------|------|
+| `run_reap_parked` | Lease 过期 + max attempts 已满 | Run 达到最大重试次数，进入 failed。检查 Run.reason 字段 |
+| `run_reap_requeued` | Lease 过期，但仍有重试预算 | 正常路径；spike 通常意味着 worker crash |
+| `run_reap_skipped_newer_session` | Approval continuation 场景：Session 已被新 Run 占用 | 正常路径；spike 关联 approval 流量 |
+
+**告警阈值（建议起始值，按 5min 窗口）：**
+
+| 指标 | Warning | Critical | 排查 |
+|------|---------|----------|------|
+| `run_event_transaction_failures_total` 速率 | > 1/s | > 10/s | PG 写失败/事务竞争 → 查 PG 慢日志 |
+| `run_seq_conflict_total` 速率 | > 0 | > 0（恒为 0） | Phase 0 boundary 违反 → 立刻 `aidevops security` |
+| `run_lease_ownership_conflict_total` 速率 | > 0.1/s | > 1/s | Worker 抢占/崩溃 → 查 worker 日志 |
+| `redaction_hit_total` 速率 | > 0.01/s（稳态） | > 0.1/s | 某 producer 漏脱敏 → 查对应 Run 的 source path |
+| `run_reap_skipped_newer_session` 速率 | 任意 spike | - | Approval 续接正常；如比例 > 50% 查 approval 路径 |
+
+**On-call 排查路径（5min 响应）：**
+
+1. 拉 `/v1/admin/monitoring/summary`（20.0 monitoring 面）看组件健康。
+2. 对照指标表查异常指标 → 找到对应 `outcome` label。
+3. 对 `run_reap_skipped_newer_session` spike：对照 SessionReservationStore 调用方；正常比例 < 5%。
+4. 对 `redaction_hit_total` spike：取样本 Run，grep producer 日志找未脱敏字段。
+5. 对 `run_seq_conflict_total > 0`：立即锁定生产写入路径（Phase 0 boundary 违反，架构门应已拦截）。
+
+**已知不在 §1.6 范围内（留待 Phase 2）：**
+
+- Session → visible-principals lookup（ADR-0014 §3.2）；目前 web-ui/api observation 用 principal-only heuristic。
+- 终端用户可见的 SLO 看板（slice 1.6 只覆盖 on-call 指标，不覆盖业务 SLO）。
+- Backfill 工具：Phase 1 假设新写入已走 target 路径；旧 legacy 行的回填不在本 slice。
+
+**回滚路径：** §4.6 — 摘流 → 回退镜像 → `databaseUrl` 不动（schema 向后兼容）。`target.run-observation` flag 切回 `false` 即可让所有新写入走 legacy 路径。

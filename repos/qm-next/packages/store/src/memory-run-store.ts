@@ -5,16 +5,38 @@
  */
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import type { EnqueueInput, EnqueueResult, ReapEvent, Run, RunDeliveryState, RunStore } from '@qm/types'
-import { isTerminal, leaseLapsed } from '@qm/types'
+import type { EnqueueInput, EnqueueResult, FailureReason, ReapEvent, RolloutFlag, Run, RunDeliveryState, RunSource, RunStore } from '@qm/types'
+import { assertTargetRunInvariant, isTerminal, isTerminalTargetState, leaseLapsed } from '@qm/types'
 
-export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
+/**
+ * Slice 1.5 — accept an optional `runSourceFlag` so the store can
+ * stamp freshly enqueued rows with `runSource='target'` when the
+ * Phase 1 rollout flag flips on. When the flag is omitted the store
+ * defaults to `runSource='legacy'` (Phase 0 freeze); this preserves
+ * every existing call site without modification.
+ *
+ * Linked ADRs: ADR-0001 (Run owns terminal events).
+ */
+export function createMemoryRunStore(
+  opts?: { maxClaims?: number; runSourceFlag?: RolloutFlag | null },
+): RunStore {
   const maxClaims = opts?.maxClaims ?? Number.POSITIVE_INFINITY
+  const runSourceFlag = opts?.runSourceFlag ?? null
   const runs = new Map<string, Run>()
   const byKey = new Map<string, string>()
   const events = new EventEmitter()
   events.setMaxListeners(0)
   const terminalListeners: Array<(run: Run) => void> = []
+
+  /**
+   * Slice 1.5 — read the current `runSource` literal from the
+   * registered flag. The flag is read at write time so flipping the
+   * env override in production takes effect on the next enqueue;
+   * cached reads would defeat the rollout switch.
+   */
+  function currentRunSource(): RunSource {
+    return runSourceFlag && runSourceFlag.read() ? 'target' : 'legacy'
+  }
 
   function sessionHasRunning(sessionId: string, exceptId?: string): boolean {
     for (const r of runs.values()) {
@@ -24,14 +46,20 @@ export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
   }
 
   function settle(run: Run): void {
-    if (!isTerminal(run.status)) return
+    // Slice 1.5 — settle fires on either terminal signal so target
+    // rows (whose `status` never becomes `'done'`) still emit the
+    // terminal event when `targetState` reaches `succeeded` /
+    // `failed` / `cancelled`. Legacy rows continue to fire via the
+    // legacy status path.
+    if (!isTerminal(run.status) && !isTerminalTargetState(run.targetState)) return
     events.emit(run.id, run)
     for (const listener of terminalListeners) listener(run)
   }
 
-  function lease(run: Run, workerId: string, ttlMs: number): Run {
+function lease(run: Run, workerId: string, ttlMs: number): Run {
     run.status = 'running'
-    run.leaseToken = randomUUID()
+    run.targetState = 'running'
+    run.leaseToken = [redacted-credential])
     run.leaseExpiresAt = Date.now() + ttlMs
     run.workerId = workerId
     run.attempts += 1
@@ -43,7 +71,7 @@ export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
     run: Run,
     error: string,
     retry: boolean,
-    opts?: { ifExpiredAt?: number; countsAsError?: boolean },
+    opts?: { ifExpiredAt?: number; countsAsError?: boolean; failureReason?: FailureReason },
   ): { requeued: boolean; applied: boolean } {
     if (run.status !== 'running') return { requeued: false, applied: false }
     if (opts?.ifExpiredAt !== undefined && (run.leaseExpiresAt === null || run.leaseExpiresAt > opts.ifExpiredAt)) {
@@ -56,15 +84,20 @@ export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
     const overClaimed = run.attempts >= maxClaims
     if (retry && run.errorAttempts < run.maxAttempts && !overClaimed) {
       run.status = 'pending'
+      run.targetState = 'queued'
+      run.failureReason = undefined
       return { requeued: true, applied: true }
     }
     run.status = 'failed'
+    run.targetState = 'failed'
+    run.failureReason = opts?.failureReason ?? 'execution_failed'
     const reason =
       !opts?.countsAsError && overClaimed && retry && run.errorAttempts < run.maxAttempts
         ? `run parked after ${run.attempts} claims without completing (suspected crash loop)`
         : error
     run.result = { status: 'failed', sessionId: run.sessionId, reason }
     run.finishedAt = Date.now()
+    assertTargetRunInvariant(run)
     settle(run)
     return { requeued: false, applied: true }
   }
@@ -84,6 +117,8 @@ export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
         id: randomUUID(),
         sessionId,
         status: 'pending',
+        targetState: 'queued',
+        runSource: currentRunSource(),
         request,
         result: null,
         deliveryState: null,
@@ -98,6 +133,7 @@ export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
         startedAt: null,
         finishedAt: null,
       }
+      assertTargetRunInvariant(run)
       runs.set(run.id, run)
       if (dedupKey) byKey.set(dedupKey, run.id)
       return { run, deduped: false }
@@ -129,6 +165,7 @@ export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
       const run = runs.get(runId)
       if (!run || run.status !== 'running' || run.leaseToken !== leaseToken) return false
       run.status = 'pending'
+      run.targetState = 'queued'
       run.leaseToken = null
       run.leaseExpiresAt = null
       run.workerId = null
@@ -138,11 +175,21 @@ export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
     async complete(runId, leaseToken, result) {
       const run = runs.get(runId)
       if (!run || run.leaseToken !== leaseToken) return false
-      run.status = 'done'
+      // Slice 1.5 — when the row was written by the target path
+      // (`runSource === 'target'`), the legacy `status='done'`
+      // literal is forbidden; the target semantics live exclusively
+      // in `targetState`. Legacy rows still write both fields so the
+      // existing wire shape (web SSE, api relay) keeps reading.
+      if (run.runSource === 'legacy') {
+        run.status = 'done'
+      }
+      run.targetState = 'succeeded'
+      run.failureReason = undefined
       run.result = result
       run.leaseToken = null
       run.leaseExpiresAt = null
       run.finishedAt = Date.now()
+      assertTargetRunInvariant(run)
       settle(run)
       return true
     },
@@ -254,14 +301,39 @@ export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
 
     async reapExpired(
       onRetired?: (sessionIds: string[]) => Promise<void>,
-      opts?: { maxAgeMs?: number; onReap?: (event: ReapEvent) => void },
+      opts?: {
+        maxAgeMs?: number
+        onReap?: (event: ReapEvent) => void
+        isNewerSession?: (run: Run) => Promise<boolean>
+      },
     ) {
       const now = Date.now()
       const expired = [...runs.values()].filter((run) => leaseLapsed(run, now))
       let requeued = 0
       let parked = 0
+      let skippedNewerSession = 0
       const retiredSessionIds: string[] = []
       for (const run of expired) {
+        // Slice 1.3 — newer-Session overlap detection. When the caller
+        // passes `isNewerSession` (typically wrapping
+        // `SessionReservationStore.listActiveForSession`) and it
+        // returns `true`, the Run is part of an approval-continuation
+        // chain: a newer Session already has an active reservation on
+        // the same Session id, so the older Run's lease must NOT be
+        // reaped (ADR-0010 / ADR-0001). The Run row stays as-is and a
+        // `skipped_newer_session` event is emitted.
+        if (opts?.isNewerSession && (await opts.isNewerSession(run))) {
+          skippedNewerSession++
+          opts.onReap?.({
+            runId: run.id,
+            sessionId: run.sessionId,
+            workerId: run.workerId,
+            attempts: run.attempts,
+            errorAttempts: run.errorAttempts,
+            outcome: 'skipped_newer_session',
+          })
+          continue
+        }
         const tooOld = opts?.maxAgeMs !== undefined && run.startedAt !== null && now - run.startedAt > opts.maxAgeMs
         const reason = tooOld ? 'run exceeded max age (reaped)' : 'lease expired (reaped)'
         const workerId = run.workerId
@@ -280,7 +352,7 @@ export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
         })
       }
       if (onRetired && retiredSessionIds.length) await onRetired(retiredSessionIds)
-      return { requeued, parked }
+      return { requeued, parked, skippedNewerSession }
     },
 
     waitFor(runId, timeoutMs = 60_000) {

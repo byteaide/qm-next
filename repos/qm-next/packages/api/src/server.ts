@@ -39,6 +39,7 @@ import { adminRoutes, type AdminDeps } from './routes/admin-routes.ts'
 import { skillPackRoutes, type SkillPackDeps } from './routes/skill-pack-routes.ts'
 import { userModelAuthRoutes, type UserModelAuthDeps } from './routes/user-model-auth-routes.ts'
 import { authBrokerRoutes, credentialRoutes, egressAuditRoutes, emojiRoutes, secretDropRoutes, type AuthBrokerDeps, type CredentialDeps, type SecretDropDeps } from './routes/parity-lanes-routes.ts'
+import { runsObservationRoutes, type RunsObservationRoutesDeps } from './routes/runs-observation-routes.ts'
 import { registerAdminUi, type AdminUiDeps } from './routes/admin-ui-routes.ts'
 import { registerPortal, type PortalDeps } from '@qm/portal'
 
@@ -119,6 +120,8 @@ export interface ApiDeps {
   portal?: PortalDeps
   /** Observability (20.0): readiness probe + monitoring summary inputs. */
   monitoring?: MonitoringDeps
+  /** Phase 1 slice 1.4 — Run Observation HTTP routes (snapshot/replay/subscribe). */
+  runsObservation?: RunsObservationRoutesDeps
 }
 
 export interface MonitoringDeps {
@@ -320,6 +323,9 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
   }
   if (deps.portal) {
     registerPortal(app, deps.portal)
+  }
+  if (deps.runsObservation) {
+    registerRouteTable(app, opts, runsObservationRoutes(deps.runsObservation))
   }
 
   app.get('/v1/runs/:id', async (request, reply) => {
