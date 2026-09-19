@@ -182,6 +182,19 @@ export function isTerminal(status: RunStatus): boolean {
   return TERMINAL.has(status)
 }
 
+/**
+ * Slice 1.5 — terminal-state check on the *target* state machine.
+ * Used by `settle()` so target rows (which never write the legacy
+ * `status='done'` literal) still fire the terminal listener when the
+ * targetState reaches `succeeded` / `failed` / `cancelled`. Legacy
+ * rows also pass this check because every legacy terminal write
+ * already sets `targetState` to the same value (`succeeded` on
+ * `complete`, `failed` on `retire`).
+ */
+export function isTerminalTargetState(state: RunState): boolean {
+  return state === 'succeeded' || state === 'failed' || state === 'cancelled'
+}
+
 export function errorParks(run: Pick<Run, 'errorAttempts' | 'maxAttempts' | 'attempts'>, maxClaims?: number): boolean {
   return run.errorAttempts + 1 >= run.maxAttempts || (maxClaims !== undefined && run.attempts >= maxClaims)
 }

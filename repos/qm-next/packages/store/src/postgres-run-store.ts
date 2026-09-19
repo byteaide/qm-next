@@ -20,7 +20,7 @@ import type {
   TurnInput,
   TurnResult,
 } from '@qm/types'
-import { assertTargetRunInvariant, isTerminal } from '@qm/types'
+import { assertTargetRunInvariant, isTerminal, isTerminalTargetState, type RolloutFlag } from '@qm/types'
 import { createPgPool, errMessage, type PgPool } from './pg-pool.ts'
 import { RUN_SCHEMA_STATEMENTS } from './schema.ts'
 
@@ -56,15 +56,33 @@ export interface PostgresRunStore extends RunStore {
   close(): Promise<void>
 }
 
-export function createPostgresRunStore(connectionString: string, opts?: { maxClaims?: number }): PostgresRunStore {
+export function createPostgresRunStore(
+  connectionString: string,
+  opts?: { maxClaims?: number; runSourceFlag?: RolloutFlag | null },
+): PostgresRunStore {
   const maxClaims = opts?.maxClaims ?? Number.POSITIVE_INFINITY
+  const runSourceFlag = opts?.runSourceFlag ?? null
   const events = new EventEmitter()
   events.setMaxListeners(0)
   const { query, close: closePool }: PgPool = createPgPool(connectionString, RUN_SCHEMA_STATEMENTS)
 
+  /**
+   * Slice 1.5 — read the current `run_source` literal from the
+   * registered flag. The flag is read at write time so flipping the
+   * env override in production takes effect on the next enqueue;
+   * cached reads would defeat the rollout switch.
+   */
+  function currentRunSource(): RunSource {
+    return runSourceFlag && runSourceFlag.read() ? 'target' : 'legacy'
+  }
+
   const terminalListeners: Array<(run: Run) => void> = []
   function settle(run: Run | null): void {
-    if (!run || !isTerminal(run.status)) return
+    if (!run) return
+    // Slice 1.5 — same dual-terminal check as memory-run-store so
+    // target rows fire the terminal event via `targetState` while
+    // legacy rows continue to fire via `status`.
+    if (!isTerminal(run.status) && !isTerminalTargetState(run.targetState)) return
     events.emit(run.id, run)
     for (const listener of terminalListeners) listener(run)
   }
@@ -116,11 +134,12 @@ const result: TurnResult = { status: 'failed', sessionId: run.sessionId, reason 
 
     async enqueue({ sessionId, request, dedupKey, maxAttempts = 3 }: EnqueueInput): Promise<EnqueueResult> {
       const id = randomUUID()
+      const runSource = currentRunSource()
       const { rows: inserted } = await query(
         `INSERT INTO runs(id, session_id, status, target_state, run_source, request, idempotency_key, attempts, max_attempts, created_at)
-         VALUES ($1,$2,'pending','queued','legacy',$3,$4,0,$5,$6)
+         VALUES ($1,$2,'pending','queued',$7,$3,$4,0,$5,$6)
          ON CONFLICT (idempotency_key) DO NOTHING RETURNING *`,
-        [id, sessionId, JSON.stringify(request), dedupKey ?? null, maxAttempts, Date.now()],
+        [id, sessionId, JSON.stringify(request), dedupKey ?? null, maxAttempts, Date.now(), runSource],
       )
       if (inserted[0]) {
         const run = rowToRun(inserted[0])
@@ -192,8 +211,15 @@ async claimById(runId, workerId, ttlMs): Promise<Run | null> {
     },
 
     async complete(runId, leaseToken, result): Promise<boolean> {
+      // Slice 1.5 — fetch the row first so we know whether to skip
+      // the legacy `status='done'` write (target rows must not carry
+      // the literal; see `assertTargetRunInvariant`). The conditional
+      // branches keep PG parity with the memory twin.
+      const existing = await getRun(runId)
+      if (!existing || existing.leaseToken !== leaseToken) return false
+      const setStatus = existing.runSource === 'legacy' ? "status='done'," : ''
       const { rowCount } = await query(
-        "UPDATE runs SET status='done', target_state='succeeded', failure_reason=NULL, result=$1, lease_token=NULL, lease_expires_at=NULL, finished_at=$2 WHERE id=$3 AND lease_token=$4 AND status='running'",
+        `UPDATE runs SET ${setStatus} target_state='succeeded', failure_reason=NULL, result=$1, lease_token=NULL, lease_expires_at=NULL, finished_at=$2 WHERE id=$3 AND lease_token=$4 AND status='running'`,
         [JSON.stringify(result), Date.now(), runId, leaseToken],
       )
       if (rowCount > 0) {

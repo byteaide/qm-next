@@ -5,16 +5,38 @@
  */
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import type { EnqueueInput, EnqueueResult, FailureReason, ReapEvent, Run, RunDeliveryState, RunStore } from '@qm/types'
-import { assertTargetRunInvariant, isTerminal, leaseLapsed } from '@qm/types'
+import type { EnqueueInput, EnqueueResult, FailureReason, ReapEvent, RolloutFlag, Run, RunDeliveryState, RunSource, RunStore } from '@qm/types'
+import { assertTargetRunInvariant, isTerminal, isTerminalTargetState, leaseLapsed } from '@qm/types'
 
-export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
+/**
+ * Slice 1.5 — accept an optional `runSourceFlag` so the store can
+ * stamp freshly enqueued rows with `runSource='target'` when the
+ * Phase 1 rollout flag flips on. When the flag is omitted the store
+ * defaults to `runSource='legacy'` (Phase 0 freeze); this preserves
+ * every existing call site without modification.
+ *
+ * Linked ADRs: ADR-0001 (Run owns terminal events).
+ */
+export function createMemoryRunStore(
+  opts?: { maxClaims?: number; runSourceFlag?: RolloutFlag | null },
+): RunStore {
   const maxClaims = opts?.maxClaims ?? Number.POSITIVE_INFINITY
+  const runSourceFlag = opts?.runSourceFlag ?? null
   const runs = new Map<string, Run>()
   const byKey = new Map<string, string>()
   const events = new EventEmitter()
   events.setMaxListeners(0)
   const terminalListeners: Array<(run: Run) => void> = []
+
+  /**
+   * Slice 1.5 — read the current `runSource` literal from the
+   * registered flag. The flag is read at write time so flipping the
+   * env override in production takes effect on the next enqueue;
+   * cached reads would defeat the rollout switch.
+   */
+  function currentRunSource(): RunSource {
+    return runSourceFlag && runSourceFlag.read() ? 'target' : 'legacy'
+  }
 
   function sessionHasRunning(sessionId: string, exceptId?: string): boolean {
     for (const r of runs.values()) {
@@ -24,7 +46,12 @@ export function createMemoryRunStore(opts?: { maxClaims?: number }): RunStore {
   }
 
   function settle(run: Run): void {
-    if (!isTerminal(run.status)) return
+    // Slice 1.5 — settle fires on either terminal signal so target
+    // rows (whose `status` never becomes `'done'`) still emit the
+    // terminal event when `targetState` reaches `succeeded` /
+    // `failed` / `cancelled`. Legacy rows continue to fire via the
+    // legacy status path.
+    if (!isTerminal(run.status) && !isTerminalTargetState(run.targetState)) return
     events.emit(run.id, run)
     for (const listener of terminalListeners) listener(run)
   }
@@ -91,7 +118,7 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
         sessionId,
         status: 'pending',
         targetState: 'queued',
-        runSource: 'legacy',
+        runSource: currentRunSource(),
         request,
         result: null,
         deliveryState: null,
@@ -148,11 +175,14 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
     async complete(runId, leaseToken, result) {
       const run = runs.get(runId)
       if (!run || run.leaseToken !== leaseToken) return false
-      // Legacy write path: terminal success. targetState captures the
-      // target semantic; the legacy `status='done'` literal stays so
-      // existing surface code (web SSE, api relay) keeps reading the
-      // same wire shape. Phase 7 cleanup removes `status` entirely.
-      run.status = 'done'
+      // Slice 1.5 — when the row was written by the target path
+      // (`runSource === 'target'`), the legacy `status='done'`
+      // literal is forbidden; the target semantics live exclusively
+      // in `targetState`. Legacy rows still write both fields so the
+      // existing wire shape (web SSE, api relay) keeps reading.
+      if (run.runSource === 'legacy') {
+        run.status = 'done'
+      }
       run.targetState = 'succeeded'
       run.failureReason = undefined
       run.result = result
