@@ -18,6 +18,12 @@ import { rawSendJson, type RawRoute } from './raw-framework.ts'
 export interface ConnectorDeps {
   tokens: ConnectorTokenStore
   consentLinks?: null
+  /** OAuth provider registry surfaced via /v1/connectors/catalog and walked
+   *  by /v1/connectors/oauth/status and the provider-keyed mint/start routes.
+   *  Pass `[]` to ship a deployment with no OAuth providers (host-keyed
+   *  token/register/status/revoke keep working). Defaults to the in-process
+   *  Phase 3C mock registry until the control plane lands in 12.0. */
+  providers?: readonly MockProvider[]
 }
 
 /** Mock OAuth provider registry (Phase 3C). Replaced by a real registry
@@ -29,7 +35,7 @@ export interface MockProvider {
   scopes: string[]
 }
 
-const MOCK_PROVIDERS: readonly MockProvider[] = [
+export const MOCK_PROVIDERS: readonly MockProvider[] = [
   { id: 'google-mock', name: 'Google (mock)', host: 'google-m.example.test', scopes: ['email', 'profile'] },
   { id: 'slack-mock', name: 'Slack (mock)', host: 'slack-m.example.test', scopes: ['channels:read', 'chat:write'] },
 ]
@@ -89,7 +95,7 @@ async function consentMint(ctx: ApiRouteContext, deps: ConnectorDeps): Promise<u
       message: 'provider, host, principalId, redirectUri are required',
     })
   }
-  const providerSpec = MOCK_PROVIDERS.find((p) => p.id === provider)
+  const providerSpec = (deps.providers ?? MOCK_PROVIDERS).find((p) => p.id === provider)
   if (!providerSpec) {
     return sendJson(ctx, 404, { error: 'not_found', message: `unknown OAuth provider: ${provider}` })
   }
@@ -144,7 +150,7 @@ async function oauthStart(ctx: ApiRouteContext, deps: ConnectorDeps): Promise<un
   // comes back to /v1/connectors/oauth/:provider/callback with code+state.
   const provider = String(ctx.params.provider ?? '').trim()
   if (!provider) return sendJson(ctx, 404, { error: 'not_found' })
-  const providerSpec = MOCK_PROVIDERS.find((p) => p.id === provider)
+  const providerSpec = (deps.providers ?? MOCK_PROVIDERS).find((p) => p.id === provider)
   if (!providerSpec) {
     return sendJson(ctx, 404, { error: 'not_found', message: `unknown OAuth provider: ${provider}` })
   }
@@ -162,14 +168,20 @@ async function oauthStart(ctx: ApiRouteContext, deps: ConnectorDeps): Promise<un
 async function oauthStatus(ctx: ApiRouteContext, deps: ConnectorDeps): Promise<unknown> {
   const principalId = ctx.query.principalId ?? ''
   if (!principalId) return sendJson(ctx, 400, { error: 'bad_request', message: 'principalId required' })
+  // Only emit a provider entry when at least one accountType has a connected
+  // token — listing every MOCK_PROVIDERS slot even when the user has no
+  // token leaks the registry to /v1/connectors/oauth/status consumers.
+  const configured = deps.providers ?? MOCK_PROVIDERS
   const providers: Record<string, { host: string; accountTypes: string[]; hasToken: boolean }> = {}
-  for (const p of MOCK_PROVIDERS) {
+  for (const p of configured) {
     const accountTypes: string[] = []
     for (const at of CONNECTOR_STATUS_ACCOUNT_TYPES) {
       const status = await deps.tokens.connectorTokenStatus(p.host, principalId, at)
       if (status.connected) accountTypes.push(at)
     }
-    providers[p.id] = { host: p.host, accountTypes, hasToken: accountTypes.length > 0 }
+    if (accountTypes.length > 0) {
+      providers[p.id] = { host: p.host, accountTypes, hasToken: true }
+    }
   }
   return { principalId, providers }
 }
@@ -214,13 +226,14 @@ async function setToken(ctx: ApiRouteContext, deps: ConnectorDeps): Promise<unkn
   return { ok: true }
 }
 
-async function catalog(ctx: ApiRouteContext, _deps: ConnectorDeps): Promise<unknown> {
+async function catalog(ctx: ApiRouteContext, deps: ConnectorDeps): Promise<unknown> {
   void ctx
-  void _deps
-  // Phase 3C: return the mock provider registry. Real OAuth providers
-  // (Google, Slack, …) will replace this once the control plane ships.
+  // Phase 3C: return the configured provider registry (defaults to the
+  // in-process mock). Real OAuth providers (Google, Slack, …) will replace
+  // this once the control plane ships.
+  const providers = deps.providers ?? MOCK_PROVIDERS
   return {
-    catalog: MOCK_PROVIDERS.map((p) => ({
+    catalog: providers.map((p) => ({
       id: p.id,
       name: p.name,
       host: p.host,
@@ -261,7 +274,7 @@ async function oauthCallback(ctx: import('./raw-framework.ts').RawRouteContext):
 
 export function connectorRoutes(deps: ConnectorDeps): ReadonlyArray<Route> {
   return [
-    { method: 'POST', path: '/v1/connectors/oauth/consent/mint', auth: 'source', handle: (ctx) => consentMint(ctx, deps) },
+    { method: 'POST', path: '/v1/connectors/oauth/consent/mint', auth: { aud: 'oauth-consent' }, handle: (ctx) => consentMint(ctx, deps) },
     { method: 'GET', path: '/v1/connectors/oauth/consent/redeem/:linkId', auth: 'source', handle: (ctx) => consentRedeem(ctx, deps) },
     { method: 'GET', path: '/v1/connectors/oauth/status', auth: 'source', handle: (ctx) => oauthStatus(ctx, deps) },
     { method: 'POST', path: '/v1/connectors/oauth/revoke', auth: 'either', handle: (ctx) => oauthRevoke(ctx, deps) },

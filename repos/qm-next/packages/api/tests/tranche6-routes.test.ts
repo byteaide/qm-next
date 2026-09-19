@@ -418,7 +418,7 @@ test('deployment-layer: empty state, put, applied read, invalid bundle 400', asy
 
 test('connectors: token register + status, revoke by host, unknown provider 404, consent unwired 404', async () => {
   const tokens = createMemoryConnectorTokenStore()
-  const app = createApiServer({ ...baseDeps(), connectors: { tokens } }, OPTS)
+  const app = createApiServer({ ...baseDeps(), connectors: { tokens, providers: [] } }, OPTS)
   const ada = auth(await token('person:ada'))
 
   const badExpiry = await app.inject({ method: 'POST', url: '/v1/connectors/token', headers: ada, payload: { host: 'github.com', principalId: 'person:ada', accessToken: 'tok', expiresAt: 'not-a-date' } })
