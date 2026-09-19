@@ -10,8 +10,8 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@qm/api": "workspace:^",
     "@qm/cordis": "workspace:^",
+    "@qm/concurrency": "workspace:^",
     "@qm/directory": "workspace:^",
     "@qm/im-core": "workspace:^",
     "@qm/im-bridge": "workspace:^",

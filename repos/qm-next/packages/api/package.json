@@ -17,6 +17,7 @@
     "@qm/tasks": "workspace:^",
     "@qm/credentials": "workspace:^",
     "@qm/cordis": "workspace:^",
+    "@qm/concurrency": "workspace:^",
     "@qm/directory": "workspace:^",
     "@qm/harness-claude": "workspace:^",
     "@qm/harness-codex": "workspace:^",

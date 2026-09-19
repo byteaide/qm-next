@@ -12,6 +12,10 @@ export {
   type TriggerRuntimeDeps,
   type TriggerRuntimeImplOptions,
 } from './trigger-runtime-impl.ts'
+export {
+  TriggerRuntimeCordisService,
+  default as TriggerRuntimeCordisDefault,
+} from './trigger-runtime-cordis.ts'
 export { authenticateBearer, type TurnTokenClaims } from './auth.ts'
 export { mintSignedPayload, signingKeyId, verifySignedPayload } from './signed-token.ts'
 export { registerRouteTable, sendJson, type ApiRouteContext, type Route, type RouteAuth } from './routes/framework.ts'
