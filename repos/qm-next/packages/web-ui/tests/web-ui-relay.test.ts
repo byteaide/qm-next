@@ -421,7 +421,7 @@ test('search and approvals ride the convergence: session hits return, pending ap
     await rig.runs.waitFor(runId, 5_000)
     const poll = await rig.web.inject({ method: 'GET', url: `/api/runs/${runId}`, headers: COOKIE })
     const pollBody = poll.json() as { status: string; result: { status: string; pendingApprovals?: Array<{ requestId: string }> } | null }
-    assert.equal(pollBody.status, 'done')
+    assert.equal(pollBody.status, 'succeeded')
     assert.equal(pollBody.result?.status, 'pending_approval')
     const requestId = pollBody.result?.pendingApprovals?.[0]?.requestId
     assert.ok(requestId)

@@ -1,10 +1,18 @@
-import type { Run, Session, SessionEntry, TurnResult } from '@qm/types'
+import { isTerminalTargetState, projectLegacyStatus } from '@qm/types'
+import type { Run, RunState, Session, SessionEntry, TurnResult } from '@qm/types'
 import type { CronRecord } from '@qm/triggers'
 import type { SkillRecord } from '@qm/skills'
 import type { DirectorySpaceRecord } from '@qm/directory'
 
+/**
+ * Wire status vocabulary (Phase 7 cutover): `pending` / `running` while
+ * open, then the target terminal states (`succeeded` / `failed` /
+ * `cancelled`). The legacy `done` literal never crosses the wire.
+ */
+export type RunPollWireStatus = 'pending' | 'running' | RunState
+
 export type RunPollWire = {
-  status: Run['status']
+  status: RunPollWireStatus
   result: {
     status: string
     reply?: string
@@ -32,10 +40,19 @@ export function resultWire(result: TurnResult): NonNullable<RunPollWire['result'
 }
 
 export function runWire(run: Run): RunPollWire {
+  // Phase 7 cutover read projection (plan §1.5): terminal truth is
+  // `targetState`. A completed target row keeps the legacy `status`
+  // column at 'running' (the legacy 'done' literal is never written);
+  // historical pre-cutover rows may still carry `status='done'` with a
+  // defaulted `targetState` — project those through the accepted
+  // legacy-status mapping.
+  const status: RunPollWireStatus = isTerminalTargetState(run.targetState)
+    ? run.targetState
+    : projectLegacyStatus(run.status, { result: run.result, failureReason: run.failureReason ?? null })
   return {
-    status: run.status,
+    status,
     result: run.result ? resultWire(run.result) : null,
-    alive: run.status === 'running',
+    alive: !isTerminalTargetState(run.targetState) && run.status === 'running',
     startedAt: run.startedAt ?? null,
     finishedAt: run.finishedAt ?? null,
   }

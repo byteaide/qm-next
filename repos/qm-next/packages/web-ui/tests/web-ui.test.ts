@@ -112,7 +112,7 @@ test('turn flow: POST /api/turn queues, run reaches done with echo reply, SSE st
     const polled = await rig.app.inject({ method: 'GET', url: `/api/runs/${runId}`, headers: COOKIE })
     assert.equal(polled.statusCode, 200)
     const poll = polled.json() as { status: string; result: { status: string; reply?: string } | null }
-    assert.equal(poll.status, 'done')
+    assert.equal(poll.status, 'succeeded')
     assert.equal(poll.result?.status, 'ok')
     assert.equal(poll.result?.reply, 'echo: hello web')
 
@@ -122,7 +122,7 @@ test('turn flow: POST /api/turn queues, run reaches done with echo reply, SSE st
     const doneLine = stream.body.split('\n').find((line) => line.startsWith('data: ') && line.includes('"status"'))
     assert.ok(doneLine)
     const done = JSON.parse(doneLine.slice('data: '.length)) as { status: string; result: { reply?: string } | null }
-    assert.equal(done.status, 'done')
+    assert.equal(done.status, 'succeeded')
     assert.equal(done.result?.reply, 'echo: hello web')
 
     const again = await rig.app.inject({ method: 'GET', url: `/api/runs/${runId}/events`, headers: COOKIE })

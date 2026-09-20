@@ -283,7 +283,7 @@ test('inbound message submits a run and the terminal reply is delivered in-threa
     assert.equal(all.length, 1)
     const run = all[0]
     assert.ok(run)
-    assert.equal(run.status, 'done')
+    assert.equal(run.targetState, 'succeeded')
     assert.equal(run.request.surface, 'feishu')
     assert.equal(run.request.actor.id, 'feishu:u1')
     assert.equal(run.request.conversation.threadRef, 'feishu:oc_chat1:om_thread1')
@@ -574,7 +574,7 @@ test('non-IM runs terminate without deliveries', async () => {
         text: 'api hi',
       },
     })
-    assert.ok(await waitFor(async () => (await t.runs.list()).every((run) => run.status === 'done')))
+    assert.ok(await waitFor(async () => (await t.runs.list()).every((run) => run.targetState === 'succeeded')))
     await new Promise((resolve) => setTimeout(resolve, 50))
     assert.equal(t.sent.length, 0)
   } finally {

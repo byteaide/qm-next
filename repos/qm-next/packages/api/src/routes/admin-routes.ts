@@ -331,8 +331,10 @@ async function metrics(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> 
     uncachedInputTotal: sum((s) => s.uncachedInput),
   }
   const runs = (await deps.runs?.list({ limit: 500 })) ?? []
-  const done = runs.filter((r) => r.status === 'done').length
-  const failed = runs.filter((r) => r.status === 'failed').length
+  // Phase 7 cutover: terminal truth is `targetState`; the legacy
+  // `status='done'` literal is never written on target rows.
+  const done = runs.filter((r) => r.targetState === 'succeeded').length
+  const failed = runs.filter((r) => r.targetState === 'failed').length
   const finished = done + failed
   return {
     scopeId: authz.scope,

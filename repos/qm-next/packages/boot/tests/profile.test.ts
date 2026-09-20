@@ -72,15 +72,17 @@ test('the repository profile boots end to end', async () => {
   assert.equal(queued.status, 202)
   const { runId } = (await queued.json()) as { runId?: string }
   assert.ok(runId)
-  let run: { status?: string; result?: { reply?: string } } | undefined
+  let run: { targetState?: string; result?: { reply?: string } } | undefined
   for (let i = 0; i < 100; i += 1) {
     const poll: Response = await fetch(`http://127.0.0.1:${port}/v1/runs/${runId}`, { headers })
     assert.equal(poll.status, 200)
-    run = (await poll.json()) as { status?: string; result?: { reply?: string } }
-    if (run.status === 'done' || run.status === 'failed') break
+    run = (await poll.json()) as { targetState?: string; result?: { reply?: string } }
+    if (run.targetState === 'succeeded' || run.targetState === 'failed') break
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
-  assert.equal(run?.status, 'done')
+  // Phase 7 cutover: terminal truth is `targetState` (the raw row keeps
+  // the legacy `status` column at 'running' after a target completion).
+  assert.equal(run?.targetState, 'succeeded')
   assert.equal(run?.result?.reply, 'echo: hi profile async')
 
   await ctx.loader.remove('include')

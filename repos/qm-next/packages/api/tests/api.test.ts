@@ -154,7 +154,7 @@ test('async turn: 202 queued, runner claims and completes the run', async () => 
   assert.ok(body.runId)
   assert.ok(body.sessionId)
   const run = await deps.runs.waitFor(body.runId!, 5_000)
-  assert.equal(run.status, 'done')
+  assert.equal(run.targetState, 'succeeded')
   assert.equal(run.result?.reply, 'echo: hi async')
   const entries = await deps.sessions.getEntries(body.sessionId!)
   assert.deepEqual(entries.map((e) => e.type), ['user', 'assistant'])

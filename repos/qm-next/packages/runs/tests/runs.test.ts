@@ -230,7 +230,8 @@ test('worker: claims, heartbeats, completes and drains over the memory run store
   const { run } = await runs.enqueue({ sessionId: 'sess-w', request: turnInput('do it') })
   worker.start()
   const finished = await runs.waitFor(run.id, 5_000)
-  assert.equal(finished.status, 'done')
+  // Phase 7 cutover: terminal truth is `targetState`.
+  assert.equal(finished.targetState, 'succeeded')
   assert.equal(finished.result?.reply, 'done')
   const handled = orchestrator.calls[0]!
   assert.equal(handled.runId, run.id)

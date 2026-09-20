@@ -11,6 +11,7 @@ import { createFireEngine, manualFireKey, renderCronFireInput, type CronSchedule
 import { WEBHOOK_SCHEMES } from '@qm/api'
 import type { DirectoryStore } from '@qm/directory'
 import type { SkillStore } from '@qm/skills'
+import { isTerminalTargetState } from '@qm/types'
 import type {
   Conversation,
   Orchestrator,
@@ -463,7 +464,9 @@ export function createWebUiServer(deps: WebUiDeps, opts: WebUiServerOptions): Fa
     }
     for (const ev of deps.runEvents.replay(id)) process(ev)
     for (const ev of pending.splice(0)) process(ev)
-    if (!finished && (initial.status === 'done' || initial.status === 'failed')) await finish()
+    // Phase 7 cutover: terminal truth is `targetState` — target rows never
+    // carry the legacy `status='done'` literal.
+    if (!finished && isTerminalTargetState(initial.targetState)) await finish()
     if (!finished) sseEvent(raw, 'alive', { at: Date.now() })
     req.raw.on('close', teardown)
     heartbeat = setInterval(() => {

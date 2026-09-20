@@ -85,7 +85,10 @@ async function runStoreCases(t: import('node:test').TestContext, make: () => Pro
     const done = h.store.waitFor(run.id)
     assert.equal(await h.store.complete(run.id, claimed.leaseToken!, { status: 'ok', reply: 'hi' }), true)
     const finished = await done
-    assert.equal(finished.status, 'done')
+    // Phase 7 cutover: target semantics — terminal truth is `targetState`,
+    // the legacy `status='done'` literal is never written.
+    assert.equal(finished.runSource, 'target')
+    assert.equal(finished.targetState, 'succeeded')
     assert.equal(finished.result?.reply, 'hi')
     assert.equal(await h.store.complete(run.id, 'bogus', { status: 'ok' }), false)
     await h.close()

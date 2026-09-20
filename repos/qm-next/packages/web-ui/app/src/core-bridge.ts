@@ -336,7 +336,9 @@ export type AssistantWork = AssistantMessage & {
 };
 
 export interface RunPoll {
-  status: "pending" | "running" | "done" | "failed";
+  // Phase 7 cutover: the wire never carries the legacy `done` literal;
+  // terminal truth arrives as the target states.
+  status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
   result: {
     status: string;
     reply?: string;
@@ -935,7 +937,11 @@ function applyRun(
     pushDelta(stream, partial, st, p);
   }
   const terminal =
-    run.status === "done" || run.status === "failed" || run.result !== null || run.replyComplete === true;
+    run.status === "succeeded" ||
+    run.status === "failed" ||
+    run.status === "cancelled" ||
+    run.result !== null ||
+    run.replyComplete === true;
   if (!terminal) return "open";
   const res = run.result;
   const delivered = deliveredFilesFromAttachments(res?.attachments);

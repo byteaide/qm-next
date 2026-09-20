@@ -5,42 +5,34 @@
  */
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import type { EnqueueInput, EnqueueResult, FailureReason, ReapEvent, RolloutFlag, Run, RunDeliveryState, RunSource, RunStore } from '@qm/types'
+import type { EnqueueInput, EnqueueResult, FailureReason, ReapEvent, Run, RunDeliveryState, RunStore } from '@qm/types'
 import { assertTargetRunInvariant, isTerminal, isTerminalTargetState, leaseLapsed } from '@qm/types'
 
 /**
- * Slice 1.5 — accept an optional `runSourceFlag` so the store can
- * stamp freshly enqueued rows with `runSource='target'` when the
- * Phase 1 rollout flag flips on. When the flag is omitted the store
- * defaults to `runSource='legacy'` (Phase 0 freeze); this preserves
- * every existing call site without modification.
+ * Phase 7 cutover — every fresh row is stamped `runSource='target'`
+ * (the `target.run-observation` rollout flag is removed). Historical
+ * rows with `runSource='legacy'` may still exist in Postgres; reads
+ * project them via the Phase 1 helpers until the data migration rewrites
+ * them physically.
  *
  * Linked ADRs: ADR-0001 (Run owns terminal events).
  */
 export function createMemoryRunStore(
-  opts?: { maxClaims?: number; runSourceFlag?: RolloutFlag | null },
+  opts?: { maxClaims?: number },
 ): RunStore {
   const maxClaims = opts?.maxClaims ?? Number.POSITIVE_INFINITY
-  const runSourceFlag = opts?.runSourceFlag ?? null
   const runs = new Map<string, Run>()
   const byKey = new Map<string, string>()
   const events = new EventEmitter()
   events.setMaxListeners(0)
   const terminalListeners: Array<(run: Run) => void> = []
 
-  /**
-   * Slice 1.5 — read the current `runSource` literal from the
-   * registered flag. The flag is read at write time so flipping the
-   * env override in production takes effect on the next enqueue;
-   * cached reads would defeat the rollout switch.
-   */
-  function currentRunSource(): RunSource {
-    return runSourceFlag && runSourceFlag.read() ? 'target' : 'legacy'
-  }
-
   function sessionHasRunning(sessionId: string, exceptId?: string): boolean {
+    // Phase 7 cutover: a session is busy iff another claimed run is
+    // actually in flight (`targetState === 'running'`). Queued runs do
+    // not hold the session — the claim itself serializes them.
     for (const r of runs.values()) {
-      if (r.sessionId === sessionId && r.status === 'running' && r.id !== exceptId) return true
+      if (r.sessionId === sessionId && r.targetState === 'running' && r.id !== exceptId) return true
     }
     return false
   }
@@ -118,7 +110,7 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
         sessionId,
         status: 'pending',
         targetState: 'queued',
-        runSource: currentRunSource(),
+        runSource: 'target',
         request,
         result: null,
         deliveryState: null,
@@ -141,7 +133,7 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
 
     async claim(workerId, ttlMs) {
       const pending = [...runs.values()]
-        .filter((r) => r.status === 'pending' && !sessionHasRunning(r.sessionId))
+        .filter((r) => r.status === 'pending' && !sessionHasRunning(r.sessionId, r.id))
         .sort((a, b) => a.createdAt - b.createdAt)
       const run = pending[0]
       if (!run) return null
@@ -150,7 +142,7 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
 
     async claimById(runId, workerId, ttlMs) {
       const run = runs.get(runId)
-      if (!run || run.status !== 'pending' || sessionHasRunning(run.sessionId)) return null
+      if (!run || run.status !== 'pending' || sessionHasRunning(run.sessionId, run.id)) return null
       return lease(run, workerId, ttlMs)
     },
 
@@ -175,14 +167,10 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
     async complete(runId, leaseToken, result) {
       const run = runs.get(runId)
       if (!run || run.leaseToken !== leaseToken) return false
-      // Slice 1.5 — when the row was written by the target path
-      // (`runSource === 'target'`), the legacy `status='done'`
-      // literal is forbidden; the target semantics live exclusively
-      // in `targetState`. Legacy rows still write both fields so the
-      // existing wire shape (web SSE, api relay) keeps reading.
-      if (run.runSource === 'legacy') {
-        run.status = 'done'
-      }
+      // Phase 7 cutover — target semantics only: the legacy
+      // `status='done'` literal is never written. Historical legacy rows
+      // (runSource='legacy') cannot be completed here because they would
+      // have been enqueued before the cutover.
       run.targetState = 'succeeded'
       delete run.failureReason
       run.result = result
@@ -270,14 +258,14 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
     async activeForThread(sessionId) {
       return (
         [...runs.values()]
-          .filter((r) => r.sessionId === sessionId && !isTerminal(r.status))
+          .filter((r) => r.sessionId === sessionId && !isTerminalTargetState(r.targetState))
           .sort((a, b) => b.createdAt - a.createdAt)[0] ?? null
       )
     },
 
     async inFlightForThread(sessionId) {
       return [...runs.values()]
-        .filter((r) => r.sessionId === sessionId && !isTerminal(r.status))
+        .filter((r) => r.sessionId === sessionId && !isTerminalTargetState(r.targetState))
         .sort((a, b) => a.createdAt - b.createdAt)
     },
 
@@ -291,7 +279,7 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
 
     async activeSessionIds() {
       const ids = new Set<string>()
-      for (const r of runs.values()) if (!isTerminal(r.status)) ids.add(r.sessionId)
+      for (const r of runs.values()) if (!isTerminalTargetState(r.targetState)) ids.add(r.sessionId)
       return [...ids]
     },
 
@@ -357,7 +345,7 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
 
     waitFor(runId, timeoutMs = 60_000) {
       const run = runs.get(runId)
-      if (run && isTerminal(run.status)) return Promise.resolve(run)
+      if (run && (isTerminal(run.status) || isTerminalTargetState(run.targetState))) return Promise.resolve(run)
       return new Promise<Run>((resolvePromise, reject) => {
         const timer = setTimeout(() => {
           events.off(runId, onSettle)

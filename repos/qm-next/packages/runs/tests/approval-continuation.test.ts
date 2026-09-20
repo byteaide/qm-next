@@ -85,7 +85,7 @@ test('slice-2.4: approve by requester starts a Continuation Attempt in the same 
   const run = await runs.get(runId)
   assert.ok(run)
   assert.notEqual(run?.status, 'failed')
-  assert.notEqual(run?.status, 'done')
+  assert.equal(run?.targetState, 'running')
   assert.equal(isAwaitingApproval(run?.targetState ?? 'queued'), false)
 })
 

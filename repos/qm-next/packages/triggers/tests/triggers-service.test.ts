@@ -68,7 +68,7 @@ test('TriggersService mounts the scheduler: cron fires become runs and the fire 
     assert.ok(run, 'the fired turn is on the api run queue')
     assert.deepEqual(run.request.origin, { kind: 'automation' })
     assert.equal(run.request.surface, 'cron')
-    assert.equal(run.status, 'done')
+    assert.equal(run.targetState, 'succeeded')
     assert.ok(run.request.text.includes('fire the e2e marker'), 'the fire carries the stored task')
   } finally {
     await t.dispose()
@@ -87,7 +87,7 @@ test('TriggersService exposes the trigger sink: keyed fire becomes one turn rout
     assert.ok(
       await waitFor(async () => {
         const run = (await t.ctx.api.runs.list()).find((candidate) => candidate.id === submission.runId)
-        return run?.status === 'done'
+        return run?.targetState === 'succeeded'
       }),
       'the trigger turn completes',
     )

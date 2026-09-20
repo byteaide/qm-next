@@ -153,6 +153,8 @@ class FakeRuns implements RunStore {
     const run = {
       id: `run-${this.runs.size + 1}`,
       status: 'pending',
+      targetState: 'queued',
+      runSource: 'target',
       result: null,
       deliveryState: null,
       dedupKey: null,
@@ -174,6 +176,7 @@ class FakeRuns implements RunStore {
     const run = [...this.runs.values()].find((r) => r.status === 'pending')
     if (!run) return null
     run.status = 'running'
+    run.targetState = 'running'
     run.leaseToken = 'lease'
     return run
   }
@@ -181,6 +184,7 @@ class FakeRuns implements RunStore {
     const run = this.runs.get(runId)
     if (!run || run.status !== 'pending') return null
     run.status = 'running'
+    run.targetState = 'running'
     run.leaseToken = 'lease'
     return run
   }
@@ -197,7 +201,7 @@ class FakeRuns implements RunStore {
   async complete(runId: string, token: string, result: TurnResult) {
     const run = this.runs.get(runId)
     if (run?.leaseToken !== token) return false
-    run.status = 'done'
+    run.targetState = 'succeeded'
     run.result = result
     return true
   }
@@ -205,6 +209,7 @@ class FakeRuns implements RunStore {
     const run = this.runs.get(runId)
     if (run?.leaseToken !== token) return { requeued: false }
     run.status = 'failed'
+    run.targetState = 'failed'
     run.leaseToken = null
     return { requeued: false }
   }
@@ -225,7 +230,9 @@ class FakeRuns implements RunStore {
     return this.runs.delete(runId)
   }
   async activeSessionIds() {
-    return [...new Set([...this.runs.values()].filter((r) => r.status !== 'done' && r.status !== 'failed').map((r) => r.sessionId))]
+    // Phase 7 cutover: terminal truth is `targetState` (the legacy
+    // `status` column stays 'running' on completed target rows).
+    return [...new Set([...this.runs.values()].filter((r) => r.targetState !== 'succeeded' && r.targetState !== 'failed' && r.targetState !== 'cancelled').map((r) => r.sessionId))]
   }
   async list() {
     return [...this.runs.values()]
@@ -392,7 +399,8 @@ test('async queue path: enqueue, claim, handleTurn, complete', async () => {
   assert.equal(result.status, 'ok')
   assert.equal(await runs.complete(claimed.id, claimed.leaseToken!, result), true)
   const stored = await runs.get(run.id)
-  assert.equal(stored?.status, 'done')
+  assert.equal(stored?.runSource, 'target')
+  assert.equal(stored?.targetState, 'succeeded')
   assert.equal(stored?.result?.reply, 'echo: hello')
 })
 

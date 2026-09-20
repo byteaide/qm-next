@@ -20,7 +20,7 @@ import type {
   TurnInput,
   TurnResult,
 } from '@qm/types'
-import { assertTargetRunInvariant, isTerminal, isTerminalTargetState, type RolloutFlag } from '@qm/types'
+import { assertTargetRunInvariant, isTerminal, isTerminalTargetState } from '@qm/types'
 import { createPgPool, errMessage, type PgPool } from './pg-pool.ts'
 import { RUN_SCHEMA_STATEMENTS } from './schema.ts'
 
@@ -58,23 +58,12 @@ export interface PostgresRunStore extends RunStore {
 
 export function createPostgresRunStore(
   connectionString: string,
-  opts?: { maxClaims?: number; runSourceFlag?: RolloutFlag | null },
+  opts?: { maxClaims?: number },
 ): PostgresRunStore {
   const maxClaims = opts?.maxClaims ?? Number.POSITIVE_INFINITY
-  const runSourceFlag = opts?.runSourceFlag ?? null
   const events = new EventEmitter()
   events.setMaxListeners(0)
   const { query, close: closePool }: PgPool = createPgPool(connectionString, RUN_SCHEMA_STATEMENTS)
-
-  /**
-   * Slice 1.5 — read the current `run_source` literal from the
-   * registered flag. The flag is read at write time so flipping the
-   * env override in production takes effect on the next enqueue;
-   * cached reads would defeat the rollout switch.
-   */
-  function currentRunSource(): RunSource {
-    return runSourceFlag && runSourceFlag.read() ? 'target' : 'legacy'
-  }
 
   const terminalListeners: Array<(run: Run) => void> = []
   function settle(run: Run | null): void {
@@ -134,12 +123,11 @@ const result: TurnResult = { status: 'failed', sessionId: run.sessionId, reason 
 
     async enqueue({ sessionId, request, dedupKey, maxAttempts = 3 }: EnqueueInput): Promise<EnqueueResult> {
       const id = randomUUID()
-      const runSource = currentRunSource()
       const { rows: inserted } = await query(
         `INSERT INTO runs(id, session_id, status, target_state, run_source, request, idempotency_key, attempts, max_attempts, created_at)
-         VALUES ($1,$2,'pending','queued',$7,$3,$4,0,$5,$6)
+         VALUES ($1,$2,'pending','queued','target',$3,$4,0,$5,$6)
          ON CONFLICT (idempotency_key) DO NOTHING RETURNING *`,
-        [id, sessionId, JSON.stringify(request), dedupKey ?? null, maxAttempts, Date.now(), runSource],
+        [id, sessionId, JSON.stringify(request), dedupKey ?? null, maxAttempts, Date.now()],
       )
       if (inserted[0]) {
         const run = rowToRun(inserted[0])
@@ -161,7 +149,7 @@ async claim(workerId, ttlMs): Promise<Run | null> {
              attempts=attempts+1, started_at=COALESCE(started_at,$4)
            WHERE id = (
              SELECT id FROM runs WHERE status='pending'
-               AND session_id NOT IN (SELECT session_id FROM runs WHERE status='running')
+               AND session_id NOT IN (SELECT session_id FROM runs WHERE target_state = 'running')
              ORDER BY created_at ASC, seq ASC FOR UPDATE SKIP LOCKED LIMIT 1
            ) RETURNING *`,
           [token, now + ttlMs, workerId, now],
@@ -182,7 +170,7 @@ async claimById(runId, workerId, ttlMs): Promise<Run | null> {
              attempts=attempts+1, started_at=COALESCE(started_at,$4)
            WHERE id = (
              SELECT id FROM runs WHERE id=$5 AND status='pending'
-               AND session_id NOT IN (SELECT session_id FROM runs WHERE status='running')
+               AND session_id NOT IN (SELECT session_id FROM runs WHERE target_state = 'running')
              FOR UPDATE SKIP LOCKED LIMIT 1
            ) RETURNING *`,
           [token, now + ttlMs, workerId, now, runId],
@@ -211,15 +199,14 @@ async claimById(runId, workerId, ttlMs): Promise<Run | null> {
     },
 
     async complete(runId, leaseToken, result): Promise<boolean> {
-      // Slice 1.5 — fetch the row first so we know whether to skip
-      // the legacy `status='done'` write (target rows must not carry
-      // the literal; see `assertTargetRunInvariant`). The conditional
-      // branches keep PG parity with the memory twin.
+      // Phase 7 cutover — target semantics only: the legacy
+      // `status='done'` write branch is removed. `status` stays
+      // `'running'` on the physical row; terminal truth is
+      // `target_state='succeeded'`.
       const existing = await getRun(runId)
       if (!existing || existing.leaseToken !== leaseToken) return false
-      const setStatus = existing.runSource === 'legacy' ? "status='done'," : ''
       const { rowCount } = await query(
-        `UPDATE runs SET ${setStatus} target_state='succeeded', failure_reason=NULL, result=$1, lease_token=NULL, lease_expires_at=NULL, finished_at=$2 WHERE id=$3 AND lease_token=$4 AND status='running'`,
+        `UPDATE runs SET target_state='succeeded', failure_reason=NULL, result=$1, lease_token=NULL, lease_expires_at=NULL, finished_at=$2 WHERE id=$3 AND lease_token=$4 AND status='running'`,
         [JSON.stringify(result), Date.now(), runId, leaseToken],
       )
       if (rowCount > 0) {
@@ -254,8 +241,10 @@ async claimById(runId, workerId, ttlMs): Promise<Run | null> {
     get: getRun,
 
     async activeForThread(sessionId): Promise<Run | null> {
+      // Phase 7 cutover: terminal truth is `target_state` (completed
+      // target rows keep the legacy status column at 'running').
       const { rows } = await query(
-        "SELECT * FROM runs WHERE session_id = $1 AND status IN ('pending','running') ORDER BY created_at DESC LIMIT 1",
+        "SELECT * FROM runs WHERE session_id = $1 AND (target_state IN ('queued','running','awaiting_approval') OR (target_state IS NULL AND status IN ('pending','running'))) ORDER BY created_at DESC LIMIT 1",
         [sessionId],
       )
       return rows[0] ? rowToRun(rows[0]) : null
@@ -263,7 +252,7 @@ async claimById(runId, workerId, ttlMs): Promise<Run | null> {
 
     async inFlightForThread(sessionId): Promise<Run[]> {
       const { rows } = await query(
-        "SELECT * FROM runs WHERE session_id = $1 AND status IN ('pending','running') ORDER BY created_at ASC, seq ASC",
+        "SELECT * FROM runs WHERE session_id = $1 AND (target_state IN ('queued','running','awaiting_approval') OR (target_state IS NULL AND status IN ('pending','running'))) ORDER BY created_at ASC, seq ASC",
         [sessionId],
       )
       return rows.map(rowToRun)
@@ -275,7 +264,9 @@ async claimById(runId, workerId, ttlMs): Promise<Run | null> {
     },
 
     async activeSessionIds(): Promise<string[]> {
-      const { rows } = await query("SELECT DISTINCT session_id FROM runs WHERE status IN ('pending','running')")
+      const { rows } = await query(
+        "SELECT DISTINCT session_id FROM runs WHERE target_state IN ('queued','running','awaiting_approval') OR (target_state IS NULL AND status IN ('pending','running'))",
+      )
       return rows.map((r) => r.session_id as string)
     },
 
@@ -358,7 +349,7 @@ async claimById(runId, workerId, ttlMs): Promise<Run | null> {
         const poll = setInterval(() => {
           void getRun(runId)
             .then((r) => {
-              if (r && isTerminal(r.status)) finish(r)
+              if (r && (isTerminal(r.status) || isTerminalTargetState(r.targetState))) finish(r)
             })
             .catch((err: unknown) => {
               console.error(`[postgres-run-store] waitFor poll for run ${runId} failed transiently:`, errMessage(err))
