@@ -56,9 +56,27 @@ test('architecture: TriggersService inject uses trigger-runtime, not api', () =>
   assert.doesNotMatch(src, /inject\s*=\s*\[[^\]]*['"]api['"]/)
 })
 
-test('architecture: TriggersService no longer writes api.cronsRuntime', () => {
-  const src = readFileSync(join(ROOT, 'packages/triggers/src/service.ts'), 'utf8')
-  assert.doesNotMatch(src, /api\.cronsRuntime\s*=/)
+test('architecture: the api.cronsRuntime compatibility field is removed (Phase 7 / KV-002)', () => {
+  // Phase 7 cutover: NO runtime code may declare, write, or read the
+  // `api.cronsRuntime` compatibility field. Cron schedule storage lives
+  // behind the Trigger boundary; consumers read the Cordis service
+  // registry lazily (ADR-0003, plan §4.6).
+  const offenders: string[] = []
+  function walk(dir: string): void {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        walk(full)
+        continue
+      }
+      if (!entry.name.endsWith('.ts')) continue
+      const content = readFileSync(full, 'utf8')
+      if (/cronsRuntime/.test(content)) offenders.push(full)
+    }
+  }
+  walk(join(ROOT, 'packages/api/src'))
+  walk(join(ROOT, 'packages/triggers/src'))
+  assert.deepEqual(offenders, [], `api.cronsRuntime compatibility field must be gone; offenders: ${offenders.join(', ')}`)
 })
 
 test('architecture: @qm/api no longer imports createMemoryLeaderLease from @qm/triggers', () => {
@@ -75,34 +93,4 @@ test('architecture: leader-lease primitive lives in @qm/concurrency', () => {
 test('architecture: @qm/triggers re-exports createMemoryLeaderLease from @qm/concurrency for backward compat', () => {
   const src = readFileSync(join(ROOT, 'packages/triggers/src/lease.ts'), 'utf8')
   assert.match(src, /export\s*\{[^}]*createMemoryLeaderLease[^}]*\}\s*from\s+['"]@qm\/concurrency['"]/)
-})
-
-test('architecture: WireCronRuntimeService is the only writer of api.cronsRuntime', () => {
-  // Triggers no longer writes; the composition seam (WireCronRuntimeService)
-  // owns the write. Verify there is exactly one writer in the API package.
-  const apiSrc = join(ROOT, 'packages/api/src')
-  const writers: string[] = []
-  function walk(dir: string): void {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        walk(full)
-        continue
-      }
-      if (!entry.name.endsWith('.ts')) continue
-      const content = readFileSync(full, 'utf8')
-      if (/api\.cronsRuntime\s*=/.test(content) || /cronsRuntime:\s*\{/.test(content) || /cronsRuntime\s*=\s*\{/.test(content)) {
-        writers.push(full)
-      }
-    }
-  }
-  walk(apiSrc)
-  // The wire-cron-runtime service is the legitimate writer. Service.ts may
-  // declare the type/shape. Other files must not write.
-  const allowedWriters = new Set([
-    join(apiSrc, 'wire-cron-runtime.ts'),
-    join(apiSrc, 'service.ts'),
-  ])
-  const offenders = writers.filter((w) => !allowedWriters.has(w))
-  assert.deepEqual(offenders, [], `Only wire-cron-runtime.ts may write api.cronsRuntime; offenders: ${offenders.join(', ')}`)
 })

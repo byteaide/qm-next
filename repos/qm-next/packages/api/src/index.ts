@@ -16,11 +16,6 @@ export {
   TriggerRuntimeCordisService,
   default as TriggerRuntimeCordisDefault,
 } from './trigger-runtime-cordis.ts'
-export {
-  WireCronRuntimeService,
-  default as WireCronRuntimeDefault,
-  type TriggersServiceSurface,
-} from './wire-cron-runtime.ts'
 export { authenticateBearer, type TurnTokenClaims } from './auth.ts'
 export { mintSignedPayload, signingKeyId, verifySignedPayload } from './signed-token.ts'
 export { registerRouteTable, sendJson, type ApiRouteContext, type Route, type RouteAuth } from './routes/framework.ts'

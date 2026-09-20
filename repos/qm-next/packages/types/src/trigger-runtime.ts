@@ -2,9 +2,11 @@
  * Target Trigger Runtime contract — implements ADR-0003 (Runtime contracts
  * decouple Trigger and API).
  *
- * Phase 0 freeze: types compile. Triggers may NOT depend on `@qm/api`
- * (`pnpm test:architecture` enforces it). Phase 4 migrates trigger
- * dispatch onto this port and removes the `api.cronsRuntime` late-write.
+ * Triggers may NOT depend on `@qm/api` (`pnpm test:architecture` enforces
+ * it). Phase 4 migrated trigger dispatch onto this port; Phase 7 removed
+ * the `api.cronsRuntime` compatibility field entirely — cron schedule
+ * storage stays behind the Trigger boundary and consumers read the
+ * Cordis service registry lazily.
  *
  * Minimal surface: submit, health, identity. Anything Triggers need beyond
  * this list is itself a Phase 0 architecture violation (§Phase 4 boundary

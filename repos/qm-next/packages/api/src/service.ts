@@ -149,7 +149,7 @@ export interface ApiConfig {
 }
 
 /**
- * Late-binding store proxy (parity with cronsRuntime).
+ * Late-binding store proxy.
  *
  * The memory / skill route tables capture the in-memory fallback store at
  * wire-up time. Tests inject Postgres twins via `api.memoryStore` /
@@ -506,16 +506,27 @@ export class ApiService extends Service<ApiConfig> {
   runEvents!: RunEventBus
 
   /**
-   * Cron runtime (store + scheduler) injected by the triggers plugin after
-   * it boots; the parity cron routes read it lazily per request, so late
-   * injection is fine. Routes 404 while absent. `deliveries` is the
-   * bridge's delivery queue — consent/edit notices and the admin shadow
-   * view ride it.
+   * Phase 7 cutover (KV-002) — Trigger boundary view (ADR-0003, plan §4.6):
+   * cron schedule storage, the scheduler, and the bridge delivery queue stay
+   * behind the Trigger boundary (`TriggersService` / `im-bridge` services).
+   * The parity cron/admin/monitoring routes read them lazily per request
+   * straight from the Cordis service registry — the API never owns a copy
+   * and nothing ever writes into API state. `undefined` when triggers are
+   * not mounted (routes 404 per request).
    */
-  cronsRuntime?: { crons: CronStore; scheduler?: CronScheduler; deliveries?: ImDeliveryQueue } | undefined
+  private triggerRuntimeView(): { crons: CronStore; scheduler?: CronScheduler; deliveries?: ImDeliveryQueue } | undefined {
+    const triggers = this.ctx.reflect.get('triggers', false) as { crons?: CronStore; scheduler?: CronScheduler } | undefined
+    if (!triggers?.crons) return undefined
+    const bridge = this.ctx.reflect.get('im-bridge', false) as { queue?: ImDeliveryQueue } | undefined
+    return {
+      crons: triggers.crons,
+      ...(triggers.scheduler ? { scheduler: triggers.scheduler } : {}),
+      ...(bridge?.queue ? { deliveries: bridge.queue } : {}),
+    }
+  }
 
   /**
-   * Memory / Skill store injection seam (parity with cronsRuntime).
+   * Memory / Skill store injection seam.
    * Production keeps the in-memory defaults; tests inject Postgres twins
    * via qa-smoke-wave2 to close the S42 SKIPs (memory/skill pg twin).
    * Late injection (after boot) is fine — the route tables are wired
@@ -774,7 +785,7 @@ export class ApiService extends Service<ApiConfig> {
     runner.start()
     // Parity surface (11.0): directory + reach behind an opt-in store; cron
     // routes always register and 404 per request until the triggers plugin
-    // injects its runtime into `cronsRuntime`.
+    // provides its runtime behind the Trigger boundary.
     const orgId = (this.config.scopeId ?? 'org:default').replace(/^org:/, '')
     const directoryStore = this.config.directory
       ? databaseUrl
@@ -1013,12 +1024,12 @@ export class ApiService extends Service<ApiConfig> {
           }
         : {}),
       deliveryQueueDurable: Boolean(databaseUrl),
-      deliveries: () => this.cronsRuntime?.deliveries,
+      deliveries: () => this.triggerRuntimeView()?.deliveries,
       ...(metrics ? { metrics } : {}),
       ...(errors ? { errors } : {}),
       ...(adminAuditLog ? { auditLog: adminAuditLog } : {}),
       ...(credentialUsage ? { credentialUsage } : {}),
-      crons: () => this.cronsRuntime?.crons,
+      crons: () => this.triggerRuntimeView()?.crons,
     }
     // Partial-boot rollback (20.0): a failed durable boot must not leak pool
     // sockets — open clients keep the process event loop alive, so a boot
@@ -1046,7 +1057,7 @@ export class ApiService extends Service<ApiConfig> {
     const skillPackStore = this.config.skillPacks ? createMemorySkillPackStore() : undefined
     const userModelCredentials = this.config.userModelAuth ? createMemoryUserModelCredentialsStore() : undefined
     const secretDropStore = this.config.secretDrops ? createMemorySecretDropStore() : undefined
-    // Late-binding wrappers (parity with cronsRuntime): tests inject Postgres
+    // Late-binding wrappers: tests inject Postgres
     // twins via this.memoryStore / this.skillStore *after* boot, so the routes
     // (which captured the in-memory fallback at wire-up time) need a proxy that
     // resolves the live store on each call. Properties / methods both forward;
@@ -1152,8 +1163,8 @@ export class ApiService extends Service<ApiConfig> {
                 ...(deploymentStore ? { deployments: deploymentStore } : {}),
                 ...(skillStore ? { skills: skillStore } : {}),
                 ...(skillPackStore ? { skillPacks: skillPackStore } : {}),
-                crons: () => this.cronsRuntime?.crons,
-                deliveries: () => this.cronsRuntime?.deliveries,
+                crons: () => this.triggerRuntimeView()?.crons,
+                deliveries: () => this.triggerRuntimeView()?.deliveries,
                 ...(directoryStore ? { directory: directoryStore } : {}),
                 ...(environmentRegistry ? { environments: environmentRegistry } : {}),
                 ...(egressAuditSink ? { egressAudit: egressAuditSink } : {}),
@@ -1236,10 +1247,10 @@ export class ApiService extends Service<ApiConfig> {
             })()
           : {}),
         crons: {
-          crons: () => this.cronsRuntime?.crons,
-          scheduler: () => this.cronsRuntime?.scheduler,
+          crons: () => this.triggerRuntimeView()?.crons,
+          scheduler: () => this.triggerRuntimeView()?.scheduler,
           ...(directoryStore ? { directory: directoryStore } : {}),
-          deliveries: () => this.cronsRuntime?.deliveries,
+          deliveries: () => this.triggerRuntimeView()?.deliveries,
           ...(directoryStore
             ? {
                 reach: reachDirectory(directoryStore),

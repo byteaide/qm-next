@@ -61,18 +61,6 @@ They are still present; the architecture gate acknowledges them.
   strings but those are an unrelated `SurfaceContextResult` enum,
   not `RunStatus`. They are not in scope for KV-001.
 
-- id: KV-002
-  rule: `api.cronsRuntime` compatibility write (single sanctioned seam)
-  phase: 7
-  location:
-    - packages/api/src/wire-cron-runtime.ts
-  notes: Phase 4 removed the late write from `packages/triggers` and made
-    `WireCronRuntimeService` the only writer — the composition seam the
-    TriggersService architecture test asserts. The compatibility field
-    itself is removed in Phase 7 ("Remove `api.cronsRuntime`
-    compatibility fields"), at which point this entry is deleted and the
-    gate asserts zero hits.
-
 - id: KV-004
   rule: IM platform symbols in im-core
   phase: 0  # enforced by the gate already; this entry exists so the
@@ -122,6 +110,18 @@ hits remain in the tree.
     `TriggerRuntime` contract from `@qm/types`; the composition seam is
     `TriggerRuntimeCordisService` in `@qm/api`. The TriggersService
     architecture test asserts no `@qm/api` dependency or import.
+
+- id: KV-002
+  rule: `api.cronsRuntime` compatibility write (single sanctioned seam)
+  phase: 7 (resolved — chore/architecture-cutover)
+  resolution: the `wire-cron-runtime.ts` composition service and the
+    `api.cronsRuntime` field are deleted. Cron schedule storage, the
+    scheduler, and the bridge delivery queue stay behind the Trigger
+    boundary; the parity cron/admin/monitoring routes read the Cordis
+    service registry lazily (`ctx.reflect.get('triggers'|'im-bridge')`),
+    so the API never owns a copy and nothing writes into API state.
+    The Triggers architecture test asserts zero `cronsRuntime` hits
+    across `packages/api/src` and `packages/triggers/src`.
 
 - id: KV-003
   rule: route-local OAuth pending Maps
