@@ -99,7 +99,7 @@ export function createInMemoryEventLog(opts: InMemoryEventLogOptions): InMemoryE
           ? (last.outcome === 'succeeded' ? 'succeeded' : last.outcome === 'cancelled' ? 'cancelled' : 'failed')
           : last.kind === 'run.cancelled'
             ? 'cancelled'
-            : last.kind === 'attempt.suspended'
+            : last.kind === 'attempt.suspended' || last.kind === 'approval.requested'
               ? 'awaiting_approval'
               : last.kind === 'attempt.started' || last.kind === 'attempt.resumed'
                 ? 'running'

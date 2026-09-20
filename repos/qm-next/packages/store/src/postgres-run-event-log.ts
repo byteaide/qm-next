@@ -158,7 +158,7 @@ export function createPostgresRunEventLog(opts: PostgresRunEventLogOptions): Pos
     if (e.kind === 'run.cancelled') return 'cancelled'
     // ADR-0010 continuation executor — awaiting is observable; identical
     // projection to the in-memory log (contract parity).
-    if (e.kind === 'attempt.suspended') return 'awaiting_approval'
+    if (e.kind === 'attempt.suspended' || e.kind === 'approval.requested') return 'awaiting_approval'
     if (e.kind === 'attempt.started' || e.kind === 'attempt.resumed') return 'running'
     return 'queued'
   }

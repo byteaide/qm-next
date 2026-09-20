@@ -22,6 +22,7 @@ import type {
   SessionStore,
   TargetRunEvent,
   TargetRunObservation,
+  TurnApproval,
   TurnInput,
 } from '@qm/types'
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
@@ -317,6 +318,32 @@ export function createWebUiServer(deps: WebUiDeps, opts: WebUiServerOptions): Fa
     })()
     if (!text.trim() && !proactiveOpener && !approval) {
       return reply.code(400).send({ error: 'bad_request', message: 'empty message' })
+    }
+    // ADR-0010 continuation executor — an approval-carrying turn is a
+    // decision, not new work: route it through the glue (SAME Run
+    // resumes or fails) instead of enqueueing a successor Run.
+    if (approval) {
+      const continuation = deps.approvalContinuation
+      if (!continuation) {
+        return reply.code(503).send({ error: 'approval_continuation_unavailable', message: 'approval executor not wired' })
+      }
+      const request = await continuation.approvals.get(approval.requestId)
+      if (!request) return notFound(reply)
+      const targetRun = await continuation.runs.get(request.runId)
+      if (!targetRun || !targetRun.request.conversation.threadRef.startsWith(`web:${user}:`)) {
+        return notFound(reply)
+      }
+      const { lifecycle } = await applyApprovalDecision(continuation, approval.requestId, {
+        approved: approval.approved,
+        decidedBy: user,
+      })
+      const state =
+        lifecycle.outcome === 'continuation_started'
+          ? 'resuming'
+          : lifecycle.outcome === 'run_failed'
+            ? 'failed'
+            : 'already_decided'
+      return reply.code(state === 'already_decided' ? 200 : 202).send({ status: state, runId: request.runId })
     }
     const clientTurnId =
       typeof body.clientTurnId === 'string' && /^[0-9a-f-]{36}$/i.test(body.clientTurnId) ? body.clientTurnId : undefined

@@ -39,30 +39,31 @@ async function seedRunAndApproval(opts: { approverId?: string } = {}) {
       text: 'slice-2-4 approval',
     },
   })
-  // Walk the run into `awaiting_approval` for the helper to act on.
-  // The slice-2.4 helper is the orchestrator; the Awaiting Approval
-  // transition itself lands in slice 2.6 reservation release order.
-  // For now we drive the targetState directly via the public API and
-  // rely on the helper to read whatever state is current.
+  // ADR-0010 continuation executor — walk the Run into the real
+  // `awaiting_approval` state through the store transition the turn
+  // runner drives: claim → suspend (lease released + durable
+  // continuation). The decision helpers only act on a suspended Run.
   const claimed = await runs.claim('worker-1', 60_000)
   assert.ok(claimed)
-  // Mark the Attempt as suspended by mutating `deliveryState` (the
-  // public hook). Slice 2.6 wires the full lifecycle; for now we
-  // simulate it.
-  await runs.setDeliveryState(enq.run.id, claimed.leaseToken, {
-    editRef: 'suspended:attempt-1',
+  const suspended = await runs.suspendForApproval!(enq.run.id, claimed.leaseToken!, {
+    requestId: 'app-1',
+    commandRequestId: 'cmd-1',
+    attemptId: 'attempt-1',
+    suspendedAt: Date.now(),
+    result: { status: 'pending_approval', sessionId: 'session-A', pendingApprovals: [] },
   })
+  assert.equal(suspended, true)
   const request = await approvals.create({
     id: 'app-1',
     runId: enq.run.id,
-    attemptId: claimed.id,
+    attemptId: 'attempt-1',
     requesterPrincipalId: opts.approverId ?? 'person:ada',
     commandRequestId: 'cmd-1',
     attemptState: 'suspended',
     sessionRef: 'session-A',
     commandClass: 'shell',
   })
-  return { approvals, runs, request, runId: enq.run.id, leaseToken: claimed.leaseToken }
+  return { approvals, runs, request, runId: enq.run.id, leaseToken: claimed.leaseToken! }
 }
 
 function makeDeps(approvals: ReturnType<typeof createMemoryTargetApprovalStore>, runs: ReturnType<typeof createMemoryRunStore>): ApprovalContinuationDeps {
@@ -81,12 +82,18 @@ test('slice-2.4: approve by requester starts a Continuation Attempt in the same 
     assert.equal(result.lifecycle.runId, runId)
     assert.notEqual(result.lifecycle.attemptId, request.attemptId)
   }
-  // Run itself is back to running and not terminal.
+  // Run itself is back to running (continuation-claimable) and not terminal;
+  // the continuation lane can now claim it.
   const run = await runs.get(runId)
   assert.ok(run)
   assert.notEqual(run?.status, 'failed')
   assert.equal(run?.targetState, 'running')
+  assert.equal(run?.leaseToken, null)
   assert.equal(isAwaitingApproval(run?.targetState ?? 'queued'), false)
+  const continuation = await runs.claimNextContinuation!('worker-2', 60_000)
+  assert.ok(continuation)
+  assert.equal(continuation.id, runId)
+  assert.equal(continuation.deliveryState?.pendingApproval?.commandRequestId, 'cmd-1')
 })
 
 test('slice-2.4: reject by requester fails the same Run with approval_denied', async () => {

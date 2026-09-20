@@ -135,6 +135,7 @@ export function createTurnRunner(
     const attemptId = `${run.id}:${run.attempts}`
     let requestId: string
     let ttlMs: number
+    let snapshot: TurnResult
     try {
       const input: ApprovalRequestInput = {
         runId: run.id,
@@ -149,6 +150,19 @@ export function createTurnRunner(
       const request = await deps.approvals.create(input)
       requestId = request.id
       ttlMs = request.ttlMs || APPROVAL_DEFAULT_TTL_MS
+      // The stored snapshot carries the DURABLE registry id so the
+      // decision surfaces (web / IM) resolve it against the
+      // ApprovalStore; the orchestrator's synthesized
+      // `${session}:${command}` id stays runner-internal. This slice
+      // registers the primary pending approval only — additional
+      // simultaneous approvals keep their synthesized ids and are not
+      // yet registry-resolvable.
+      snapshot = result.pendingApprovals?.length
+        ? {
+            ...result,
+            pendingApprovals: result.pendingApprovals.map((pa, i) => (i === 0 ? { ...pa, requestId: request.id } : pa)),
+          }
+        : result
     } catch (err) {
       await failClosed(run, `approval continuation unavailable: ${errMessage(err)}`)
       return
@@ -161,7 +175,7 @@ export function createTurnRunner(
       commandRequestId: primary.requestId,
       attemptId,
       suspendedAt: Date.now(),
-      result,
+      result: snapshot,
     })
     if (!suspended) {
       await failClosed(run, 'approval continuation unavailable: lease lost before suspend')

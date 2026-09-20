@@ -458,6 +458,9 @@ importers:
       '@qm/im-core':
         specifier: workspace:^
         version: link:../im-core
+      '@qm/runs':
+        specifier: workspace:^
+        version: link:../runs
       '@qm/schemastery':
         specifier: workspace:^
         version: link:../../vendor/schemastery
@@ -875,6 +878,9 @@ importers:
       '@qm/directory':
         specifier: workspace:^
         version: link:../directory
+      '@qm/runs':
+        specifier: workspace:^
+        version: link:../runs
       '@qm/schemastery':
         specifier: workspace:^
         version: link:../../vendor/schemastery
