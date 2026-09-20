@@ -30,12 +30,15 @@ import type {
   ApprovalStore,
   RunState,
   RunStore,
+  SessionReservationStore,
+  TargetRunEventBus,
 } from '@qm/types'
 import {
   isTerminalAttemptState,
   isTerminalRunState,
   type AttemptRef,
 } from '@qm/types'
+import { releaseApprovalReservation } from './approval-reservation-release.ts'
 
 /**
  * Lifecycle outcome after a decision is applied. The runtime uses
@@ -55,6 +58,20 @@ export interface ApprovalContinuationDeps {
    * id. Default: `randomUUID()`.
    */
   attemptIdAllocator?: () => string
+  /**
+   * ADR-0010 continuation executor — when wired, decision outcomes are
+   * published as Run Events (`approval.decided` / `approval.expired`,
+   * plus `run.finished` on the terminal rejection/expiry path and
+   * `attempt.resumed` on the approval path).
+   */
+  runEventLog?: TargetRunEventBus
+  /**
+   * ADR-0010 continuation executor — when wired, the Session
+   * Continuation Reservation is released on terminal decision paths
+   * only AFTER the terminal Run Event has been persisted (plan §2.6
+   * release order).
+   */
+  reservations?: SessionReservationStore
 }
 
 /**
@@ -128,6 +145,18 @@ async function startContinuation(
   if (applied === false) {
     return { outcome: 'noop', reason: 'forbidden', approval }
   }
+  if (deps.runEventLog) {
+    // Decision event first, then the resume marker; the Run itself
+    // stays non-terminal, so the reservation is NOT released here —
+    // it releases when the Run reaches durable terminal state (the
+    // turn runner owns that release, plan §2.6).
+    await deps.runEventLog
+      .publish({ kind: 'approval.decided', runId: approval.runId, sessionId: approval.continuation.sessionRef, requestId: approval.id, approved: true })
+      .catch(() => undefined)
+    await deps.runEventLog
+      .publish({ kind: 'attempt.resumed', runId: approval.runId, sessionId: approval.continuation.sessionRef, attemptRef: approval.attemptId, approvalRequestId: approval.id })
+      .catch(() => undefined)
+  }
   return {
     outcome: 'continuation_started',
     runId: approval.runId,
@@ -144,6 +173,32 @@ async function failRunForOutcome(
   const applied = await deps.runs.failFromApproval?.(approval.runId, failureReason)
   if (applied === false) {
     return { outcome: 'noop', reason: 'already_decided', approval }
+  }
+  if (deps.runEventLog) {
+    // Plan §2.6 release order, steps 1→2: the Run state transition is
+    // durable (failFromApproval above), now persist the terminal Run
+    // Events BEFORE the reservation release below.
+    if (failureReason === 'approval_expired') {
+      await deps.runEventLog
+        .publish({ kind: 'approval.expired', runId: approval.runId, sessionId: approval.continuation.sessionRef, requestId: approval.id })
+        .catch(() => undefined)
+    } else {
+      await deps.runEventLog
+        .publish({ kind: 'approval.decided', runId: approval.runId, sessionId: approval.continuation.sessionRef, requestId: approval.id, approved: false })
+        .catch(() => undefined)
+    }
+    await deps.runEventLog
+      .publish({ kind: 'run.finished', runId: approval.runId, sessionId: approval.continuation.sessionRef, outcome: 'failed', failureReason })
+      .catch(() => undefined)
+  }
+  if (deps.reservations) {
+    // Plan §2.6 step 3 — release only after the terminal Run Event.
+    // The helper refuses without the terminal-event proof.
+    await releaseApprovalReservation(deps.reservations, {
+      sessionId: approval.continuation.sessionRef,
+      runId: approval.runId,
+      terminalEventPersisted: true,
+    }).catch(() => undefined)
   }
   return { outcome: 'run_failed', runId: approval.runId, failureReason, approval }
 }

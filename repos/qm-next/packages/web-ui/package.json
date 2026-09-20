@@ -19,6 +19,7 @@
     "@qm/auth": "workspace:^",
     "@qm/cordis": "workspace:^",
     "@qm/directory": "workspace:^",
+    "@qm/runs": "workspace:^",
     "@qm/schemastery": "workspace:^",
     "@qm/skills": "workspace:^",
     "@qm/triggers": "workspace:^",

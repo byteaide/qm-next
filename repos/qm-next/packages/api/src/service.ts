@@ -34,6 +34,7 @@ import {
   createMemoryAgentRequestStore,
   createMemoryAmbientJudgmentStore,
   createMemoryApprovalStore,
+  createMemoryTargetApprovalStore,
   createPostgresApprovalStore,
   type AckEmojiPickStore,
   type AgentRequestStore,
@@ -44,7 +45,7 @@ import {
 import { createMemoryDirectoryStore, createPostgresDirectoryStore, type DirectoryStore } from '@qm/directory'
 import { createKeychain, createDeviceFlowCutoverStore, deriveConnectorKey, type DeviceFlowCutoverStore } from '@qm/credentials'
 import type { ImDeliveryQueue } from '@qm/im-core'
-import type { Keychain } from '@qm/types'
+import type { Keychain, SessionReservationStore } from '@qm/types'
 import { createClaudeHarness } from '@qm/harness-claude'
 import { createCodexHarness } from '@qm/harness-codex'
 import { createOpenCodeHarness } from '@qm/harness-opencode'
@@ -75,7 +76,7 @@ import {
   type OAuthFlowStore,
   type OAuthProviderSpec,
 } from '@qm/connectors'
-import { createDrainController, createMemorySessionStateBus, createPostgresInstanceRegistry, createReaper, type DrainController, type Reaper } from '@qm/runs'
+import { createDrainController, createMemorySessionStateBus, createPostgresInstanceRegistry, createReaper, type ApprovalContinuationDeps, type DrainController, type Reaper } from '@qm/runs'
 import { createMemorySkillStore, type SkillStore } from '@qm/skills'
 import type { RuntimeRouteConfig } from '@qm/orchestrator'
 import { createHarnessRouter, createMockHarness, createSandboxToolContext, OrchestratorService } from '@qm/orchestrator'
@@ -124,7 +125,7 @@ import {
 import { createAmbientCursorStore, createPostgresAckEmojiPickStore, createPostgresAgentRequestStore, createPostgresAmbientJudgmentStore } from './services/ambient-stores.ts'
 import type { ChannelPolicyStore as ApiChannelPolicyStore } from './services/channel-policy-store.ts'
 import type { CronScheduler, CronStore } from '@qm/triggers'
-import { createInMemoryEventLog, createMemoryLeaderLease, createMemorySequenceAllocator } from '@qm/concurrency'
+import { createInMemoryEventLog, createMemoryLeaderLease, createMemorySequenceAllocator, createMemorySessionReservationStore, createPostgresSessionReservationStore } from '@qm/concurrency'
 import type {
   Harness,
   IdentityService,
@@ -572,6 +573,15 @@ export class ApiService extends Service<ApiConfig> {
   /** Approval store (20.0): one instance shared with the IM bridge; durable with databaseUrl. */
   approvals?: ApprovalStore
 
+  /**
+   * ADR-0010 continuation executor — the approval decision glue shared
+   * with the web-ui and im-bridge decision surfaces: the target
+   * ApprovalStore + RunStore [+ event log + Session Continuation
+   * Reservation store]. Decisions mutate the SAME Run; no successor
+   * Run is created. Present after [Service.init].
+   */
+  approvalContinuation?: ApprovalContinuationDeps
+
   /** Model credential registry (20.0): provider API keys over the `model_credentials` map. */
   modelCredentials?: ModelCredentialStore
 
@@ -792,8 +802,25 @@ export class ApiService extends Service<ApiConfig> {
       })
       this.drain = drain
     }
+    // ADR-0010 continuation executor (owner decision A, 2026-09-20):
+    // the target ApprovalStore registry, the Session Continuation
+    // Reservation store, and the decision glue shared with the web-ui
+    // and im-bridge decision surfaces. The approval registry is
+    // memory-backed (its Postgres twin is a known follow-up); the
+    // Run-row Approval Continuation and the reservation are durable
+    // with databaseUrl.
+    const approvalsTarget = createMemoryTargetApprovalStore()
+    const reservations: SessionReservationStore = databaseUrl
+      ? createPostgresSessionReservationStore({ connectionString: databaseUrl })
+      : createMemorySessionReservationStore()
+    this.approvalContinuation = {
+      approvals: approvalsTarget,
+      runs,
+      ...(runEventLog ? { runEventLog } : {}),
+      reservations,
+    }
     const runner = createTurnRunner(
-      { orchestrator, runs, runEventLog },
+      { orchestrator, runs, runEventLog, approvals: approvalsTarget, reservations },
       {
         workerId: instanceId,
         ...(this.config.tickMs !== undefined ? { tickMs: this.config.tickMs } : {}),

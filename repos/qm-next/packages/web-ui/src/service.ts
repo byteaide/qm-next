@@ -76,6 +76,9 @@ export class WebUiService extends Service<WebUiConfig> {
         runs: api.runs,
         resolution: api.resolution,
         runObservation: api.runObservation,
+        // ADR-0010 continuation executor — decisions mutate the SAME
+        // Run; absent, the route fails closed with 503.
+        ...(api.approvalContinuation ? { approvalContinuation: api.approvalContinuation } : {}),
         skills: this.skills,
         crons: this.crons,
         directory: this.directory,

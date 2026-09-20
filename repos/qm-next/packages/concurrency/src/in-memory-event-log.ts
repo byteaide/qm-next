@@ -91,9 +91,19 @@ export function createInMemoryEventLog(opts: InMemoryEventLogOptions): InMemoryE
       const snap: RunSnapshot = {
         id: runId,
         sessionId: last.sessionId,
+        // ADR-0010 continuation executor — the awaiting state is
+        // observable: `attempt.suspended` projects to
+        // `awaiting_approval`; started/resumed attempts project to
+        // `running`. Identical projection to the Postgres log.
         state: last.kind === 'run.finished'
           ? (last.outcome === 'succeeded' ? 'succeeded' : last.outcome === 'cancelled' ? 'cancelled' : 'failed')
-          : 'queued',
+          : last.kind === 'run.cancelled'
+            ? 'cancelled'
+            : last.kind === 'attempt.suspended'
+              ? 'awaiting_approval'
+              : last.kind === 'attempt.started' || last.kind === 'attempt.resumed'
+                ? 'running'
+                : 'queued',
         ...(last.kind === 'run.finished' ? { outcome: last.outcome } : {}),
         attempts: list.filter((e) => e.kind === 'attempt.started').length,
         lastEventSeq: last.seq,

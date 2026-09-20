@@ -46,13 +46,19 @@ export function runWire(run: Run): RunPollWire {
   // historical pre-cutover rows may still carry `status='done'` with a
   // defaulted `targetState` — project those through the accepted
   // legacy-status mapping.
+  // ADR-0010 continuation executor — `awaiting_approval` crosses the
+  // wire as its own status so clients can render the awaiting state;
+  // the pending_approval result snapshot rides alongside for the
+  // approve/reject actions.
   const status: RunPollWireStatus = isTerminalTargetState(run.targetState)
     ? run.targetState
-    : projectLegacyStatus(run.status, { result: run.result, failureReason: run.failureReason ?? null })
+    : run.targetState === 'awaiting_approval'
+      ? 'awaiting_approval'
+      : projectLegacyStatus(run.status, { result: run.result, failureReason: run.failureReason ?? null })
   return {
     status,
     result: run.result ? resultWire(run.result) : null,
-    alive: !isTerminalTargetState(run.targetState) && run.status === 'running',
+    alive: !isTerminalTargetState(run.targetState) && run.targetState !== 'awaiting_approval' && run.status === 'running',
     startedAt: run.startedAt ?? null,
     finishedAt: run.finishedAt ?? null,
   }

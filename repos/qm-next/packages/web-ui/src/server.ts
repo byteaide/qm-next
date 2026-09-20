@@ -10,6 +10,7 @@
 import { randomBytes } from 'node:crypto'
 import { createFireEngine, manualFireKey, renderCronFireInput, type CronSchedule, type CronStore } from '@qm/triggers'
 import { WEBHOOK_SCHEMES } from '@qm/api'
+import { applyApprovalDecision, type ApprovalContinuationDeps } from '@qm/runs'
 import type { DirectoryStore } from '@qm/directory'
 import type { SkillStore } from '@qm/skills'
 import type {
@@ -21,7 +22,6 @@ import type {
   SessionStore,
   TargetRunEvent,
   TargetRunObservation,
-  TurnApproval,
   TurnInput,
 } from '@qm/types'
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
@@ -46,6 +46,13 @@ export interface WebUiDeps {
   resolution: ResolutionService
   /** Run Observation port (snapshot/replay/subscribe) over the durable log. */
   runObservation: TargetRunObservation
+  /**
+   * ADR-0010 continuation executor — the approval decision glue
+   * (durable ApprovalStore + RunStore [+ event log + reservations]).
+   * When absent, approval decisions fail closed with 503 instead of
+   * creating successor Runs.
+   */
+  approvalContinuation?: ApprovalContinuationDeps
   skills: SkillStore
   crons: CronStore
   directory: DirectoryStore
@@ -1392,20 +1399,34 @@ export function createWebUiServer(deps: WebUiDeps, opts: WebUiServerOptions): Fa
     if (!requestId || requestId.includes('/')) return notFound(reply)
     const body = (req.body ?? {}) as Record<string, unknown>
     const approved = body.approved === true
-    const scope = body.scope === 'once' || body.scope === 'session' || body.scope === 'always' ? body.scope : undefined
-    const runs = await deps.runs.list({ limit: 200 })
-    const withApproval = runs
-      .filter(
-        (r) =>
-          r.request.conversation.threadRef.startsWith(`web:${user}:`) &&
-          r.result?.pendingApprovals?.some((pa) => pa.requestId === requestId),
-      )
-      .sort((a, b) => b.createdAt - a.createdAt)[0]
-    if (!withApproval) return notFound(reply)
-    const approval: TurnApproval = { requestId, approved, ...(scope ? { scope } : {}) }
-    const input: TurnInput = { ...withApproval.request, approval }
-    const { run } = await deps.runs.enqueue({ sessionId: withApproval.sessionId, request: input })
-    return reply.code(202).send({ runId: run.id })
+    // ADR-0010 continuation executor — the decision routes through
+    // `applyApprovalDecision`; the SAME Run resumes or fails and no
+    // successor Run is ever created here (plan Phase 7 checklist).
+    const continuation = deps.approvalContinuation
+    if (!continuation) {
+      return reply.code(503).send({ error: 'approval_continuation_unavailable', message: 'approval executor not wired' })
+    }
+    const request = await continuation.approvals.get(requestId)
+    if (!request) return notFound(reply)
+    const targetRun = await continuation.runs.get(request.runId)
+    if (!targetRun || !targetRun.request.conversation.threadRef.startsWith(`web:${user}:`)) {
+      return notFound(reply)
+    }
+    const { decision, lifecycle } = await applyApprovalDecision(continuation, requestId, {
+      approved,
+      decidedBy: user,
+    })
+    if (decision.outcome === 'not_found') return notFound(reply)
+    if (decision.outcome === 'forbidden') {
+      return reply.code(403).send({ error: 'forbidden', message: 'only the original requester may decide' })
+    }
+    const state =
+      lifecycle.outcome === 'continuation_started'
+        ? 'resuming'
+        : lifecycle.outcome === 'run_failed'
+          ? 'failed'
+          : 'already_decided'
+    return reply.code(state === 'already_decided' ? 200 : 202).send({ runId: request.runId, state })
   })
 
   app.get('/api/directory/resolve', async (req, reply) => {

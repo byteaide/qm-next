@@ -62,6 +62,7 @@ import type {
   OutboundBody,
 } from '@qm/im-core'
 import { createDeliveryLoop, createMemoryDeliveryQueue } from '@qm/im-core/runtime'
+import { applyApprovalDecision, type ApprovalContinuationDeps } from '@qm/runs'
 import type {
   Conversation,
   Destination,
@@ -177,6 +178,15 @@ export interface ImTurnBridgeOptions {
   maxRoutes?: number
   /** Durable approval registry; defaults to an in-memory store. */
   approvalStore?: ApprovalStore
+  /**
+   * ADR-0010 continuation executor — the target approval decision glue
+   * (durable target ApprovalStore + RunStore [+ event log +
+   * reservations]). When wired, button decisions route through
+   * `applyApprovalDecision` and the SAME Run resumes or fails — no
+   * successor Run is ever enqueued. Unset, the legacy
+   * approval-registry + follow-up-turn path stays active.
+   */
+  approvalContinuation?: ApprovalContinuationDeps
   /**
    * Approval card renderer override applied to every provider. Unset, the
    * bridge resolves each provider's own `approvalCardRenderer` and falls
@@ -449,6 +459,43 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
 
   async function submitApprovalInteraction(event: InboundInteractionEvent, value: ApprovalActionValue): Promise<void> {
     const actor = principalOf(event.provider, event.actor)
+    // ADR-0010 continuation executor — when the glue is wired the
+    // decision mutates the SAME Run (resume or fail); no follow-up
+    // turn is enqueued. The requester-scoped + idempotent semantics
+    // come from the ApprovalStore via `applyApprovalDecision`.
+    if (options.approvalContinuation) {
+      const { decision, lifecycle } = await applyApprovalDecision(
+        options.approvalContinuation,
+        value.requestId,
+        { approved: value.decision === 'approve', decidedBy: actor.id },
+      )
+      if (decision.outcome === 'not_found') {
+        logger.info(`im-bridge: approval ${value.requestId} not found; click treated as expired`)
+        await deliverNotice(event, 'That approval request could not be found — it may have expired.')
+        return
+      }
+      if (decision.outcome === 'forbidden') {
+        logger.info(`im-bridge: approval ${value.requestId} clicked by non-requester ${actor.id}; refused`)
+        await deliverNotice(event, 'Only the person who requested this command can approve or deny it.')
+        return
+      }
+      if (decision.outcome === 'already_decided' && lifecycle.outcome === 'noop') {
+        logger.info(`im-bridge: approval ${value.requestId} already decided; duplicate click ignored`)
+        return
+      }
+      const runId = lifecycle.outcome === 'noop' ? undefined : lifecycle.runId
+      if (lifecycle.outcome === 'run_failed') {
+        await deliverNotice(
+          event,
+          `${value.decision === 'approve' ? 'Approved' : 'Rejected'}: \`${value.command}\` — the turn was closed (${lifecycle.failureReason}); the command never ran.`,
+        )
+      } else if (lifecycle.outcome === 'continuation_started') {
+        await deliverNotice(event, `Approved: \`${value.command}\` — resuming the same turn.`)
+      } else {
+        await deliverNotice(event, `That decision was already recorded${runId ? '' : ''}.`)
+      }
+      return
+    }
     const decided = await approvalStore.decide(value.requestId, {
       approved: value.decision === 'approve',
       decidedBy: actor.id,

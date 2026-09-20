@@ -15,6 +15,7 @@
     "@qm/cordis": "workspace:^",
     "@qm/directory": "workspace:^",
     "@qm/im-core": "workspace:^",
+    "@qm/runs": "workspace:^",
     "@qm/schemastery": "workspace:^",
     "@qm/types": "workspace:^"
   },

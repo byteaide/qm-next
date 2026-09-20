@@ -273,6 +273,9 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
         ...(this.config.actorType ? { actorType: this.config.actorType } : {}),
         ...(this.config.replyAs ? { replyAs: this.config.replyAs } : {}),
         ...(api.approvals ? { approvalStore: api.approvals } : {}),
+        // ADR-0010 continuation executor — button decisions mutate the
+        // SAME Run; the legacy follow-up-turn path stays dormant.
+        ...(api.approvalContinuation ? { approvalContinuation: api.approvalContinuation } : {}),
         ...(ambient ? { ambient } : {}),
         ...(ack ? { ack } : {}),
         ...(agentRequests ? { agentRequests } : {}),
