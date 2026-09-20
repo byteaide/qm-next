@@ -21,11 +21,26 @@ import {
   createModelAmbientJudge,
   type ChannelPolicyStore,
 } from '@qm/approvals'
+import { createRolloutFlagRegistry, registerTargetImIntakeFlag, resolveTargetImIntake } from '@qm/concurrency'
 import { resolveProviderDm } from '@qm/directory'
-import type { ImDeliveryQueue } from '@qm/im-core'
-import { createMemoryDeliveryQueue, createPostgresDeliveryQueue, ImRegistryService } from '@qm/im-core/runtime'
+import type { ImDeliveryQueue, ImIntakeCursorStore, ImIntakeDeadLetterStore, ImIntakeInbox, IntakeSubscriber } from '@qm/im-core'
+import {
+  createAuditSubscriber,
+  createMemoryDeliveryQueue,
+  createMemoryIntakeCursorStore,
+  createMemoryIntakeDeadLetterStore,
+  createMemoryIntakeInbox,
+  createPostgresDeliveryQueue,
+  createPostgresIntakeCursorStore,
+  createPostgresIntakeDeadLetterStore,
+  createPostgresIntakeInbox,
+  createIntakeFanout,
+  ImRegistryService,
+  type IntakeFanout,
+} from '@qm/im-core/runtime'
 import Schema from '@qm/schemastery'
 import { createImTurnBridge, type ImTurnBridge, type ImTurnBridgeLoopOptions, type ImTurnBridgeOptions } from './bridge.ts'
+import { createBridgeIntakeSubscriber, createBridgeTurnTracker, type BridgeTurnTracker } from './intake-subscriber.ts'
 
 export interface ImBridgeConfig {
   /** Principal type assigned to IM actors. */
@@ -62,6 +77,12 @@ export interface ImBridgeConfig {
   askResolutions?: boolean
   /** Ask sweep cadence in ms. */
   askSweepMs?: number
+  /**
+   * Record accepted intake through the named `audit` subscriber
+   * (Phase 5 fan-out). The audit sink is the service log until a durable
+   * audit store is wired by composition.
+   */
+  intakeAudit?: boolean
 }
 
 export const Config = Schema.object({
@@ -82,6 +103,7 @@ export const Config = Schema.object({
   agentRequests: Schema.boolean().default(false).description('Agent-request reply directives ([[ask-agent]]) with DM approval'),
   askResolutions: Schema.boolean().default(false).description('Keychain-ask resolution notices as personal DM turns'),
   askSweepMs: Schema.number().default(30_000).description('Ask-resolution sweep cadence in ms'),
+  intakeAudit: Schema.boolean().default(false).description('Fan accepted intake out to the named audit subscriber'),
 })
 
 export class ImTurnBridgeService extends Service<ImBridgeConfig> {
@@ -90,6 +112,16 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
   static inject = ['api']
 
   private bridge: ImTurnBridge | undefined
+
+  /**
+   * Phase 5 durable intake fan-out, present only when the
+   * `target.im-intake` rollout flag is on. Composition code may inspect
+   * it (dead-letter admin surface) or attach further subscribers before
+   * start via `createMirrorSubscriber`.
+   */
+  intake: IntakeFanout | undefined
+
+  private tracker: BridgeTurnTracker | undefined
 
   /** The delivery queue the bridge drains; cron/trigger deliveries share it. */
   queue!: ImDeliveryQueue
@@ -149,13 +181,38 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
     } else if (containers.length > 0) {
       this.ctx.logger.warn('im-bridge: ambientContainers set without a judge — ambient stays inert')
     }
+    // Phase 5 (ADR-0008/0015): the `target.im-intake` rollout flag — read
+    // through the RolloutFlag port only — decides whether inbound events
+    // flow through the durable Intake Inbox + fan-out or the legacy
+    // direct bridge sink. Default off keeps legacy authoritative.
+    const flags = createRolloutFlagRegistry({ env: process.env })
+    registerTargetImIntakeFlag(flags)
+    const intakeEnabled = resolveTargetImIntake(flags)
+    const databaseUrl = api.config.databaseUrl
+
+    // Durable intake stores (target path): Postgres when the composition
+    // root runs with databaseUrl, memory otherwise — mirroring the
+    // delivery-queue selection.
+    let inbox: ImIntakeInbox | undefined
+    let cursors: ImIntakeCursorStore | undefined
+    let deadLetters: ImIntakeDeadLetterStore | undefined
+    if (intakeEnabled) {
+      inbox = databaseUrl ? createPostgresIntakeInbox(databaseUrl) : createMemoryIntakeInbox()
+      cursors = databaseUrl ? createPostgresIntakeCursorStore(databaseUrl) : createMemoryIntakeCursorStore()
+      deadLetters = databaseUrl ? createPostgresIntakeDeadLetterStore(databaseUrl) : createMemoryIntakeDeadLetterStore()
+      this.tracker = createBridgeTurnTracker(inbox)
+    }
+    const intakeActive = Boolean(inbox && cursors && deadLetters && this.tracker)
+
     const registry = new ImRegistryService(this.ctx, {
-      onEvent: (events) => (this.bridge ? this.bridge.sink(events) : Promise.resolve()),
+      onEvent: (events) => {
+        if (intakeActive && this.intake) return this.intake.ingestAll(events).then(() => undefined)
+        return this.bridge ? this.bridge.sink(events) : Promise.resolve()
+      },
     })
     // Delivery queue (20.0 twin lane): durable Postgres queue as soon as
     // the api composition root runs with databaseUrl; cron/trigger fires
     // and the admin provenance view share this queue.
-    const databaseUrl = api.config.databaseUrl
     const queue: ImDeliveryQueue = databaseUrl ? createPostgresDeliveryQueue(databaseUrl) : createMemoryDeliveryQueue()
     this.queue = queue
     const directory = api.directory
@@ -231,14 +288,35 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
         ...(ack ? { ack } : {}),
         ...(agentRequests ? { agentRequests } : {}),
         ...(askResolutions ? { askResolutions } : {}),
+        ...(this.tracker ? { onTurnCreated: (eventId: string, runId: string) => this.tracker!.onTurnCreated(eventId, runId) } : {}),
         loop,
       },
     )
     this.queue = this.bridge.queue
     await this.bridge.start()
+    if (inbox && cursors && deadLetters && this.tracker) {
+      const subscribers: IntakeSubscriber[] = [createBridgeIntakeSubscriber(this.bridge, this.tracker)]
+      if (this.config.intakeAudit) {
+        subscribers.push(
+          createAuditSubscriber(async (record) => {
+            this.ctx.logger.info(
+              `im-intake audit: ${record.provider}:${record.eventId} seq=${record.seq} kind=${record.event.kind} turn=${record.turnId ?? 'none'}`,
+            )
+          }),
+        )
+      }
+      this.intake = createIntakeFanout({ inbox, cursors, deadLetters, subscribers })
+      await this.intake.start()
+    }
     return async () => {
+      await this.intake?.stop()
       await this.bridge?.stop()
       if (databaseUrl && 'close' in this.queue) await (this.queue as { close(): Promise<void> }).close().catch(() => undefined)
+      if (databaseUrl) {
+        for (const store of [inbox, cursors, deadLetters]) {
+          if (store && 'close' in store) await (store as { close(): Promise<void> }).close().catch(() => undefined)
+        }
+      }
     }
   }
 }

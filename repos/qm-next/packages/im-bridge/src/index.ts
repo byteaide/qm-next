@@ -27,4 +27,6 @@ export type {
 } from './bridge.ts'
 export { Config, ImTurnBridgeService } from './service.ts'
 export type { ImBridgeConfig } from './service.ts'
+export { createBridgeIntakeSubscriber, createBridgeTurnTracker } from './intake-subscriber.ts'
+export type { BridgeTurnTracker } from './intake-subscriber.ts'
 export { default } from './service.ts'

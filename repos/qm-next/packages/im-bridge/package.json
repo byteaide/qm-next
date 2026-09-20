@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@qm/approvals": "workspace:^",
+    "@qm/concurrency": "workspace:^",
     "@qm/cordis": "workspace:^",
     "@qm/directory": "workspace:^",
     "@qm/im-core": "workspace:^",

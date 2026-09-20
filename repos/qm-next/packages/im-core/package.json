@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@qm/cordis": "workspace:^",
+    "@qm/runs": "workspace:^",
     "@qm/store": "workspace:^",
     "@qm/types": "workspace:^"
   }

@@ -34,6 +34,7 @@ import type { ReservationReleaseResult, SessionReservationStore } from '@qm/type
 import {
   bumpReservationReleaseOrderViolation,
   createRunMetricsRegistry,
+  RUN_METRICS,
   type RunMetricsRegistry,
 } from './observability.ts'
 
