@@ -878,11 +878,11 @@ pnpm test:sandbox-policy
 
 #### 6. 运营关卡
 
-- [ ] 灰度标志已移除。
-- [ ] §1.6 / §2.7 / §3.3 / §5.5 / §6.5 中添加的指标和告警已接线到 on-call 轮班，配有仪表盘和运行手册。
-- [ ] `docs/architecture.md` 已更新为当前目标行为（无"当前与目标"框架）。
-- [ ] `docs/known-violations.md` 为空（所有条目已解决）。
-- [ ] 每个清理项至少有一个在清理前失败、清理后通过的测试 — 各阶段测试影响评估中的回归篮子纪律保持完整。
+- [x] 灰度标志已移除。（slice 7.3/7.4 — `target.im-intake` 与 `target.run-observation` 已从 `RolloutFlag` 端口表面删除；核验：残留引用仅为 JSDoc 注释和一个契约测试 fixture key，无生产注册。）
+- [ ] §1.6 / §2.7 / §3.3 / §5.5 / §6.5 中添加的指标和告警已接线到 on-call 轮班，配有仪表盘和运行手册。（未完成 — 属 §5"On-call 告警接线核验"的 release-PR 证据；这是唯一无法在 release PR 前结清的运营关卡。）
+- [x] `docs/architecture.md` 已更新为当前目标行为（无"当前与目标"框架）。（Phase 7 切换时完成，延续执行器切片重写 §7 后再次核验；`rg "current vs target" docs/architecture.md` 零命中。）
+- [x] `docs/known-violations.md` 为空（所有条目已解决）。（所有可随阶段解决的条目均已解决；live block 仅保留 KV-004 — 提供方适配器平台符号的永久 gate 白名单，由 `pnpm check:im` 强制，不是未解决违规。）
+- [x] 每个清理项至少有一个在清理前失败、清理后通过的测试 — 各阶段测试影响评估中的回归篮子纪律保持完整。（TIA §12 自检（`docs/test-impact/phase-7.md`）：回归篮子内存与 PG 双绿 — `pnpm test` 927/0/51、`pnpm test:pg` 1033/0/4；所有"预期破坏"测试已按 TIA §3/§11 处置。）
 
 **关联 ADR：** 0001–0016 全部，加上执行期间引入的任何 ADR（例如 Phase 6 §8 要求的 OAuth 令牌静态加密 ADR）。
 

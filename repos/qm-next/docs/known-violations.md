@@ -28,6 +28,12 @@ gate asserts no hits remain.
 These are the legacy paths the 2026-09-19 architecture review recorded.
 They are still present; the architecture gate acknowledges them.
 
+As of the Phase 7 cutover (2026-09-20), KV-004 is the only remaining live
+entry and is a **permanent allowlist**, not an unresolved violation: provider
+adapters legitimately name platforms, and the entry exists so the gate skips
+the adapter packages. All phase-resolvable violations recorded in this file
+are resolved (see "Phase-resolved entries" below).
+
 ```yaml
 - id: KV-004
   rule: IM platform symbols in im-core
