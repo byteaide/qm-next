@@ -1,9 +1,11 @@
 # 架构实施计划
 
-状态：**Phase 0–4 已完成 — 2026-09-20**
-范围：实施 `docs/adr/0001`–`docs/adr/0016` 中记录的目标模型，并由 `docs/architecture.md` 汇总。
+状态：**Phase 0–7 已完成 — 2026-09-20**（Phase 7 清理已落地；其中一项由负责人豁免解决：ADR-0010 审批续接执行器曾推迟到专属切片，现已在 `feat/approval-continuation` 上**落地**（同日）——见 Phase 7 的"推迟到专属切片"一节。§5 的发布阻断项仍作为发布 PR 的证据。）
+范围：实施 `docs/adr/0001`–`docs/adr/0017` 中记录的目标模型，并由 `docs/architecture.md` 汇总。
 
 本计划有意将行为变更拆分为多个阶段。一个阶段只有在 Memory 和 Postgres 两种模式下都通过其阶段关卡后，才算完成。在某个必需关卡为红色时，不得开始下一阶段。
+
+Phase 5 已合并于 `453ca26`。Phase 6（连接器 OAuth + ADR-0017 令牌保险库）以切片 6.1–6.7 直接落在 `main`（至 `6b70c85`）。Phase 7 在 `chore/architecture-cutover` 上开启，测试影响评估位于 `docs/test-impact/phase-7.md`；切片进度记录在该文件的 changelog 与下方 Phase 7 清单中。
 
 ## 0. 基本规则
 
@@ -782,19 +784,43 @@ pnpm test:user-stories
 
 ### 清理清单
 
-- [ ] 移除旧版 Run 终端 `done` 写入。
-- [ ] 移除 Attempt 失败时关闭事件流。
-- [ ] 移除编排器拥有的订阅者真相。
-- [ ] 移除复制 Run 观测的 Web 轮询/回放补偿。
-- [ ] 移除 Web/IM 后继 Run 审批逻辑。
-- [ ] 移除 `api.cronsRuntime` 兼容字段。
-- [ ] 移除 API 路由本地 OAuth 挂起状态。
-- [ ] 移除进程本地 IM 去重作为权威机制。
-- [ ] 在灰度标志的切换关卡通过后移除临时灰度标志。
-- [ ] 将 `docs/architecture.md` 从"当前与目标"更新为当前目标行为。
-- [ ] 仅在适用时标记被取代的 ADR。
-- [ ] 验证 `done` 在目标路径上**物理消失**：`rg "term:\s*['\"]done['\"]" packages/` 在目标运行时代码中返回零命中（`legacy/` 下的旧版兼容垫片按其位置排除；此 grep 在 `pnpm test:architecture` 中）。
-- [ ] 验证 Phase 0 中注册的每个灰度标志都有移除 PR 链接或已被移除。
+- [x] 移除旧版 Run 终端 `done` 写入。（切片 7.4 — store 无条件打上 `runSource='target'`；`status='done'` 写入分支已删除。历史行在数据迁移物理重写之前，继续经 Phase 1 投影读取。）
+- [x] 移除 Attempt 失败时关闭事件流。（切片 7.6 — 旧版 SSE `finish()` 补偿路径随 `/api/runs/:id/events` 的删除而消亡；观测订阅路由在终端事件处结束流，因此 Attempt 失败时其流自然关闭。）
+- [x] 移除编排器拥有的订阅者真相。（切片 7.6 — KV-006：编排器仅通过目标事件日志发布由分配器赋 `seq` 的类型化非终端事件（`attempt.started` / 已脱敏的 `progress` / `attempt.finished`）；turn runner 在 RunStore 提交后发布 `run.finished`；旧版总线与编排器的流关闭已删除。）
+- [x] 移除复制 Run 观测的 Web 轮询/回放补偿。（切片 7.6 — web 旧版 SSE 路由及其 `runEvents.replay` 补偿已删除；SPA 消费 `/api/runs/:id/observation/subscribe` 的类型化 `run_observation` 帧，并在终端事件处对 run wire 做最后一次轮询。）
+- [x] 移除 Web/IM 后继 Run 审批逻辑。（**已由负责人决策 A 解决，2026-09-20 — 从 Phase 7 豁免并推迟到专属的 ADR-0010 审批续接执行器切片；该切片现已在 `feat/approval-continuation` 上落地（同日）。** 范围发现：运行时从未进入挂起/恢复状态 — `pending_approval` 以 `succeeded` 完成，决策路径经后续 turn（新 Run）重新驱动；store 原语与决策 glue 已存在但没有执行器支撑。推迟的切片实现了该执行器：决策面现在经 `applyApprovalDecision` 路由且不再创建后继 Run；`docs/architecture.md` §7 描述当前行为。）
+- [x] 移除 `api.cronsRuntime` 兼容字段。（切片 7.2 — `wire-cron-runtime.ts` 已删除；cron/scheduler/deliveries 从 Cordis registry 惰性读取；零命中的架构测试）
+- [x] 移除 API 路由本地 OAuth 挂起状态。（已在 Phase 6 解决 — KV-003）
+- [x] 移除进程本地 IM 去重作为权威机制。（切片 7.3 — `seenEvents` Map 已删除；持久 Intake Inbox accept 是唯一权威且无条件）
+- [x] 在灰度标志的切换关卡通过后移除临时灰度标志。（切片 7.3/7.4 — `target.im-intake` 与 `target.run-observation` 已从 RolloutFlag 端口表面删除；registry 本身为未来标志保留）
+- [x] 将 `docs/architecture.md` 从"当前与目标"更新为当前目标行为。（已完成 — 文档现在描述切换后的运行时：持久事件日志是唯一的 Run 事件来源、仅观测的 web 流、已删除的旧版契约；原唯一剩余的非目标区域 — ADR-0010 审批续接执行器 — 的差距已由续接执行器切片关闭，见下方"推迟到专属切片"。）
+- [x] 仅在适用时标记被取代的 ADR。（已评估 — 无适用项：ADR-0005（旧版投影）在 `migrate:qm` 物理重写历史行之前仍是权威；被取代标记随数据迁移交付，见 TIA §10。）
+- [x] 验证 `done` 在目标路径上**物理消失**：`rg "term:\s*['\"]done['\"]" packages/` 在目标运行时代码中返回零命中（`legacy/` 下的旧版兼容垫片按其位置排除；此 grep 在 `pnpm test:architecture` 中）。
+- [x] 验证 Phase 0 中注册的每个灰度标志都有移除 PR 链接或已被移除。（两个已注册标志均在此分支移除；TIA §4 记录了被删标志的测试）
+
+本分支上额外完成的关卡修复切片（记录在 TIA changelog 中）：
+
+- 切片 7.1 — 全仓 `pnpm typecheck` 修复至绿色（债务记录于 `16c9370`）。
+- 切片 7.5a — KV-005：沙箱策略落到类型化 `CommandDecision` 形状（`LegacyCommandDecision` 已删除）。
+- 切片 7.6 — KV-006：旧版 RunEventBus + web 旧版 SSE 已删除；目标事件日志是唯一的 Run 事件生产者；web SPA 使用观测订阅流。
+
+### 推迟到专属切片（负责人决策 A，2026-09-20）— 已实现
+
+**ADR-0010 收尾 — 审批续接执行器。已落在
+`feat/approval-continuation`（2026-09-20）。** 范围（按归档）：一个
+`suspendForApproval` RunStore 转换（`awaiting_approval` + 执行器租约
+释放 + `deliveryState.pendingApproval` 中的持久审批续接）、turn runner 中
+可认领的续接通道（`claimNextContinuation` — 持久发现，因此审批与恢复之间的
+重启仍恰好恢复一次）、转发进 `harness.turns.runTurn` 的 `TurnInput.approval`
+（带 `commandRequestId`）、待审批状态在观测快照 + wire（`awaiting_approval`
+状态）+ IM 挂起投递（`onSuspension`）中的表示，以及改经
+`applyApprovalDecision` 路由的决策面（Web `/api/approvals/:id` + IM 卡片
+点击），从而不创建后继 Run。未接线的执行器使挂起的 turn 以
+`approval_continuation_unavailable` 失败关闭 — 待审批永远不会以成功收场。
+验收证据：`packages/api/tests/approval-continuation-executor.test.ts`
+（Phase 2 恢复测试 — "审批恢复保存的命令点，而非盲目重放"、"不创建后继
+Run"、"审批与恢复之间的重启仍恰好恢复一次"），外加
+`packages/store/tests/stores.test.ts` 中的 memory/Postgres 契约用例。
 
 ### 阶段关卡
 
