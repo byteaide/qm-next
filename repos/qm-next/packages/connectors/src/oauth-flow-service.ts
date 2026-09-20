@@ -28,6 +28,9 @@ export interface OAuthProviderSpec {
   authorizeUrl?: string
   /** Absolute token endpoint; defaults to `https://host/oauth/token`. */
   tokenUrl?: string
+  /** Redirect URI registered with the provider; defaults to the
+   *  connector callback route for the provider id. */
+  redirectUri?: string
   type?: 'mock' | 'oauth'
 }
 

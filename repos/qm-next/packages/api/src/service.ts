@@ -65,10 +65,15 @@ import { createMcpServerStore, createMcpToolService, type McpServerStore, type M
 import {
   createBrowserSessionStore,
   createConsentLinkStore,
+  createConnectorOAuthService,
+  createConnectorTokenVault,
   createOAuthFlowStore,
+  deriveConnectorTokenKeks,
   type BrowserSessionStore,
+  type ConnectorOAuthService,
   type ConsentLinkStore,
   type OAuthFlowStore,
+  type OAuthProviderSpec,
 } from '@qm/connectors'
 import { createDrainController, createMemorySessionStateBus, createPostgresInstanceRegistry, createReaper, type DrainController, type Reaper } from '@qm/runs'
 import { createMemorySkillStore, type SkillStore } from '@qm/skills'
@@ -92,11 +97,12 @@ import {
 import { createMemoryMap } from '@qm/store'
 import { reachDirectory } from '@qm/reach'
 import {
+  createVaultConnectorTokenStore,
   createMemoryAdminService,
   createMemoryBlobTransfer,
   createMemoryChannelPolicyStore,
-  createMemoryConnectorTokenStore,
   createMemoryDeploymentLayerStore,
+  type ConnectorTokenStore,
   createMemoryDeploymentStore,
   createMemoryEnvironmentRegistry,
   createMemoryFileStore,
@@ -259,6 +265,9 @@ export interface ApiConfig {
   deploymentLayer?: boolean
   /** Connectors surface (11.0): connector token/OAuth surface. */
   connectors?: boolean
+  /** Phase 6 (ADR-0009): deployment-configured OAuth provider registry.
+   *  Empty/absent ships a deployment with no OAuth providers. */
+  connectorProviders?: OAuthProviderSpec[]
   /** Webhooks surface (11.0): webhook CRUD + raw incoming deliveries. */
   webhooks?: boolean
   /** Blobs surface (11.0): raw blob staging put/get. */
@@ -407,6 +416,7 @@ export const Config = Schema.object({
   deployments: Schema.boolean().description('Deployments surface (11.0): management lane'),
   deploymentLayer: Schema.boolean().description('Deployment-layer surface (11.0): CLI bundle lane'),
   connectors: Schema.boolean().description('Connectors surface (11.0): connector tokens + OAuth gates'),
+  connectorProviders: Schema.array(Schema.any()).description('Phase 6 OAuth provider registry (id/name/host/scopes/clientId/...); specs validated at boot'),
   webhooks: Schema.boolean().description('Webhooks surface (11.0): webhook CRUD + raw incoming'),
   blobs: Schema.boolean().description('Blobs surface (11.0): raw blob staging'),
   admin: Schema.boolean().description('Admin surface (11.0): qm admin lanes'),
@@ -820,7 +830,10 @@ export class ApiService extends Service<ApiConfig> {
     const runtimeConfigStore = this.config.config ? createMemoryRuntimeConfigStore() : undefined
     const deploymentStore = this.config.deployments ? createMemoryDeploymentStore({ grants: grantLedger! }) : undefined
     const deploymentLayerStore = this.config.deploymentLayer ? createMemoryDeploymentLayerStore() : undefined
-    const connectorTokens = this.config.connectors ? createMemoryConnectorTokenStore() : undefined
+    // Phase 6 (ADR-0009/0017): the connector surface composes the
+    // Connector-owned OAuth service over durable stores + the sealed
+    // token vault. Assigned inside the connectors block below.
+    let connectorDeps: { tokens: ConnectorTokenStore; oauth: ConnectorOAuthService } | undefined
     const webhookStore = this.config.webhooks
       ? databaseUrl
         ? createWebhookStore(pgMap('webhooks'))
@@ -933,6 +946,31 @@ export class ApiService extends Service<ApiConfig> {
         sessions: databaseUrl ? pgMap('browser_sessions') : createMemoryMap(),
         key: browserKey,
       })
+      // Phase 6 (ADR-0017): fail-closed — the connectors surface
+      // refuses to boot without key material, the same way production
+      // refuses to boot without a policy (plan §2.2). No plaintext
+      // fallback mode exists.
+      if (!keyMaterial) {
+        throw new Error('connectors surface requires signing secret material for token encryption (fail-closed, ADR-0017)')
+      }
+      for (const spec of this.config.connectorProviders ?? []) {
+        if (!spec || typeof spec.id !== 'string' || !spec.id || typeof spec.host !== 'string' || !spec.host) {
+          throw new Error('connectorProviders: every provider needs at least id and host')
+        }
+      }
+      const connectorVault = createConnectorTokenVault({
+        backing: databaseUrl ? pgMap('connector_tokens') : createMemoryMap(),
+        keks: deriveConnectorTokenKeks([keyMaterial]),
+      })
+      connectorDeps = {
+        tokens: createVaultConnectorTokenStore(connectorVault),
+        oauth: createConnectorOAuthService({
+          flows: this.oauthFlows!,
+          consentLinks: this.consentLinks!,
+          vault: connectorVault,
+          providers: this.config.connectorProviders ?? [],
+        }),
+      }
     }
     // MCP registry (20.0 twin lane): the admin routes light up when the
     // admin surface is on; the store table exists for migration either way.
@@ -1092,7 +1130,7 @@ export class ApiService extends Service<ApiConfig> {
             }
           : {}),
         ...(deploymentLayerStore ? { deploymentLayer: { deploymentLayer: deploymentLayerStore } } : {}),
-        ...(connectorTokens ? { connectors: { tokens: connectorTokens } } : {}),
+        ...(connectorDeps ? { connectors: connectorDeps } : {}),
         ...(webhookStore
           ? {
               webhooks: {

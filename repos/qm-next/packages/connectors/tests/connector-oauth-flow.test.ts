@@ -28,6 +28,11 @@ const PROVIDERS: readonly OAuthProviderSpec[] = [
   { id: 'p6-mock', name: 'P6 Mock', host: 'p6-m.example.test', scopes: ['basic'], clientId: 'cid-p6', type: 'mock' },
 ]
 
+/** Narrowing assertion for discriminated `{ ok }` outcomes. */
+function expectOk<T extends { ok: boolean }>(r: T): asserts r is T & { ok: true } {
+  if (!r.ok) throw new Error(`expected ok outcome, got: ${JSON.stringify(r)}`)
+}
+
 interface Harness {
   service: ConnectorOAuthService
   flows: OAuthFlowStore
@@ -65,25 +70,34 @@ function buildCluster() {
   return { a: make(), b: make() }
 }
 
+/** Mint + redeem a consent link, returning the state and code. */
+async function mintAndRedeem(service: ConnectorOAuthService, principalId: string) {
+  const mint = await service.mintConsent({ provider: 'p6-mock', principalId, redirectUri: 'https://app.test/cb' })
+  expectOk(mint)
+  const redeem = await service.redeemConsent(mint.linkId)
+  expectOk(redeem)
+  return { linkId: mint.linkId, state: mint.state, code: redeem.code }
+}
+
 test('oauth-flow: full consent loop mints, redeems, starts, callbacks, and seals the token', async () => {
   const h = buildHarness()
   const mint = await h.service.mintConsent({ provider: 'p6-mock', principalId: 'person:ada', redirectUri: 'https://app.test/cb' })
-  assert.ok(mint.ok)
+  expectOk(mint)
   assert.equal(mint.provider, 'p6-mock')
   assert.match(mint.oauthUrl, /\/v1\/connectors\/oauth\/p6-mock\/start\?state=/)
 
   const start = await h.service.startOAuth({ provider: 'p6-mock', state: mint.state })
-  assert.ok(start.ok)
+  expectOk(start)
   assert.match(start.authorizeUrl, /^https:\/\/p6-m\.example\.test\/oauth\/authorize\?/)
   assert.match(start.authorizeUrl, new RegExp(`state=${encodeURIComponent(mint.state)}`))
 
   const redeem = await h.service.redeemConsent(mint.linkId)
-  assert.ok(redeem.ok)
+  expectOk(redeem)
   assert.equal(redeem.state, mint.state)
   assert.ok(redeem.code)
 
   const callback = await h.service.handleCallback({ provider: 'p6-mock', code: redeem.code, state: mint.state })
-  assert.ok(callback.ok)
+  expectOk(callback)
   assert.equal(callback.principalId, 'person:ada')
 
   const status = await h.service.status('person:ada')
@@ -94,12 +108,13 @@ test('oauth-flow: full consent loop mints, redeems, starts, callbacks, and seals
 test('oauth-flow: restart between start and callback completes the flow (durable, not process-local)', async () => {
   const { a, b } = buildCluster()
   const mint = await a.mintConsent({ provider: 'p6-mock', principalId: 'person:grace', redirectUri: 'https://app.test/cb' })
+  expectOk(mint)
   const redeem = await a.redeemConsent(mint.linkId)
-  assert.ok(redeem.ok)
+  expectOk(redeem)
   // Simulated restart: the second service instance over the same
   // durable stores completes the flow the first one started.
   const callback = await b.handleCallback({ provider: 'p6-mock', code: redeem.code, state: mint.state })
-  assert.ok(callback.ok)
+  expectOk(callback)
   const status = await b.status('person:grace')
   assert.ok(status.providers['p6-mock'])
 })
@@ -107,21 +122,20 @@ test('oauth-flow: restart between start and callback completes the flow (durable
 test('oauth-flow: callback routed to another simulated instance completes with the same stores', async () => {
   const { a, b } = buildCluster()
   const mint = await a.mintConsent({ provider: 'p6-mock', principalId: 'person:lin', redirectUri: 'https://app.test/cb' })
+  expectOk(mint)
   const redeem = await b.redeemConsent(mint.linkId)
-  assert.ok(redeem.ok)
+  expectOk(redeem)
   const callback = await b.handleCallback({ code: redeem.code, state: mint.state })
-  assert.ok(callback.ok)
+  expectOk(callback)
 })
 
 test('oauth-flow: duplicate callback does not create duplicate tokens', async () => {
   const h = buildHarness()
-  const mint = await h.service.mintConsent({ provider: 'p6-mock', principalId: 'person:ada', redirectUri: 'https://app.test/cb' })
-  const redeem = await h.service.redeemConsent(mint.linkId)
-  assert.ok(redeem.ok)
-  const first = await h.service.handleCallback({ code: redeem.code, state: mint.state })
-  assert.ok(first.ok)
+  const { state, code } = await mintAndRedeem(h.service, 'person:ada')
+  const first = await h.service.handleCallback({ code, state })
+  expectOk(first)
   const rowsBefore = JSON.stringify(await h.vaultBacking.all())
-  const second = await h.service.handleCallback({ code: redeem.code, state: mint.state })
+  const second = await h.service.handleCallback({ code, state })
   assert.equal(second.ok, false)
   assert.equal((second as { error: string }).error, 'unknown_state')
   assert.equal(JSON.stringify(await h.vaultBacking.all()), rowsBefore)
@@ -131,6 +145,7 @@ test('oauth-flow: expired consent cannot be exchanged; used consent link cannot 
   let clock = Date.now()
   const h = buildHarness(PROVIDERS, { ttlMs: 1_000, clock: () => clock })
   const mint = await h.service.mintConsent({ provider: 'p6-mock', principalId: 'person:ada', redirectUri: 'https://app.test/cb' })
+  expectOk(mint)
   clock += 5_000
   const expired = await h.service.redeemConsent(mint.linkId)
   assert.equal(expired.ok, false)
@@ -138,6 +153,7 @@ test('oauth-flow: expired consent cannot be exchanged; used consent link cannot 
 
   // Fresh link: first redeem consumes it; replay is not_found.
   const mint2 = await h.service.mintConsent({ provider: 'p6-mock', principalId: 'person:ada', redirectUri: 'https://app.test/cb' })
+  expectOk(mint2)
   assert.ok((await h.service.redeemConsent(mint2.linkId)).ok)
   const replay = await h.service.redeemConsent(mint2.linkId)
   assert.equal(replay.ok, false)
@@ -154,10 +170,8 @@ test('oauth-flow: exchange failure is structured, secret-free, and stores no tok
       throw new Error('provider 500: Bearer abcdef1234567890abcdef1234567890 leaked')
     },
   })
-  const mint = await failing.mintConsent({ provider: 'p6-mock', principalId: 'person:ada', redirectUri: 'https://app.test/cb' })
-  const redeem = await failing.redeemConsent(mint.linkId)
-  assert.ok(redeem.ok)
-  const callback = await failing.handleCallback({ code: redeem.code, state: mint.state })
+  const { state, code } = await mintAndRedeem(failing, 'person:ada')
+  const callback = await failing.handleCallback({ code, state })
   assert.equal(callback.ok, false)
   assert.equal((callback as { error: string }).error, 'exchange_failed')
   assert.ok(!(callback as { message?: string }).message!.includes('abcdef1234567890'), 'exchange errors must be redacted')
@@ -177,9 +191,8 @@ test('oauth-flow: denied, malformed, unknown-state, and code-mismatch callbacks'
   const stale = await h.service.handleCallback({ code: 'c', state: 'stale-state' })
   assert.equal((stale as { error: string }).error, 'unknown_state')
 
-  const mint = await h.service.mintConsent({ provider: 'p6-mock', principalId: 'person:ada', redirectUri: 'https://app.test/cb' })
-  await h.service.redeemConsent(mint.linkId)
-  const mismatch = await h.service.handleCallback({ code: 'wrong-code', state: mint.state })
+  const { state } = await mintAndRedeem(h.service, 'person:ada')
+  const mismatch = await h.service.handleCallback({ code: 'wrong-code', state })
   assert.equal((mismatch as { error: string }).error, 'code_mismatch')
 })
 
@@ -195,16 +208,16 @@ test('oauth-flow: start and mint reject unknown providers; start requires a stat
 
 test('oauth-flow: revoke by provider removes the sealed token; unknown provider errors; revoke by host works', async () => {
   const h = buildHarness()
-  const mint = await h.service.mintConsent({ provider: 'p6-mock', principalId: 'person:ada', redirectUri: 'https://app.test/cb' })
-  const redeem = await h.service.redeemConsent(mint.linkId)
-  await h.service.handleCallback({ code: redeem.code, state: mint.state })
+  const { state, code } = await mintAndRedeem(h.service, 'person:ada')
+  const callback = await h.service.handleCallback({ code, state })
+  expectOk(callback)
   assert.ok((await h.service.status('person:ada')).providers['p6-mock'])
 
   const unknown = await h.service.revoke({ principalId: 'person:ada', provider: 'github' })
   assert.equal((unknown as { error: string }).error, 'unknown_provider')
 
   const revoked = await h.service.revoke({ principalId: 'person:ada', provider: 'p6-mock' })
-  assert.ok(revoked.ok)
+  expectOk(revoked)
   assert.deepEqual(await h.service.status('person:ada'), { principalId: 'person:ada', providers: {} })
 })
 
@@ -222,9 +235,8 @@ test('oauth-flow: §6.5 flow counters tick through the loop', async () => {
   assert.ok(snap()?.byLabels.some((l) => l.labels.step === 'start' && l.labels.outcome === 'ok'))
   await h.service.startOAuth({ provider: 'nope', state: 's' })
   assert.ok(snap()?.byLabels.some((l) => l.labels.step === 'start' && l.labels.outcome === 'fail'))
-  const mint = await h.service.mintConsent({ provider: 'p6-mock', principalId: 'person:ada', redirectUri: 'https://app.test/cb' })
-  const redeem = await h.service.redeemConsent(mint.linkId)
-  await h.service.handleCallback({ code: redeem.code, state: mint.state })
+  const { state, code } = await mintAndRedeem(h.service, 'person:ada')
+  await h.service.handleCallback({ code, state })
   assert.ok(snap()?.byLabels.some((l) => l.labels.step === 'callback' && l.labels.outcome === 'ok'))
   assert.ok(snap()?.byLabels.some((l) => l.labels.step === 'complete' && l.labels.outcome === 'ok'))
 })

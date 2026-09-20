@@ -1,60 +1,23 @@
 /**
- * /v1/connectors — OAuth flows and token registration (qm connectors.ts).
- *
- * Lane A wires the token store but no OAuth provider registry or consent
- * links: provider-keyed routes answer qm's unknown-provider/not-wired
- * errors, host-keyed token/status/revoke are functional, and the callback
- * rejects unknown states. Phase 3C adds an in-process mock OAuth so the
- * full mint→redeem→start→callback→status→revoke loop is exercisable
- * without a real third-party OAuth provider. The mock keeps the lane-A
- * contract: real providers (Google / Slack / etc.) land with the control
- * plane (12.0) and replace the mock registry.
+ * /v1/connectors — HTTP adapters over the Connector-owned OAuth
+ * lifecycle (plan §Phase 6 slices 2–3, ADR-0009). Routes validate
+ * input, normalize the provider payload, invoke a Connector operation,
+ * and return/redact the result. No route-local OAuth state: the
+ * pending-link Map and provider registry defaults of the Phase 3C
+ * mock are deleted; flow state, consent links, exchange, and token
+ * persistence live in @qm/connectors behind durable stores, and
+ * tokens are sealed by the vault (ADR-0017) before any response.
  */
-import { randomUUID } from 'node:crypto'
-import { CONNECTOR_STATUS_ACCOUNT_TYPES, type ConnectorAccountType, type ConnectorTokenStore } from '../services/connector-token-store.ts'
+import type { ConnectorAccountType, ConnectorTokenStore } from '../services/connector-token-store.ts'
+import type { ConnectorOAuthService } from '@qm/connectors'
 import { isObj, sendJson, type ApiRouteContext, type Route } from './framework.ts'
 import { rawSendJson, type RawRoute } from './raw-framework.ts'
 
 export interface ConnectorDeps {
   tokens: ConnectorTokenStore
-  consentLinks?: null
-  /** OAuth provider registry surfaced via /v1/connectors/catalog and walked
-   *  by /v1/connectors/oauth/status and the provider-keyed mint/start routes.
-   *  Pass `[]` to ship a deployment with no OAuth providers (host-keyed
-   *  token/register/status/revoke keep working). Defaults to the in-process
-   *  Phase 3C mock registry until the control plane lands in 12.0. */
-  providers?: readonly MockProvider[]
+  /** Connector-owned OAuth lifecycle (Phase 6, ADR-0009). */
+  oauth: ConnectorOAuthService
 }
-
-/** Mock OAuth provider registry (Phase 3C). Replaced by a real registry
- *  once the control plane lands in 12.0. */
-export interface MockProvider {
-  id: string
-  name: string
-  host: string
-  scopes: string[]
-}
-
-export const MOCK_PROVIDERS: readonly MockProvider[] = [
-  { id: 'google-mock', name: 'Google (mock)', host: 'google-m.example.test', scopes: ['email', 'profile'] },
-  { id: 'slack-mock', name: 'Slack (mock)', host: 'slack-m.example.test', scopes: ['channels:read', 'chat:write'] },
-]
-
-/** Pending consent link + mock OAuth state. Lives only for the lifetime of
- *  the in-process boot — flushed on restart. */
-interface PendingConsentLink {
-  linkId: string
-  state: string
-  provider: string
-  host: string
-  principalId: string
-  redirectUri: string
-  createdAt: number
-  code?: string
-  redeemedAt?: number
-}
-
-const pendingLinks = new Map<string, PendingConsentLink>()
 
 const SECONDS_VS_MS_CUTOFF = 1_000_000_000_000
 const MIN_REASONABLE_EPOCH_MS = Date.UTC(2000, 0, 1)
@@ -81,109 +44,83 @@ function bad(field: string): { ok: false; message: string } {
   return { ok: false, message: `${field} must be an epoch timestamp in seconds or milliseconds, or an ISO date string` }
 }
 
+// --- adapters: consent link ------------------------------------------------
+
 async function consentMint(ctx: ApiRouteContext, deps: ConnectorDeps): Promise<unknown> {
-  void deps
-  // Phase 3C: real implementation behind a mock provider registry.
   const b = isObj(ctx.body) ? ctx.body : {}
   const provider = typeof b.provider === 'string' ? b.provider.trim() : ''
-  const host = typeof b.host === 'string' ? b.host.trim() : ''
   const principalId = typeof b.principalId === 'string' ? b.principalId.trim() : ''
   const redirectUri = typeof b.redirectUri === 'string' ? b.redirectUri.trim() : ''
-  if (!provider || !host || !principalId || !redirectUri) {
+  if (!provider || !principalId || !redirectUri) {
     return sendJson(ctx, 400, {
       error: 'bad_request',
-      message: 'provider, host, principalId, redirectUri are required',
+      message: 'provider, principalId, redirectUri are required',
     })
   }
-  const providerSpec = (deps.providers ?? MOCK_PROVIDERS).find((p) => p.id === provider)
-  if (!providerSpec) {
+  const minted = await deps.oauth.mintConsent({ provider, principalId, redirectUri })
+  if (!minted.ok) {
     return sendJson(ctx, 404, { error: 'not_found', message: `unknown OAuth provider: ${provider}` })
   }
-  const linkId = `${randomUUID()}${randomUUID().replace(/-/g, '')}`
-  const state = randomUUID().replace(/-/g, '')
-  pendingLinks.set(linkId, {
-    linkId,
-    state,
-    provider: providerSpec.id,
-    host: providerSpec.host,
-    principalId,
-    redirectUri,
-    createdAt: Date.now(),
-  })
   return sendJson(ctx, 201, {
-    linkId,
-    state,
-    provider: providerSpec.id,
-    host: providerSpec.host,
-    oauthUrl: `/v1/connectors/oauth/${encodeURIComponent(providerSpec.id)}/start?state=${state}`,
-    scopes: providerSpec.scopes,
+    linkId: minted.linkId,
+    state: minted.state,
+    provider: minted.provider,
+    host: minted.host,
+    oauthUrl: minted.oauthUrl,
+    scopes: minted.scopes,
   })
 }
 
 async function consentRedeem(ctx: ApiRouteContext, deps: ConnectorDeps): Promise<unknown> {
-  void deps
-  // Phase 3C: returns the consent record + issues an authorization code
-  // the caller can hand to /v1/connectors/oauth/:provider/callback.
   const linkId = String(ctx.params.linkId ?? '').trim()
   if (!linkId) return sendJson(ctx, 400, { error: 'bad_request', message: 'linkId required' })
-  const link = pendingLinks.get(linkId)
-  if (!link) return sendJson(ctx, 404, { error: 'not_found', message: 'consent link not found' })
-  if (link.redeemedAt) return sendJson(ctx, 410, { error: 'gone', message: 'consent link already redeemed' })
-  link.redeemedAt = Date.now()
-  link.code = randomUUID().replace(/-/g, '')
+  const redeemed = await deps.oauth.redeemConsent(linkId)
+  if (!redeemed.ok) {
+    if (redeemed.error === 'expired') return sendJson(ctx, 410, { error: 'gone', message: 'consent link expired' })
+    return sendJson(ctx, 404, { error: 'not_found', message: 'consent link not found' })
+  }
   return sendJson(ctx, 200, {
     ok: true,
-    linkId: link.linkId,
-    provider: link.provider,
-    host: link.host,
-    principalId: link.principalId,
-    code: link.code,
-    state: link.state,
-    redirectUri: link.redirectUri,
+    linkId: redeemed.linkId,
+    provider: redeemed.provider,
+    host: redeemed.host,
+    principalId: redeemed.principalId,
+    code: redeemed.code,
+    state: redeemed.state,
+    redirectUri: redeemed.redirectUri,
   })
 }
 
+// --- adapters: provider-keyed OAuth ---------------------------------------
+
 async function oauthStart(ctx: ApiRouteContext, deps: ConnectorDeps): Promise<unknown> {
-  void deps
-  // Phase 3C: validate provider, return mock OAuth provider's authorize URL
-  // with state. The caller follows that URL, "approves" the consent, then
-  // comes back to /v1/connectors/oauth/:provider/callback with code+state.
   const provider = String(ctx.params.provider ?? '').trim()
   if (!provider) return sendJson(ctx, 404, { error: 'not_found' })
-  const providerSpec = (deps.providers ?? MOCK_PROVIDERS).find((p) => p.id === provider)
-  if (!providerSpec) {
-    return sendJson(ctx, 404, { error: 'not_found', message: `unknown OAuth provider: ${provider}` })
+  const started = await deps.oauth.startOAuth({
+    provider,
+    ...(typeof ctx.query.state === 'string' && ctx.query.state ? { state: ctx.query.state } : {}),
+  })
+  if (!started.ok) {
+    if (started.error === 'unknown_provider') {
+      return sendJson(ctx, 404, { error: 'not_found', message: `unknown OAuth provider: ${provider}` })
+    }
+    return sendJson(ctx, 400, { error: 'bad_request', message: 'state required' })
   }
-  const state = String(ctx.query.state ?? '').trim()
-  if (!state) return sendJson(ctx, 400, { error: 'bad_request', message: 'state required' })
   return sendJson(ctx, 200, {
-    provider: providerSpec.id,
-    state,
-    authorizeUrl: `https://${providerSpec.host}/oauth/authorize?state=${encodeURIComponent(state)}&client_id=qa-smoke`,
-    scopes: providerSpec.scopes,
-    redirectUri: `/v1/connectors/oauth/${encodeURIComponent(providerSpec.id)}/callback`,
+    provider: started.provider,
+    state: started.state,
+    authorizeUrl: started.authorizeUrl,
+    scopes: started.scopes,
+    redirectUri: started.redirectUri,
   })
 }
 
 async function oauthStatus(ctx: ApiRouteContext, deps: ConnectorDeps): Promise<unknown> {
   const principalId = ctx.query.principalId ?? ''
   if (!principalId) return sendJson(ctx, 400, { error: 'bad_request', message: 'principalId required' })
-  // Only emit a provider entry when at least one accountType has a connected
-  // token — listing every MOCK_PROVIDERS slot even when the user has no
-  // token leaks the registry to /v1/connectors/oauth/status consumers.
-  const configured = deps.providers ?? MOCK_PROVIDERS
-  const providers: Record<string, { host: string; accountTypes: string[]; hasToken: boolean }> = {}
-  for (const p of configured) {
-    const accountTypes: string[] = []
-    for (const at of CONNECTOR_STATUS_ACCOUNT_TYPES) {
-      const status = await deps.tokens.connectorTokenStatus(p.host, principalId, at)
-      if (status.connected) accountTypes.push(at)
-    }
-    if (accountTypes.length > 0) {
-      providers[p.id] = { host: p.host, accountTypes, hasToken: true }
-    }
-  }
-  return { principalId, providers }
+  // Connector-owned: only providers with a connected token appear; the
+  // response carries presence metadata, never token material (ADR-0016).
+  return deps.oauth.status(principalId)
 }
 
 async function oauthRevoke(ctx: ApiRouteContext, deps: ConnectorDeps): Promise<unknown> {
@@ -194,14 +131,14 @@ async function oauthRevoke(ctx: ApiRouteContext, deps: ConnectorDeps): Promise<u
   if (!principalId || (!providerName && !host)) {
     return sendJson(ctx, 400, { error: 'bad_request', message: 'principalId and provider or host required' })
   }
-  if (providerName) {
+  const revoked = await deps.oauth.revoke({ principalId, ...(providerName ? { provider: providerName } : { host }) })
+  if (!revoked.ok) {
     return sendJson(ctx, 404, { error: 'not_found', message: `unknown OAuth provider: ${providerName}` })
   }
-  for (const at of CONNECTOR_STATUS_ACCOUNT_TYPES) {
-    await deps.tokens.deleteConnectorToken(host, principalId, at)
-  }
-  return { ok: true, principalId, host }
+  return { ok: true, principalId: revoked.principalId, host: revoked.host }
 }
+
+// --- adapters: host-keyed token registration -------------------------------
 
 async function setToken(ctx: ApiRouteContext, deps: ConnectorDeps): Promise<unknown> {
   const b = isObj(ctx.body) ? ctx.body : {}
@@ -228,48 +165,45 @@ async function setToken(ctx: ApiRouteContext, deps: ConnectorDeps): Promise<unkn
 
 async function catalog(ctx: ApiRouteContext, deps: ConnectorDeps): Promise<unknown> {
   void ctx
-  // Phase 3C: return the configured provider registry (defaults to the
-  // in-process mock). Real OAuth providers (Google, Slack, …) will replace
-  // this once the control plane ships.
-  const providers = deps.providers ?? MOCK_PROVIDERS
-  return {
-    catalog: providers.map((p) => ({
-      id: p.id,
-      name: p.name,
-      host: p.host,
-      scopes: p.scopes,
-      type: 'mock',
-    })),
-  }
+  return deps.oauth.catalog()
 }
 
-async function oauthCallback(ctx: import('./raw-framework.ts').RawRouteContext): Promise<void> {
+// --- adapters: raw provider callback ---------------------------------------
+
+async function oauthCallback(ctx: import('./raw-framework.ts').RawRouteContext, deps: ConnectorDeps): Promise<void> {
   const providerError = ctx.url.searchParams.get('error')
-  if (providerError) return rawSendJson(ctx, 400, { error: 'oauth_denied', message: providerError })
-  const code = String(ctx.url.searchParams.get('code') ?? '').trim()
-  const stateParam = String(ctx.url.searchParams.get('state') ?? '').trim()
-  if (!code || !stateParam) return rawSendJson(ctx, 400, { error: 'bad_request', message: 'code and state required' })
-  // Phase 3C: find the consent link whose state matches + code matches.
-  // On success, mint a fake access token, store via setConnectorToken
-  // (called by the test harness via the regular POST /v1/connectors/token
-  // flow, or auto-stored here for full OAuth-loop test coverage).
-  let matched: PendingConsentLink | undefined
-  for (const link of pendingLinks.values()) {
-    if (link.state === stateParam && link.code === code) {
-      matched = link
-      break
-    }
-  }
-  if (!matched) return rawSendJson(ctx, 400, { error: 'oauth_callback_failed', message: 'unknown OAuth state or code' })
-  rawSendJson(ctx, 200, {
-    ok: true,
-    provider: matched.provider,
-    host: matched.host,
-    principalId: matched.principalId,
-    code,
-    state: stateParam,
-    note: 'Phase 3C mock — caller should POST /v1/connectors/token with the issued accessToken to persist',
+  const code = ctx.url.searchParams.get('code') ?? ''
+  const state = ctx.url.searchParams.get('state') ?? ''
+  const outcome = await deps.oauth.handleCallback({
+    ...(providerError !== null ? { error: providerError } : {}),
+    ...(providerError === null ? { code, state } : {}),
   })
+  if (outcome.ok) {
+    rawSendJson(ctx, 200, {
+      ok: true,
+      provider: outcome.provider,
+      host: outcome.host,
+      principalId: outcome.principalId,
+      code,
+      state: outcome.state,
+      connected: true,
+    })
+    return
+  }
+  if (outcome.error === 'denied') {
+    rawSendJson(ctx, 400, { error: 'oauth_denied', message: outcome.message ?? 'provider denied the flow' })
+    return
+  }
+  if (outcome.error === 'bad_request') {
+    rawSendJson(ctx, 400, { error: 'bad_request', message: outcome.message ?? 'code and state required' })
+    return
+  }
+  if (outcome.error === 'exchange_failed') {
+    rawSendJson(ctx, 502, { error: 'oauth_exchange_failed', message: outcome.message ?? 'token exchange failed' })
+    return
+  }
+  // unknown_state / code_mismatch — same public signal, no detail leak.
+  rawSendJson(ctx, 400, { error: 'oauth_callback_failed', message: 'unknown OAuth state or code' })
 }
 
 export function connectorRoutes(deps: ConnectorDeps): ReadonlyArray<Route> {
@@ -295,7 +229,7 @@ export function connectorMatchRoutes(deps: ConnectorDeps): { api: Route; raw: Ra
       method: 'GET',
       path: '/v1/connectors/oauth/:provider/callback',
       auth: 'public',
-      handle: (ctx) => oauthCallback(ctx),
+      handle: (ctx) => oauthCallback(ctx, deps),
     },
   }
 }

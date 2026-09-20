@@ -22,7 +22,7 @@ import { createMemorySkillStore } from '@qm/skills'
 import { createTurnRunner, createApiServer, createMemoryAdminService } from '@qm/api'
 import {
   createMemoryBlobTransfer,
-  createMemoryConnectorTokenStore,
+  createMemoryConnectorSurface,
   createMemoryDeploymentStore,
   createMemoryFileStore,
   createMemoryGrantLedger,
@@ -87,7 +87,7 @@ async function buildRig(): Promise<Rig> {
       grants: { grants: grantLedger, orgScope: SCOPE },
       blobs: { blobTransfer },
       webhooks: { webhooks: createMemoryWebhookStore() },
-      connectors: { tokens: createMemoryConnectorTokenStore() },
+      connectors: createMemoryConnectorSurface(),
       userModelAuth: { credentials: createMemoryUserModelCredentialsStore() },
       keychain: {
         keychain: () =>

@@ -87,7 +87,8 @@ export {
   createMemoryRuntimeConfigStore,
   createMemoryDeploymentStore,
   createMemoryDeploymentLayerStore,
-  createMemoryConnectorTokenStore,
+  createVaultConnectorTokenStore,
+  createMemoryConnectorSurface,
   createMemoryWebhookStore,
   createMemoryBlobTransfer,
   deploymentView,
@@ -108,6 +109,8 @@ export {
   type DeploymentStore,
   type DeploymentLayerStore,
   type ConnectorTokenStore,
+  type ConnectorToken,
+  type ConnectorAccountType,
   type WebhookStore,
   type BlobTransferService,
 } from './services/index.ts'

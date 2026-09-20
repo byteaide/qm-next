@@ -1,13 +1,26 @@
 /**
- * Lane-A connector token store: per-host/per-principal OAuth tokens with
- * the qm status probe shape. The provider registry is empty in lane A
- * (deployment config lands with the real connectors integration), so
- * provider-keyed flows answer qm's unknown-provider errors while
- * host-keyed registration/status/revoke are fully functional.
+ * Connector token store port (api surface, plan §Phase 6 slice 4):
+ * routes persist and probe connector tokens through this interface;
+ * composition (service.ts) wires the vault-backed implementation
+ * (ADR-0017 envelope encryption, durable by default) instead of a
+ * process-local Map. Account types are owned by @qm/connectors.
  */
-export type ConnectorAccountType = 'default' | 'personal' | 'org'
+import { createMemoryMap } from '@qm/store'
+import {
+  createConsentLinkStore,
+  createConnectorOAuthService,
+  createConnectorTokenVault,
+  createOAuthFlowStore,
+  deriveConnectorTokenKeks,
+  type ConnectorOAuthService,
+  type OAuthProviderSpec,
+} from '@qm/connectors'
+import { CONNECTOR_ACCOUNT_TYPES } from '@qm/connectors'
+import type { ConnectorAccountType, ConnectorTokenVault } from '@qm/connectors'
 
-export const CONNECTOR_STATUS_ACCOUNT_TYPES: readonly ConnectorAccountType[] = ['default', 'personal', 'org']
+export type { ConnectorAccountType }
+
+export const CONNECTOR_STATUS_ACCOUNT_TYPES: readonly ConnectorAccountType[] = CONNECTOR_ACCOUNT_TYPES
 
 export interface ConnectorToken {
   accessToken: string
@@ -28,23 +41,53 @@ export interface ConnectorTokenStore {
   deleteConnectorToken(host: string, principalId: string, accountType: ConnectorAccountType): Promise<void>
 }
 
-export function createMemoryConnectorTokenStore(): ConnectorTokenStore {
-  const tokens = new Map<string, ConnectorToken>()
-  const key = (host: string, principalId: string, accountType: string) => `${accountType}:${principalId}@${host}`
+/**
+ * Phase 6 (ADR-0009/0017): token persistence lives in the Connector
+ * vault — sealed with the AES-256-GCM envelope before any durable
+ * write, decrypted only for short-lived provider calls. The api-side
+ * port is a thin adapter over the vault.
+ */
+export function createVaultConnectorTokenStore(vault: ConnectorTokenVault): ConnectorTokenStore {
   return {
     async setConnectorToken(host, principalId, token, accountType = 'default') {
-      tokens.set(key(host, principalId, accountType), { ...token, accountType })
+      await vault.seal({
+        host,
+        principalId,
+        accessToken: token.accessToken,
+        ...(token.refreshToken !== undefined ? { refreshToken: token.refreshToken } : {}),
+        ...(token.expiresAt !== undefined ? { expiresAt: token.expiresAt } : {}),
+        accountType,
+      })
     },
     async connectorTokenStatus(host, principalId, accountType) {
-      const token = tokens.get(key(host, principalId, accountType))
-      if (!token) return { connected: false }
-      if (token.expiresAt !== undefined && token.expiresAt <= Date.now()) {
-        return token.refreshToken ? { connected: true, needsReconnect: true } : { connected: false, needsReconnect: true }
-      }
-      return { connected: true }
+      return vault.status(host, principalId, accountType)
     },
     async deleteConnectorToken(host, principalId, accountType) {
-      tokens.delete(key(host, principalId, accountType))
+      await vault.delete(host, principalId, accountType)
     },
+  }
+}
+
+/**
+ * Memory-backed connector surface over the Connector-owned OAuth
+ * service (Phase 6 composition shape). Tests and memory-mode
+ * deployments inject this as the `connectors` dep; production
+ * composition (service.ts) builds the same shape over Postgres maps.
+ */
+export function createMemoryConnectorSurface(
+  providers: readonly OAuthProviderSpec[] = [],
+): { tokens: ConnectorTokenStore; oauth: ConnectorOAuthService } {
+  const vault = createConnectorTokenVault({
+    backing: createMemoryMap(),
+    keks: deriveConnectorTokenKeks(['memory-surface-master']),
+  })
+  return {
+    tokens: createVaultConnectorTokenStore(vault),
+    oauth: createConnectorOAuthService({
+      flows: createOAuthFlowStore(createMemoryMap()),
+      consentLinks: createConsentLinkStore(createMemoryMap()),
+      vault,
+      providers,
+    }),
   }
 }

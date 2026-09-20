@@ -79,8 +79,11 @@ export {
   type DeploymentLayerStore,
 } from './deployment-layer-store.ts'
 export {
-  createMemoryConnectorTokenStore,
+  createVaultConnectorTokenStore,
+  createMemoryConnectorSurface,
   CONNECTOR_STATUS_ACCOUNT_TYPES,
+  type ConnectorAccountType,
+  type ConnectorToken,
   type ConnectorTokenStore,
   type OAuthTokenStatus,
 } from './connector-token-store.ts'
