@@ -1,6 +1,6 @@
 # Architecture Implementation Plan
 
-Status: **Phases 0–7 complete — 2026-09-20** (Phase 7 cleanup landed; one item resolved by owner waiver: the ADR-0010 approval continuation executor was deferred to a dedicated slice and has since **landed** on `feat/approval-continuation` (same date) — see "Deferred to a dedicated slice" below. Release blockers in §5 remain release-PR evidence.)  
+Status: **Phases 0–7 complete — 2026-09-20** (Phase 7 cleanup landed; one item resolved by owner waiver: the ADR-0010 approval continuation executor was deferred to a dedicated slice and has since **landed** on `feat/approval-continuation` (same date) — see "Deferred to a dedicated slice" below. §5 release blockers evidenced 2026-09-20 on `bbce7cc`: contract parity, real-sandbox cutover rehearsal (after rehearsal target-state fix `2006d22` on `fix/cutover-rehearsal-target-state`), and the OAuth token redaction scan; still open: production-size migration sample and on-call alert wiring.)  
 Scope: implementation of the target model recorded in `docs/adr/0001`–`docs/adr/0017` and summarized by `docs/architecture.md`.
 
 This plan deliberately separates behavior changes into phases. A phase is complete only when its phase gate passes in both memory and Postgres modes. Do not begin the next phase while a required gate is red.
@@ -868,10 +868,10 @@ Plus per-PR safety tests:
 
 Per `docs/gate-enforcement.md` §7, the following must be evidenced on the release PR, **not** on individual cleanup PRs. None of these are conditional on infrastructure availability; if the underlying infrastructure is missing, the release is paused.
 
-- [ ] **Real-sandbox cutover rehearsal evidence attached.** If real-sandbox infrastructure is unavailable, the release does not ship; the rehearsal is a hard prerequisite, not an option.
-- [ ] **OAuth token redaction scan report attached.**
-- [ ] **Memory/Postgres contract parity green on the release commit.**
-- [ ] **Migration projections green on a production-size data sample.**
+- [x] **Real-sandbox cutover rehearsal evidence attached.** (evidenced 2026-09-20 on `bbce7cc`: `pnpm rehearsal:cutover` PASS with 11 checks — same-sha dual-run queue sharing 20/20 attempts=1, blue-green supersede + rollback resume, cross-process worker split + SIGKILL takeover, clean 71-run ledger; supporting `pnpm test:sandbox-real` 5/5 on the real Docker daemon. Required fixing the rehearsal first: it still waited on legacy `status === 'done'` after slice 7.4 removed the `done` write branch — target-state predicates + two-column ledger landed as `2006d22` on `fix/cutover-rehearsal-target-state`. Report attaches to the release PR.)
+- [x] **OAuth token redaction scan report attached.** (scan report produced 2026-09-20: zero token-shaped hits across production log/event/observation paths; focused suites 20/20 — token-vault ciphertext-only rows + fail-closed decrypt with audit, adapter sealed-value absence asserted on callback and route bodies, `isSecretShaped`/`redactSecrets` boundary plus the `oauth_redaction_hit_total` family.)
+- [x] **Memory/Postgres contract parity green on the release commit.** (evidenced 2026-09-20 on `bbce7cc`: `pnpm test:pg` 1046 tests / 1042 pass / 0 fail / 4 skipped on an ephemeral postgres:16; `pnpm test` 985 / 934 / 0 / 51 in memory mode.)
+- [ ] **Migration projections green on a production-size data sample.** (partially evidenced 2026-09-20: `pnpm rehearsal:migrate` PASS — dry-run rollback → commit → 50 verify checks → clean rollback — on the built-in synthetic qm-shaped sample; the rehearsal has no scale knob, so production-size evidence still requires a real qm snapshot via `QM_MIGRATE_SOURCE_URL`. Without it the release pauses, per §0.)
 - [ ] **On-call alert wiring verified** for the metric and alert families accumulated across phases:
   - Run Event transaction failures, duplicate seq conflicts, expired lease ownership conflicts, redaction hits (Phase 1)
   - Command Gate decisions, approval outcomes, approval continuation failures, session reservation release-order violations (Phase 2)
@@ -882,10 +882,10 @@ Per `docs/gate-enforcement.md` §7, the following must be evidenced on the relea
 #### 6. Operational gates
 
 - [x] Rollout flags are removed. (slices 7.3/7.4 — `target.im-intake` and `target.run-observation` deleted from the `RolloutFlag` port surface; verified: remaining references are JSDoc comments and one contract-suite fixture key, no production registration.)
-- [ ] Metrics and alerts added in §1.6 / §2.7 / §3.3 / §5.5 / §6.5 are wired to the on-call rotation with dashboards and runbooks. (open — release-PR evidence per §5 "On-call alert wiring verified"; the only operational gate not dischargeable before the release PR.)
+- [ ] Metrics and alerts added in §1.6 / §2.7 / §3.3 / §5.5 / §6.5 are wired to the on-call rotation with dashboards and runbooks. (open — the only remaining gate; metric families are pinned in code by tests, but dashboards/rotation wiring is ops scope. All other §5/§6 evidence was gathered 2026-09-20 on `bbce7cc`, see §5 annotations.)
 - [x] `docs/architecture.md` updated to current target behavior (no "current vs target" framing). (done at the Phase 7 cutover, re-verified after the continuation-executor slice rewrote §7; `rg "current vs target" docs/architecture.md` returns zero hits.)
 - [x] `docs/known-violations.md` is empty (all entries resolved). (all phase-resolvable entries are resolved; the live block retains only KV-004 — a permanent gate allowlist for platform symbols in provider adapters, enforced by `pnpm check:im`, not an unresolved violation.)
-- [x] Every cleanup item has at least one test that fails without the cleanup and passes after — the regression-basket discipline from each phase's Test Impact Assessment remains intact. (TIA §12 self-check at `docs/test-impact/phase-7.md`: regression basket green in memory and PG modes — `pnpm test` 927/0/51, `pnpm test:pg` 1033/0/4; all "expected to break" tests resolved per TIA §3/§11.)
+- [x] Every cleanup item has at least one test that fails without the cleanup and passes after — the regression-basket discipline from each phase's Test Impact Assessment remains intact. (TIA §12 self-check at `docs/test-impact/phase-7.md`: regression basket green in memory and PG modes — latest re-run on the release candidate `bbce7cc`, 2026-09-20: `pnpm test` 985/934/0/51, `pnpm test:pg` 1046/1042/0/4; all "expected to break" tests resolved per TIA §3/§11.)
 
 **Linked ADRs:** all of 0001–0016 plus any ADRs introduced during execution (e.g. the OAuth token encryption at rest ADR required by Phase 6 §8).
 

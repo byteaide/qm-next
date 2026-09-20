@@ -1,6 +1,6 @@
 # 架构实施计划
 
-状态：**Phase 0–7 已完成 — 2026-09-20**（Phase 7 清理已落地；其中一项由负责人豁免解决：ADR-0010 审批续接执行器曾推迟到专属切片，现已在 `feat/approval-continuation` 上**落地**（同日）——见 Phase 7 的"推迟到专属切片"一节。§5 的发布阻断项仍作为发布 PR 的证据。）
+状态：**Phase 0–7 已完成 — 2026-09-20**（Phase 7 清理已落地；其中一项由负责人豁免解决：ADR-0010 审批续接执行器曾推迟到专属切片，现已在 `feat/approval-continuation` 上**落地**（同日）——见 Phase 7 的"推迟到专属切片"一节。§5 发布阻断项已于 2026-09-20 在 `bbce7cc` 上取证：契约一致性、真实沙箱切换演练（需先落地演练目标态修复 `2006d22`，见 `fix/cutover-rehearsal-target-state`）与 OAuth 令牌脱敏扫描；仍未完成：生产级迁移数据样本与 on-call 告警接线。）
 范围：实施 `docs/adr/0001`–`docs/adr/0017` 中记录的目标模型，并由 `docs/architecture.md` 汇总。
 
 本计划有意将行为变更拆分为多个阶段。一个阶段只有在 Memory 和 Postgres 两种模式下都通过其阶段关卡后，才算完成。在某个必需关卡为红色时，不得开始下一阶段。
@@ -865,10 +865,10 @@ pnpm test:sandbox-policy
 
 按 `docs/gate-enforcement.md` §7，以下必须在发布 PR 上提供证据，**而非**在各个清理 PR 上。这些都不以基础设施可用性为条件；如果底层基础设施缺失，则发布暂停。
 
-- [ ] **真实沙箱切换演练证据已附。** 如果真实沙箱基础设施不可用，则发布不交付；演练是硬性前提，不是可选项。
-- [ ] **OAuth 令牌脱敏扫描报告已附。**
-- [ ] **Memory/Postgres 契约一致性在发布提交上绿色。**
-- [ ] **迁移投影在生产级数据样本上绿色。**
+- [x] **真实沙箱切换演练证据已附。**（2026-09-20 在 `bbce7cc` 上取证：`pnpm rehearsal:cutover` PASS，11 项检查 — 同 sha 双跑共享队列 20/20 attempts=1、蓝绿新旧交接 + 回滚恢复、跨进程 worker 拆分 + SIGKILL 接管、71 条 run 台账干净；佐证 `pnpm test:sandbox-real` 在真实 Docker 守护进程上 5/5。需先修复演练脚本本身：slice 7.4 删除 `done` 写入后它仍在等待旧版 `status === 'done'` — 目标态谓词 + 双列台账以 `2006d22` 落在 `fix/cutover-rehearsal-target-state`。报告随发布 PR 附上。）
+- [x] **OAuth 令牌脱敏扫描报告已附。**（扫描报告产出 2026-09-20：生产日志/事件/观测路径零令牌形态命中；专项套件 20/20 — token-vault 持久行仅存密文 + 解密失败关闭并审计、适配器在回调与路由响应体上断言密封值不出现、`isSecretShaped`/`redactSecrets` 边界及 `oauth_redaction_hit_total` 指标族。）
+- [x] **Memory/Postgres 契约一致性在发布提交上绿色。**（2026-09-20 在 `bbce7cc` 上取证：`pnpm test:pg` 1046 测试 / 1042 通过 / 0 失败 / 4 跳过（临时 postgres:16）；内存模式 `pnpm test` 985 / 934 / 0 / 51。）
+- [ ] **迁移投影在生产级数据样本上绿色。**（2026-09-20 部分取证：`pnpm rehearsal:migrate` PASS — 试跑回滚 → 提交 → 50 项核验 → 干净回滚 — 但使用的是内置合成 qm 形态样本；演练无规模参数，生产级证据仍需通过 `QM_MIGRATE_SOURCE_URL` 提供真实 qm 快照。缺失时发布暂停，依 §0。）
 - [ ] **On-call 告警接线已验证**，覆盖各阶段累积的指标和告警族：
   - Run 事件事务失败、重复 seq 冲突、过期租约所有权冲突、脱敏命中（Phase 1）
   - 命令门决策、审批结果、审批续接失败、会话预留释放顺序违规（Phase 2）
@@ -879,10 +879,10 @@ pnpm test:sandbox-policy
 #### 6. 运营关卡
 
 - [x] 灰度标志已移除。（slice 7.3/7.4 — `target.im-intake` 与 `target.run-observation` 已从 `RolloutFlag` 端口表面删除；核验：残留引用仅为 JSDoc 注释和一个契约测试 fixture key，无生产注册。）
-- [ ] §1.6 / §2.7 / §3.3 / §5.5 / §6.5 中添加的指标和告警已接线到 on-call 轮班，配有仪表盘和运行手册。（未完成 — 属 §5"On-call 告警接线核验"的 release-PR 证据；这是唯一无法在 release PR 前结清的运营关卡。）
+- [ ] §1.6 / §2.7 / §3.3 / §5.5 / §6.5 中添加的指标和告警已接线到 on-call 轮班，配有仪表盘和运行手册。（未完成 — 唯一剩余关卡；指标族已由测试钉在代码中，但仪表盘/轮值接线属运维范围。§5/§6 其余证据已于 2026-09-20 在 `bbce7cc` 上采集，见 §5 注记。）
 - [x] `docs/architecture.md` 已更新为当前目标行为（无"当前与目标"框架）。（Phase 7 切换时完成，延续执行器切片重写 §7 后再次核验；`rg "current vs target" docs/architecture.md` 零命中。）
 - [x] `docs/known-violations.md` 为空（所有条目已解决）。（所有可随阶段解决的条目均已解决；live block 仅保留 KV-004 — 提供方适配器平台符号的永久 gate 白名单，由 `pnpm check:im` 强制，不是未解决违规。）
-- [x] 每个清理项至少有一个在清理前失败、清理后通过的测试 — 各阶段测试影响评估中的回归篮子纪律保持完整。（TIA §12 自检（`docs/test-impact/phase-7.md`）：回归篮子内存与 PG 双绿 — `pnpm test` 927/0/51、`pnpm test:pg` 1033/0/4；所有"预期破坏"测试已按 TIA §3/§11 处置。）
+- [x] 每个清理项至少有一个在清理前失败、清理后通过的测试 — 各阶段测试影响评估中的回归篮子纪律保持完整。（TIA §12 自检（`docs/test-impact/phase-7.md`）：回归篮子内存与 PG 双绿 — 最新复跑于发布候选 `bbce7cc`，2026-09-20：`pnpm test` 985/934/0/51、`pnpm test:pg` 1046/1042/0/4；所有"预期破坏"测试已按 TIA §3/§11 处置。）
 
 **关联 ADR：** 0001–0016 全部，加上执行期间引入的任何 ADR（例如 Phase 6 §8 要求的 OAuth 令牌静态加密 ADR）。
 
