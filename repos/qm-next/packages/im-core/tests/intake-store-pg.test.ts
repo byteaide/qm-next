@@ -47,11 +47,20 @@ test('postgres intake inbox: idempotent accept on the composite key, seq order',
   assert.equal(otherProvider.duplicate, false, 'same eventId under a different provider is distinct')
 
   const second = await inbox.accept(messageEvent('p5-inbox', 'evt-2', 'two'))
-  assert.equal(second.record.seq, first.record.seq + 1, 'seq is monotonic')
+  assert.ok(
+    second.record.seq > first.record.seq,
+    'seq is monotonic (the counter is global to the inbox, not per test)',
+  )
 
   const after = await inbox.listAfterSeq(first.record.seq - 1)
   assert.ok(after.map((r) => r.seq).includes(first.record.seq))
-  assert.deepEqual((await inbox.listAfterSeq(first.record.seq, 1)).map((r) => r.seq), [second.record.seq])
+  const afterFirst = await inbox.listAfterSeq(first.record.seq, 10)
+  assert.ok(afterFirst.map((r) => r.seq).includes(second.record.seq), 'second record sits above the cursor')
+  assert.deepEqual(
+    [...afterFirst.map((r) => r.seq)].sort((a, b) => a - b),
+    afterFirst.map((r) => r.seq),
+    'listAfterSeq returns ascending seq order',
+  )
   assert.equal((await inbox.get(first.record.id))?.eventId, 'evt-1')
 })
 

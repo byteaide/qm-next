@@ -62,20 +62,16 @@ They are still present; the architecture gate acknowledges them.
   not `RunStatus`. They are not in scope for KV-001.
 
 - id: KV-002
-  rule: late `api.cronsRuntime` writes
-  phase: 4
-  location: packages/triggers/src/service.ts:89, 92
-  notes: Triggers still assign `api.cronsRuntime` from the legacy
-    composition path. Phase 4 removes this in favor of the minimal
-    `TriggerRuntime` contract in `@qm/types`.
-
-- id: KV-002a
-  rule: triggers package imports @qm/api
-  phase: 4
-  location: packages/triggers/src/service.ts:8
-  notes: Triggers still import `ApiService` from `@qm/api` for
-    composition injection. Phase 4 replaces this dependency with
-    the minimal `TriggerRuntime` contract from `@qm/types`.
+  rule: `api.cronsRuntime` compatibility write (single sanctioned seam)
+  phase: 7
+  location:
+    - packages/api/src/wire-cron-runtime.ts
+  notes: Phase 4 removed the late write from `packages/triggers` and made
+    `WireCronRuntimeService` the only writer — the composition seam the
+    TriggersService architecture test asserts. The compatibility field
+    itself is removed in Phase 7 ("Remove `api.cronsRuntime`
+    compatibility fields"), at which point this entry is deleted and the
+    gate asserts zero hits.
 
 - id: KV-003
   rule: route-local OAuth pending Maps
@@ -117,4 +113,10 @@ Entries move here as the corresponding phase ships. When the entry is
 deleted from the live block above, the architecture gate asserts that no
 hits remain in the tree.
 
-(no entries yet)
+- id: KV-002a
+  rule: triggers package imports @qm/api
+  phase: 4 (resolved — merged in "Merge Phase 1+4")
+  resolution: `packages/triggers` depends only on the minimal
+    `TriggerRuntime` contract from `@qm/types`; the composition seam is
+    `TriggerRuntimeCordisService` in `@qm/api`. The TriggersService
+    architecture test asserts no `@qm/api` dependency or import.
