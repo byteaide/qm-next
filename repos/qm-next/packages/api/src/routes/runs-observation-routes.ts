@@ -56,12 +56,11 @@ function buildVisibilityToken(
   if (!actor) {
     return { status: 401, body: { error: 'unauthorized', message: 'caller has no principal id' } }
   }
-  // `internal` and `system` callers ride the control-plane `reach`
-  // scope; principal callers ride the `principal` scope. Phase 2 will
-  // add a Session → visible-principals lookup that filters principal
-  // scope callers down to the Session audience.
-  const scope: RunVisibilityToken['scope'] =
-    actor.type === 'internal' ? 'internal' : actor.type === 'system' ? 'system' : 'principal'
+  // `internal` callers ride the control-plane `reach` scope; other
+  // callers ride the `principal` scope. Phase 2 will add a Session →
+  // visible-principals lookup that filters principal scope callers down
+  // to the Session audience.
+  const scope: RunVisibilityToken['scope'] = actor.type === 'internal' ? 'internal' : 'principal'
   return { sessionId, callerPrincipalId: actor.id, scope }
 }
 
@@ -102,6 +101,7 @@ export function runsObservationRoutes(deps: RunsObservationRoutesDeps): Readonly
       auth: 'source',
       handle: async (ctx) => {
         const runId = ctx.params.id
+        if (runId === undefined) return badRequest(ctx, 'missing run id')
         const runResult = await resolveRunOrNotFound(deps, runId)
         if (!runResult.ok) return notFound(ctx)
         const token = buildVisibilityToken(ctx, runResult.run.sessionId)
@@ -118,6 +118,7 @@ export function runsObservationRoutes(deps: RunsObservationRoutesDeps): Readonly
       auth: 'source',
       handle: async (ctx) => {
         const runId = ctx.params.id
+        if (runId === undefined) return badRequest(ctx, 'missing run id')
         const cursorResult = parseCursor(ctx.query)
         if (!cursorResult.ok) return badRequest(ctx, cursorResult.message)
         const runResult = await resolveRunOrNotFound(deps, runId)
@@ -138,6 +139,7 @@ export function runsObservationRoutes(deps: RunsObservationRoutesDeps): Readonly
       auth: 'source',
       handle: async (ctx) => {
         const runId = ctx.params.id
+        if (runId === undefined) return badRequest(ctx, 'missing run id')
         const cursorResult = parseCursor(ctx.query)
         if (!cursorResult.ok) return badRequest(ctx, cursorResult.message)
         const runResult = await resolveRunOrNotFound(deps, runId)

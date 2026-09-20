@@ -53,7 +53,6 @@ export function createMemoryShadowRecordStore(
   opts: MemoryShadowRecordStoreOptions = {},
 ): ShadowRecordStore {
   const records = new Map<string, ShadowRecord>()
-  const now = opts.now ?? Date.now
   const capacity = opts.capacity ?? DEFAULT_CAPACITY
   const retentionMs = opts.retentionMs ?? DEFAULT_RETENTION_MS
 

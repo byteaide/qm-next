@@ -12,8 +12,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type {
-  Conversation,
-  OrchestratorDeps,
   Principal,
   ResolutionService,
   RunStore,
@@ -26,12 +24,6 @@ import {
 import { RUN_METRICS, createRunMetricsRegistry } from '@qm/runs'
 
 const principal: Principal = { id: 'person:ada', type: 'internal' }
-const conversation: Conversation = {
-  threadRef: 'thread-1',
-  kind: 'web',
-  channelName: 'main',
-  participants: [principal],
-}
 
 const resolution: ResolutionService = {
   async resolve() {
@@ -47,7 +39,11 @@ function makeRunStore(opts: { enqueueError?: Error } = {}): RunStore & { enqueue
     async enqueue(input: unknown) {
       if (opts.enqueueError) throw opts.enqueueError
       enqueued.push(input)
-      return { id: `run-${enqueued.length}`, sessionId: 'session-A' }
+      // EnqueueResult contract shape (types/run.ts §EnqueueResult).
+      return {
+        run: { id: `run-${enqueued.length}`, sessionId: 'session-A' },
+        deduped: false,
+      }
     },
     async claim() {
       return null

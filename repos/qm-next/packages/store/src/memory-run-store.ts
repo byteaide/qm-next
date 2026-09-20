@@ -85,7 +85,7 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
     if (retry && run.errorAttempts < run.maxAttempts && !overClaimed) {
       run.status = 'pending'
       run.targetState = 'queued'
-      run.failureReason = undefined
+      delete run.failureReason
       return { requeued: true, applied: true }
     }
     run.status = 'failed'
@@ -184,7 +184,7 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
         run.status = 'done'
       }
       run.targetState = 'succeeded'
-      run.failureReason = undefined
+      delete run.failureReason
       run.result = result
       run.leaseToken = null
       run.leaseExpiresAt = null
@@ -222,7 +222,7 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
       if (isTerminal(run.status)) return false
       // Idempotency guard: repeated delivery of the same approval
       // decision must not create a second Continuation Attempt.
-      const lastReq = (run.deliveryState as { lastCommandRequestId?: string } | null)?.lastCommandRequestId
+      const lastReq = run.deliveryState?.lastCommandRequestId
       if (lastReq === commandRequestId) return false
       run.attempts += 1
       run.startedAt = run.startedAt ?? Date.now()

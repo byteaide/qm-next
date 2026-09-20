@@ -95,7 +95,7 @@ test('slice-2.3: listPending filters out expired requests', async () => {
   let now = 0
   const store = createMemoryTargetApprovalStore({ clock: { now: () => now } })
   const shortLived = await store.create(makeInput({ runId: 'run-short', ttlMs: 1_000 }))
-  const longLived = await store.create(makeInput({ runId: 'run-long', ttlMs: 60_000 }))
+  await store.create(makeInput({ runId: 'run-long', ttlMs: 60_000 }))
   // Advance the clock past the short-lived absolute expiry.
   now = 2_000
   const pending = await store.listPending()

@@ -66,6 +66,14 @@ export interface ReapEvent {
 
 export interface RunDeliveryState {
   editRef?: string
+  /**
+   * Slice 2.4 — idempotency key of the last Approval Continuation
+   * Attempt (ADR-0010). Repeated delivery of the same approval decision
+   * must not create a second Continuation Attempt.
+   */
+  lastCommandRequestId?: string
+  /** Slice 2.4 — id of the active Continuation Attempt within this Run. */
+  currentAttemptId?: string
 }
 
 export interface Run {

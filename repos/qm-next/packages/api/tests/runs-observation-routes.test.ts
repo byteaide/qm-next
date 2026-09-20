@@ -53,15 +53,16 @@ function makeObservation(events: readonly TargetRunEvent[]): TargetRunObservatio
     seenCursors,
     async snapshot(runId, auth) {
       seenAuth.push(auth)
-      if (!events.length) return null
-      const latest = events[events.length - 1]
+      const latest = events.at(-1)
+      if (!latest) return null
       const snapshot: RunSnapshot = {
-        runId,
+        id: runId,
         sessionId: latest.sessionId,
-        targetState: 'running',
-        attemptState: 'running',
-        lastSeq: latest.seq,
-        ts: latest.ts,
+        state: 'running',
+        attempts: 0,
+        lastEventSeq: latest.seq,
+        createdAt: latest.ts,
+        updatedAt: latest.ts,
       }
       return snapshot
     },
@@ -139,8 +140,8 @@ test('runs-observation snapshot: 200 returns RunSnapshot and records auth', asyn
   })
   assert.equal(res.statusCode, 200)
   const body = res.json() as RunSnapshot
-  assert.equal(body.runId, seed.id)
-  assert.equal(body.lastSeq, 1)
+  assert.equal(body.id, seed.id)
+  assert.equal(body.lastEventSeq, 1)
   assert.equal((observation as ReturnType<typeof makeObservation>).seenAuth.length, 1)
   assert.equal((observation as ReturnType<typeof makeObservation>).seenAuth[0]?.callerPrincipalId, 'person:ada')
   // The minted bearer resolves to an internal control-plane actor, so

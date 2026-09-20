@@ -129,7 +129,7 @@ export function createMemoryTargetApprovalStore(
         if (rec.request.status !== 'pending') continue
         // Effective expiry is `createdAt + ttlMs`; `absoluteExpiry`
         // (`createdAt + maxTtlMs`) only caps renewals (§2.5).
-        if (rec.request.createdAt + rec.request.ttlMs <= now) continue
+        if (isCurrentlyExpired(rec, now)) continue
         out.push(snapshot(rec))
         if (out.length >= limit) break
       }
@@ -142,7 +142,7 @@ export function createMemoryTargetApprovalStore(
       const out: ApprovalRequest[] = []
       for (const rec of records.values()) {
         if (rec.request.status !== 'pending') continue
-        if (rec.request.createdAt + rec.request.ttlMs > now) continue
+        if (!isCurrentlyExpired(rec, now)) continue
         out.push(snapshot(rec))
         if (out.length >= limit) break
       }
@@ -216,7 +216,6 @@ export function createMemoryTargetApprovalStore(
       if (rec.request.status !== 'pending') {
         return {
           outcome: 'already_decided',
-          approved: rec.request.approved ?? false,
           request: snapshot(rec),
         }
       }

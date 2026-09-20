@@ -32,9 +32,9 @@ import { createMemoryAdmissionRecordStore } from '@qm/admission'
 const principal: Principal = { id: 'person:ada', type: 'internal' }
 const conversation: Conversation = {
   threadRef: 'thread-1',
-  kind: 'web',
+  kind: 'dm',
   channelName: 'main',
-  participants: [principal],
+  audience: [principal],
 }
 
 function makeTurnInput(overrides: Partial<TurnInput> = {}): TurnInput {
@@ -43,6 +43,7 @@ function makeTurnInput(overrides: Partial<TurnInput> = {}): TurnInput {
     actor: principal,
     text: 'hello',
     conversation,
+    origin: { kind: 'direct' },
     ...overrides,
   }
 }
@@ -63,18 +64,18 @@ function makeDeps(overrides: Partial<OrchestratorDeps> = {}): OrchestratorDeps {
     },
     scopeFor: () => 'personal:ada',
   }
-  const sessions: SessionStore = {
+  // Partial in-memory SessionStore double: `handleTurn` exercises only
+  // the members below; the full interface is satisfied in production.
+  const sessions: Partial<SessionStore> = {
     async getOrCreateByThread(threadRef) {
       return {
         id: 'session-A',
         threadRef,
-        kind: 'web',
+        type: 'dm',
         scopeId: 'personal:ada',
         surface: 'web',
         channelName: 'main',
-        participants: [principal],
         createdAt: 0,
-        updatedAt: 0,
       }
     },
     async addParticipant() {
@@ -89,52 +90,49 @@ function makeDeps(overrides: Partial<OrchestratorDeps> = {}): OrchestratorDeps {
       return {
         id: 'entry-1',
         sessionId: 'session-A',
+        seq: 1,
+        parentSeq: null,
         type: 'user',
         payload: { text: 'hello', author: 'person:ada' },
         scopeLabel: 'personal:ada',
         createdAt: 0,
       }
     },
-    async releaseLease() { return true },
-    async getForViewer() { return null },
-    async fork() {
-      return {
-        id: 'session-B',
-        threadRef: 'thread-B',
-        kind: 'web',
-        scopeId: 'personal:ada',
-        surface: 'web',
-        channelName: 'main',
-        participants: [principal],
-        createdAt: 0,
-        updatedAt: 0,
-      }
-    },
-    async patch() { return null },
+    async releaseLease() {},
   }
   const harness: HarnessRegistry = {
     resolve(): Harness {
       return {
-        profile: { id: 'mock', supportedModels: ['mock-1'] },
+        profile: {
+          id: 'mock',
+          controlTransport: 'mock',
+          toolTransport: 'mock',
+          transcriptFormat: 'json',
+          capabilities: new Set(),
+        },
         turns: {
           async runTurn(_input: HarnessTurnInput): Promise<HarnessTurnResult> {
-            return { status: 'ok', output: 'mock result', tokens: { input: 0, output: 0 } }
+            return { reply: 'mock result' }
           },
         },
+        models: {},
+        tools: { name: (coreName: string) => coreName },
       }
     },
     register() {},
+    get() { return undefined },
+    ids() { return [] },
   }
-  const deps: OrchestratorDeps = {
+  const deps = {
     identity,
     rateLimiter,
     resolution,
-    sessions,
+    sessions: sessions as SessionStore,
     harness,
     // Apply only explicitly-provided overrides; callers pass the stage
     // double they want to replace (identity, rateLimiter, budget, …).
     ...Object.fromEntries(Object.entries(overrides).filter(([, v]) => v !== undefined)),
-  } as OrchestratorDeps
+  } as unknown as OrchestratorDeps
   return deps
 }
 
@@ -207,6 +205,7 @@ test('buildStagePorts: budget port is wired when deps.budget is present', async 
     async check() {
       return { allowed: false, spentUsd: 10, limitUsd: 5, retryAfterMs: 0 }
     },
+    async record() {},
   }
   const deps = makeDeps({ budget })
   const ports = buildStagePorts({ deps, store: createMemoryAdmissionRecordStore() })

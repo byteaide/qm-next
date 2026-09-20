@@ -17,7 +17,6 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { CommandRequest } from '@qm/types'
 import {
-  ALLOWLIST_POLICY_ID,
   BASELINE_DENY_POLICY_ID,
   CommandPolicyNotConfigured,
   classRequiresGate,

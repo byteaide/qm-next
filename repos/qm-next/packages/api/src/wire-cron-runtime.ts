@@ -45,7 +45,7 @@ export class WireCronRuntimeService extends Service {
       deliveries: deps.deliveries,
     }
     return async () => {
-      deps.api.cronsRuntime = undefined
+      delete deps.api.cronsRuntime
     }
   }
 }

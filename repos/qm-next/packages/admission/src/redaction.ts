@@ -27,16 +27,22 @@ export function redactSecrets(input: string): string {
   return out
 }
 
+export function redactAdmissionStageReason(reason: string): string
+export function redactAdmissionStageReason(reason: string | undefined): string | undefined
 export function redactAdmissionStageReason(reason: string | undefined): string | undefined {
   if (reason === undefined) return undefined
   return redactSecrets(reason)
 }
 
+export function redactAdmissionReason(reason: string): string
+export function redactAdmissionReason(reason: string | undefined): string | undefined
 export function redactAdmissionReason(reason: string | undefined): string | undefined {
   if (reason === undefined) return undefined
   return redactSecrets(reason)
 }
 
+export function redactExcerpt(excerpt: string): string
+export function redactExcerpt(excerpt: string | undefined): string | undefined
 export function redactExcerpt(excerpt: string | undefined): string | undefined {
   if (excerpt === undefined) return undefined
   return redactSecrets(excerpt)

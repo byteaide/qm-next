@@ -105,7 +105,8 @@ export interface ResolvedContext {
   leaseToken: unknown
   systemPrompt: string
   orgScopeId: ScopeId
-  commandRequest: CommandRequest
+  /** Present only when the admitted work carried a structured command; pure reads omit it (ADR-0002). */
+  commandRequest?: CommandRequest
   rateLimit?: { limit: number; remaining: number; resetMs: number }
   budget?: { remaining: number; unit: string }
   screen?: SecurityScreenOutcome
@@ -114,7 +115,8 @@ export interface ResolvedContext {
 export interface AcceptedAdmission {
   decision: 'accepted'
   record: import('@qm/types').AdmissionRecord
-  commandRequest: CommandRequest
+  /** Present only when the admitted work carried a structured command; pure reads omit it (ADR-0002). */
+  commandRequest?: CommandRequest
   resolved: ResolvedContext
 }
 

@@ -231,7 +231,7 @@ class FakeRuns implements RunStore {
     return [...this.runs.values()]
   }
   async reapExpired() {
-    return { requeued: 0, parked: 0 }
+    return { requeued: 0, parked: 0, skippedNewerSession: 0 }
   }
   async waitFor(runId: string) {
     return this.runs.get(runId)

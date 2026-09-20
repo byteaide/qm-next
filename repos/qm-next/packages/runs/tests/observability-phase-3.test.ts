@@ -28,8 +28,6 @@ import {
 import { createMemoryShadowRecordStore, createSecurityScreenAdapter, resolveScreenConfig } from '@qm/security'
 import type { AdmissionInput } from '@qm/types'
 
-const principal = { id: 'person:ada', type: 'internal' } as const
-
 /** Snapshot lookup: does this counter series carry exactly these labels? */
 function seriesWith(snap: readonly CounterSnapshot[], name: string, want: Record<string, string>): CounterSnapshot | undefined {
   return snap.find(

@@ -105,5 +105,5 @@ export interface AdmissionInput {
 }
 
 export type AdmissionOutcome =
-  | { decision: 'accepted'; record: AdmissionRecord; commandRequest: CommandRequest }
+  | { decision: 'accepted'; record: AdmissionRecord; commandRequest?: CommandRequest }
   | { decision: 'rejected'; record: AdmissionRecord }

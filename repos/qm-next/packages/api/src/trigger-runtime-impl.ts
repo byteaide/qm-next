@@ -10,7 +10,7 @@
  */
 import type {
   Conversation,
-  Principal,
+  EnqueueInput,
   ResolutionService,
   RunStore,
   SessionStore,
@@ -86,9 +86,11 @@ export function createTriggerRuntimeFromApi(
         }
         const conversation: Conversation = {
           threadRef: `trigger:${input.fireKey}`,
-          kind: 'web',
+          // Trigger submissions are automation traffic; `channel` is the
+          // non-private ConversationKind used for non-DM sessions.
+          kind: 'channel',
           channelName: input.triggerKind,
-          participants: [input.actor],
+          audience: [input.actor],
         }
         const session = await deps.sessions.getOrCreateByThread(
           conversation.threadRef,
@@ -109,13 +111,12 @@ export function createTriggerRuntimeFromApi(
           ...(input.harness !== undefined ? { harness: input.harness } : {}),
         }
         void resolution
-        const enqueue = await deps.runs.enqueue({
-          request: turnInput,
-          ...(input.fireKey !== undefined ? { idempotencyKey: input.fireKey } : {}),
-        } as Parameters<RunStore['enqueue']>[0])
+        const enqueueInput: EnqueueInput = { sessionId: session.id, request: turnInput }
+        if (input.fireKey !== undefined) enqueueInput.dedupKey = input.fireKey
+        const enqueue = await deps.runs.enqueue(enqueueInput)
         bumpTriggerSubmit(opts.metrics, 'accepted')
         return {
-          runId: enqueue.id,
+          runId: enqueue.run.id,
           sessionId: session.id,
           acceptedAt,
         }

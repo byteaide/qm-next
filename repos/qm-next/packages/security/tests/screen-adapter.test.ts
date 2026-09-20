@@ -29,7 +29,7 @@ function allowScreener(): SecurityScreener {
     shadow: false,
     async classify() {
       return {
-        verdict: { decision: 'allow' },
+        verdict: { decision: 'auto' },
         score: 0,
         threshold: 0.5,
       }
@@ -42,8 +42,11 @@ function denyScreener(ruleId = 'prompt-injection.v1'): SecurityScreener {
     provider: 'mock',
     shadow: false,
     async classify() {
+      // Screener vocabulary: `strict` = malicious (score ≥ threshold);
+      // the adapter maps `strict` → deny and the reason doubles as the
+      // stable rule identity.
       return {
-        verdict: { decision: 'deny', ruleId, reason: 'rule fired' },
+        verdict: { decision: 'strict', reason: ruleId },
         score: 1,
         threshold: 0.5,
       }

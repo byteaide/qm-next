@@ -34,7 +34,7 @@ export function buildStagePorts(opts: BuildStagePortsOptions): StagePorts {
         const ok = deps.identity.isInternal(actor)
         return {
           decision: ok ? 'allow' : 'deny',
-          reason: ok ? undefined : 'internal-only: non-internal principals cannot interact',
+          ...(ok ? {} : { reason: 'internal-only: non-internal principals cannot interact' }),
           latencyMs: Date.now() - start,
         }
       },

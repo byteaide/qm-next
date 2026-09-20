@@ -16,7 +16,6 @@
 import { Context, Service } from '@qm/cordis'
 import type {
   AdmissionInput,
-  Conversation,
   Orchestrator,
   OrchestratorDeps,
   PendingApproval,
@@ -24,6 +23,7 @@ import type {
   LegacyRunEvent,
   LegacyRunEventDraft,
   LegacyRunProgressEvent,
+  Session,
   SessionEntry,
   TurnInput,
   TurnResult,
@@ -34,10 +34,6 @@ import { buildStagePorts } from './admission-integration.ts'
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
-}
-
-function sessionTypeOf(conversation: Conversation): Conversation['kind'] {
-  return conversation.kind
 }
 
 export class OrchestratorService extends Service implements Orchestrator {
@@ -71,8 +67,7 @@ export class OrchestratorService extends Service implements Orchestrator {
     const admissionInput: AdmissionInput = {
       surface: input.surface,
       actor: input.actor,
-      ...(input.scopeId !== undefined ? { scopeId: input.scopeId } : {}),
-      ...(input.conversation !== undefined ? { conversation: input.conversation } : {}),
+      conversation: input.conversation,
     }
     const ports = buildStagePorts({ deps, store })
     const outcome = await runAdmissionWaterfall({ ports, store }, admissionInput)
@@ -84,17 +79,18 @@ export class OrchestratorService extends Service implements Orchestrator {
     }
     const { sessionId, scopeId, leaseToken, systemPrompt, orgScopeId } = outcome.resolved
     const conversation = input.conversation
-    const session = {
+    // Session aggregate for the harness. `ConversationKind` and
+    // `SessionType` share the `'dm' | 'channel' | 'group'` domain; the
+    // Session is identified by the id the session stage resolved/leased.
+    const session: Session = {
       id: sessionId,
-      threadRef: conversation.threadRef,
-      kind: conversation.kind,
+      type: conversation.kind,
       scopeId,
+      threadRef: conversation.threadRef,
       surface: input.surface,
-      channelName: conversation.channelName,
-      participants: [input.actor],
       createdAt: 0,
-      updatedAt: 0,
-    } as Conversation
+      ...(conversation.channelName !== undefined ? { channelName: conversation.channelName } : {}),
+    }
     const lease = leaseToken as never
 
     let harness

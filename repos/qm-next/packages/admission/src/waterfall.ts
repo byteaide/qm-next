@@ -22,6 +22,7 @@ import type {
   AdmissionInput,
   AdmissionRecord,
   AdmissionStage,
+  AdmissionStageDecision,
   AdmissionStageRecord,
 } from '@qm/types'
 import {
@@ -40,7 +41,6 @@ import {
   redactAdmissionStageReason,
 } from './redaction.ts'
 import {
-  WATERFALL_ORDER,
   type AcceptedAdmission,
   type RejectedAdmission,
   type StagePorts,
@@ -65,6 +65,25 @@ interface StageHistory {
 
 const defaultNow: () => number = Date.now
 
+/**
+ * Build one AdmissionStageRecord. `reason` is omitted (not set to
+ * `undefined`) when absent — `exactOptionalPropertyTypes` forbids an
+ * explicit `undefined` on an optional property.
+ */
+function stageRecord(
+  stage: AdmissionStage,
+  decision: AdmissionStageDecision,
+  reason: string | undefined,
+  latencyMs: number,
+): AdmissionStageRecord {
+  return {
+    stage,
+    decision,
+    ...(reason !== undefined ? { reason: redactAdmissionStageReason(reason) } : {}),
+    latencyMs,
+  }
+}
+
 export async function runAdmissionWaterfall(
   deps: WaterfallDeps,
   input: AdmissionInput,
@@ -78,26 +97,16 @@ export async function runAdmissionWaterfall(
   // Stage 1: identity
   const identityStart = now()
   const identityDecision = await deps.ports.identity.check(input.actor)
-  history.records.push({
-    stage: 'identity',
-    decision: identityDecision.decision,
-    reason: redactAdmissionStageReason(identityDecision.reason),
-    latencyMs: now() - identityStart,
-  })
+  history.records.push(stageRecord('identity', identityDecision.decision, identityDecision.reason, now() - identityStart))
   bumpStageMetric(metrics, 'identity', identityDecision.decision)
   if (identityDecision.decision !== 'allow') {
-    return reject(id, input, history, identityDecision.reason, ts, now, deps)
+    return reject(id, input, history, identityDecision.reason, ts, deps)
   }
 
   // Stage 2: rate_limit
   const rlStart = now()
   const rlDecision = await deps.ports.rateLimit.check(input.actor.id)
-  history.records.push({
-    stage: 'rate_limit',
-    decision: rlDecision.decision,
-    reason: redactAdmissionStageReason(rlDecision.reason),
-    latencyMs: now() - rlStart,
-  })
+  history.records.push(stageRecord('rate_limit', rlDecision.decision, rlDecision.reason, now() - rlStart))
   bumpStageMetric(metrics, 'rate_limit', rlDecision.decision)
   if (rlDecision.decision !== 'allow') {
     if (rlDecision.limit !== undefined && rlDecision.remaining !== undefined && rlDecision.resetMs !== undefined) {
@@ -107,7 +116,7 @@ export async function runAdmissionWaterfall(
         resetMs: rlDecision.resetMs,
       }
     }
-    return reject(id, input, history, rlDecision.reason, ts, now, deps)
+    return reject(id, input, history, rlDecision.reason, ts, deps)
   }
   if (rlDecision.limit !== undefined && rlDecision.remaining !== undefined && rlDecision.resetMs !== undefined) {
     history.context.rateLimit = {
@@ -121,12 +130,7 @@ export async function runAdmissionWaterfall(
   if (deps.ports.budget) {
     const bStart = now()
     const bDecision = await deps.ports.budget.check(input.actor.id)
-    history.records.push({
-      stage: 'budget',
-      decision: bDecision.decision,
-      reason: redactAdmissionStageReason(bDecision.reason),
-      latencyMs: now() - bStart,
-    })
+    history.records.push(stageRecord('budget', bDecision.decision, bDecision.reason, now() - bStart))
     bumpStageMetric(metrics, 'budget', bDecision.decision)
     if (bDecision.decision !== 'allow') {
       if (bDecision.remaining !== undefined && bDecision.unit !== undefined) {
@@ -135,7 +139,7 @@ export async function runAdmissionWaterfall(
           unit: bDecision.unit,
         }
       }
-      return reject(id, input, history, bDecision.reason, ts, now, deps)
+      return reject(id, input, history, bDecision.reason, ts, deps)
     }
     if (bDecision.remaining !== undefined && bDecision.unit !== undefined) {
       history.context.budget = {
@@ -158,16 +162,13 @@ export async function runAdmissionWaterfall(
   if (deps.ports.screen) {
     const sStart = now()
     screenOutcome = await deps.ports.screen.screen(input)
-    history.records.push({
-      stage: 'screen',
-      decision: screenOutcome.decision === 'allow' ? 'allow' : 'deny',
-      reason: redactAdmissionStageReason(screenOutcome.reason),
-      latencyMs: now() - sStart,
-    })
+    history.records.push(
+      stageRecord('screen', screenOutcome.decision === 'allow' ? 'allow' : 'deny', screenOutcome.reason, now() - sStart),
+    )
     bumpStageMetric(metrics, 'screen', screenOutcome.decision === 'allow' ? 'allow' : 'deny')
     bumpScreenDecisionMetric(metrics, screenOutcome.mode, screenOutcome.decision)
     if (screenOutcome.mode === 'enforce' && screenOutcome.decision !== 'allow') {
-      return reject(id, input, history, `security screen denied: ${screenOutcome.reason ?? 'unspecified'}`, ts, now, deps, screenOutcome)
+      return reject(id, input, history, `security screen denied: ${screenOutcome.reason ?? 'unspecified'}`, ts, deps, screenOutcome)
     }
     if (screenOutcome.mode === 'shadow' && screenOutcome.decision === 'unavailable') {
       bumpScreenUnavailableMetric(metrics, 'shadow')
@@ -192,15 +193,11 @@ export async function runAdmissionWaterfall(
   // Stage 5: session (resolution + lease)
   const sStart = now()
   const sessionDecision = await deps.ports.session.resolveAndLease(input)
-  history.records.push({
-    stage: 'session',
-    decision: sessionDecision.decision,
-    reason: redactAdmissionStageReason(sessionDecision.reason),
-    latencyMs: now() - sStart,
-  })
+  const sessionReason: string | undefined = sessionDecision.decision === 'allow' ? undefined : sessionDecision.reason
+  history.records.push(stageRecord('session', sessionDecision.decision, sessionReason, now() - sStart))
   bumpStageMetric(metrics, 'session', sessionDecision.decision)
   if (sessionDecision.decision !== 'allow') {
-    return reject(id, input, history, sessionDecision.reason, ts, now, deps, screenOutcome)
+    return reject(id, input, history, sessionDecision.reason, ts, deps, screenOutcome)
   }
 
   // Stage 6: dispatch
@@ -209,28 +206,16 @@ export async function runAdmissionWaterfall(
     sessionId: sessionDecision.sessionId,
     scopeId: sessionDecision.scopeId,
   })
-  history.records.push({
-    stage: 'dispatch',
-    decision: dispatchDecision.decision,
-    reason: redactAdmissionStageReason(dispatchDecision.reason),
-    latencyMs: now() - dStart,
-  })
+  const dispatchReason: string | undefined = dispatchDecision.decision === 'allow' ? undefined : dispatchDecision.reason
+  history.records.push(stageRecord('dispatch', dispatchDecision.decision, dispatchReason, now() - dStart))
   bumpStageMetric(metrics, 'dispatch', dispatchDecision.decision)
   if (dispatchDecision.decision !== 'allow') {
-    return reject(id, input, history, dispatchDecision.reason, ts, now, deps, screenOutcome)
+    return reject(id, input, history, dispatchDecision.reason, ts, deps, screenOutcome)
   }
 
-  // Accepted
-  const commandRequest = input.commandRequest ?? {
-    id: `cmd-${id}`,
-    runId: `run-${id}`,
-    attemptId: `attempt-${id}`,
-    class: 'read',
-    args: { argv: [] },
-    context: { scopeId: sessionDecision.scopeId, principalId: input.actor.id, surface: input.surface },
-    ts: ts,
-  } as import('@qm/types').CommandRequest
-
+  // Accepted. `commandRequest` stays absent for non-side-effecting work
+  // (ADR-0002: pure, non-sensitive reads are not gated) — no synthetic
+  // placeholder is fabricated.
   const record: AdmissionRecord = {
     id,
     surface: input.surface,
@@ -248,14 +233,14 @@ export async function runAdmissionWaterfall(
   return {
     decision: 'accepted',
     record,
-    commandRequest,
+    ...(input.commandRequest !== undefined ? { commandRequest: input.commandRequest } : {}),
     resolved: {
       sessionId: sessionDecision.sessionId,
       scopeId: sessionDecision.scopeId,
       leaseToken: sessionDecision.leaseToken,
       systemPrompt: sessionDecision.systemPrompt,
       orgScopeId: sessionDecision.orgScopeId,
-      commandRequest,
+      ...(input.commandRequest !== undefined ? { commandRequest: input.commandRequest } : {}),
       ...(history.context.rateLimit !== undefined ? { rateLimit: history.context.rateLimit } : {}),
       ...(history.context.budget !== undefined ? { budget: history.context.budget } : {}),
       ...(screenOutcome !== undefined ? { screen: screenOutcome } : {}),
@@ -269,7 +254,6 @@ async function reject(
   history: StageHistory,
   reason: string | undefined,
   ts: number,
-  now: () => number,
   deps: WaterfallDeps,
   screenOutcome?: import('@qm/types').SecurityScreenOutcome,
 ): Promise<RejectedAdmission> {

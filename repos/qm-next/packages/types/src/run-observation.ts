@@ -127,9 +127,14 @@ export type TargetRunEvent =
   | TargetProgressEvent
   | TargetCommandGateDecisionEvent
 
-/** A producer-side draft missing envelope fields; allocation lives in `SequenceAllocator`. */
+/**
+ * Producer-side draft missing allocator-assigned envelope fields. The
+ * producer supplies addressing (`runId`, and `sessionId` where the event
+ * kind carries it); `seq` comes from the `SequenceAllocator` and `ts`
+ * from the bus — producers never assign either (§2.5).
+ */
 type TargetDraft<T extends TargetRunEvent> = T extends TargetRunEventEnvelope
-  ? Omit<T, 'runId' | 'sessionId' | 'seq' | 'ts'>
+  ? Omit<T, 'seq' | 'ts'>
   : never
 export type TargetRunEventDraft = TargetDraft<TargetRunEvent>
 

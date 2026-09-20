@@ -96,6 +96,7 @@ export function createSecurityScreenAdapter(opts: ScreenAdapterOptions): {
         }
         // shadow
         if (opts.shadowStore) {
+          const excerpt = redactSecrets(buildExcerpt(input))
           await opts.shadowStore.create({
             id: allocateShadowId(),
             mode: 'shadow',
@@ -103,7 +104,7 @@ export function createSecurityScreenAdapter(opts: ScreenAdapterOptions): {
             reason: 'no screener wired',
             actor: input.actor,
             ...(input.scopeId !== undefined ? { scopeId: input.scopeId } : {}),
-            redactedExcerpt: redactSecrets(buildExcerpt(input)) || undefined,
+            ...(excerpt.length > 0 ? { redactedExcerpt: excerpt } : {}),
             latencyMs: 0,
             ts,
           })
@@ -124,12 +125,15 @@ export function createSecurityScreenAdapter(opts: ScreenAdapterOptions): {
         const verdict = classification.verdict
         if (verdict.unscreened === true) {
           outcome = { mode, decision: 'unavailable', reason: verdict.reason ?? 'screener unavailable', ts }
-        } else if (verdict.decision === 'deny') {
+        } else if (verdict.decision === 'strict') {
+          // Screener vocabulary → Admission vocabulary: `strict`
+          // (score ≥ threshold) denies; the verdict reason
+          // (`provider:outcome`) doubles as the stable rule identity.
+          const reason = verdict.reason
           outcome = {
             mode,
             decision: 'deny',
-            ...(verdict.ruleId !== undefined ? { ruleId: verdict.ruleId } : {}),
-            reason: verdict.reason,
+            ...(reason !== undefined ? { ruleId: reason, reason } : {}),
             ts,
           }
         } else {

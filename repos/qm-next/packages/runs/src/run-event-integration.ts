@@ -18,7 +18,7 @@
 import type { PoolClient } from 'pg'
 import type { FailureReason, Run, RunOutcome, TargetRunEventDraft } from '@qm/types'
 import { RUN_METRICS, type RunMetricsRegistry } from './observability.ts'
-import type { PostgresRunEventLog } from '../store/src/postgres-run-event-log.ts'
+import type { PostgresRunEventLog } from '@qm/store'
 
 export interface RunEventDraftInput {
   run: Pick<Run, 'id' | 'sessionId' | 'targetState' | 'failureReason' | 'runSource' | 'attempts'>
@@ -32,8 +32,8 @@ export interface RunEventDraftInput {
  * Centralised here so the wire shape is testable in isolation
  * without touching the database.
  */
-export function buildTerminalEventDraft(input: RunEventDraftInput): TargetRunEventDraft {
-  const draft: TargetRunEventDraft = {
+export function buildTerminalEventDraft(input: RunEventDraftInput): Extract<TargetRunEventDraft, { kind: 'run.finished' }> {
+  const draft: Extract<TargetRunEventDraft, { kind: 'run.finished' }> = {
     kind: 'run.finished',
     runId: input.run.id,
     sessionId: input.run.sessionId,
@@ -105,7 +105,7 @@ export async function completeRunWithEvent(
       attempts: 0,
     },
     outcome,
-    failureReason,
+    ...(failureReason !== undefined ? { failureReason } : {}),
   })
   const event = await appendTerminalEvent(tx, log, draft, metrics)
   log.notifyAfterCommit([event])

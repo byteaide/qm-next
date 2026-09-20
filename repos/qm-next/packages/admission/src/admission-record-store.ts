@@ -38,7 +38,6 @@ const DEFAULT_CAPACITY = 10_000
 export function createMemoryAdmissionRecordStore(
   opts: MemoryAdmissionRecordStoreOptions = {},
 ): AdmissionRecordStore {
-  const now = opts.now ?? Date.now
   const capacity = opts.capacity ?? DEFAULT_CAPACITY
   const records = new Map<string, AdmissionRecord>()
   // Bounded retention: when capacity is hit, evict the oldest by `ts`.

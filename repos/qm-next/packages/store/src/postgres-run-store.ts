@@ -35,7 +35,7 @@ function rowToRun(r: Record<string, unknown>): Run {
     status: r.status as Run['status'],
     targetState: (r.target_state as RunState | null) ?? 'queued',
     runSource: (r.run_source as RunSource | null) ?? 'legacy',
-    failureReason: (r.failure_reason as FailureReason | null) ?? undefined,
+    ...(r.failure_reason != null ? { failureReason: r.failure_reason as FailureReason } : {}),
     request: JSON.parse(r.request as string) as TurnInput,
     result: r.result != null ? (JSON.parse(r.result as string) as TurnResult) : null,
     deliveryState: r.delivery_state != null ? (JSON.parse(r.delivery_state as string) as RunDeliveryState) : null,

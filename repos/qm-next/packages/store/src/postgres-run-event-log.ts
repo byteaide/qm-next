@@ -375,7 +375,6 @@ function rowToEvent(r: TargetRunEventRow): TargetRunEvent {
         ...base,
         ...(attempt ? { attempt } : {}),
         attemptRef: '',
-        ...(r.payload ? { approvalRequestId: undefined } : {}),
       }
     case 'attempt.resumed':
       return { kind: 'attempt.resumed', ...base, attemptRef: '' }
