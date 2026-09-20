@@ -1069,7 +1069,11 @@ function streamRunViaSse(
     if (typeof EventSource === "undefined") return resolve("fallback");
     let settled = false;
     let established = false;
-    const es = new EventSource(withBase(runPath(runId, "/events")));
+    // Phase 7 / KV-006 — the browser rides the durable observation stream
+    // (typed run_observation frames) instead of the deleted legacy
+    // /events replay. A terminal frame triggers one final poll for the
+    // run wire (reply/approvals), then the stream settles.
+    const es = new EventSource(withBase(runPath(runId, "/observation/subscribe?after=-1")));
     const settle = (outcome: "done" | "fallback"): void => {
       if (settled) return;
       settled = true;
@@ -1091,59 +1095,45 @@ function streamRunViaSse(
     es.onopen = (): void => {
       established = true;
     };
-    es.addEventListener("partial", (e: MessageEvent) => {
-      established = true;
+    const finishFromPoll = async (): Promise<void> => {
       try {
-        const d = JSON.parse(e.data) as { partial?: string };
-        if (typeof d.partial === "string" && d.partial.length > st.acc.length) {
-          st.lastProgressAt = now();
-          pushDelta(stream, partial, st, d.partial);
-        }
-      } catch (e) {
-        swallow("web-ui: handle sse partial event", e);
-      }
-    });
-    es.addEventListener("activity", (e: MessageEvent) => {
-      established = true;
-      try {
-        const d = JSON.parse(e.data) as { activity?: unknown[]; startedAt?: number | null };
-        const work = (partial as AssistantWork).work;
-        const beforeActivity = work?.activity.length ?? 0;
-        if (mergeWork(work, d)) {
-          if ((work?.activity.length ?? 0) > beforeActivity) st.lastProgressAt = now();
-          notify?.();
-        }
-      } catch (e) {
-        swallow("web-ui: handle sse activity event", e);
-      }
-    });
-    es.addEventListener("alive", () => {
-      established = true;
-      st.lastProgressAt = now();
-    });
-    es.addEventListener("stale", (e: MessageEvent) => {
-      established = true;
-      try {
-        const d = JSON.parse(e.data) as { stale?: boolean };
-        const stale = d.stale === true;
-        if (stale) st.staleSince ??= now();
-        else st.staleSince = undefined;
-        if (!stale || now() - (st.staleSince ?? 0) < STALE_GRACE_MS) st.lastProgressAt = now();
-        setWorkStale((partial as AssistantWork).work, stale, notify);
-      } catch (e) {
-        swallow("web-ui: handle sse stale event", e);
-      }
-    });
-    es.addEventListener("done", (e: MessageEvent) => {
-      established = true;
-      try {
-        applyRun(stream, partial, st, JSON.parse(e.data) as RunPoll, notify);
+        const run = await api<RunPoll>(runPath(runId, ""));
+        applyRun(stream, partial, st, run, notify);
         settle("done");
       } catch {
         settle("fallback");
       }
+    };
+    es.addEventListener("run_observation", (e: MessageEvent) => {
+      established = true;
+      try {
+        const ev = JSON.parse(e.data) as {
+          kind?: string;
+          redactedExcerpt?: string;
+          attemptState?: string;
+          outcome?: string;
+        };
+        if (ev.kind === "progress" && typeof ev.redactedExcerpt === "string" && ev.redactedExcerpt) {
+          st.lastProgressAt = now();
+          pushDelta(stream, partial, st, st.acc + ev.redactedExcerpt);
+          return;
+        }
+        if (ev.kind === "attempt.started" || ev.kind === "attempt.queued" || ev.kind === "attempt.resumed") {
+          st.lastProgressAt = now();
+          return;
+        }
+        if (ev.kind === "attempt.finished") {
+          st.lastProgressAt = now();
+          setWorkStale((partial as AssistantWork).work, false, notify);
+          return;
+        }
+        if (ev.kind === "run.finished") {
+          void finishFromPoll();
+        }
+      } catch (err) {
+        swallow("web-ui: handle run_observation frame", err);
+      }
     });
-    es.addEventListener("failed", () => settle("fallback"));
     es.onerror = (): void => {
       settle("fallback");
     };

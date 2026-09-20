@@ -13,9 +13,11 @@
     "@qm/admission": "workspace:^",
     "@qm/cordis": "workspace:^",
     "@qm/model": "workspace:^",
+    "@qm/runs": "workspace:^",
     "@qm/types": "workspace:^"
   },
   "devDependencies": {
+    "@qm/concurrency": "workspace:^",
     "@qm/store": "workspace:^"
   }
 }

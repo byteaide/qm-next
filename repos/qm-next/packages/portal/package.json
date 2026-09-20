@@ -19,6 +19,7 @@
   },
   "devDependencies": {
     "@qm/credentials": "workspace:^",
+    "@qm/concurrency": "workspace:^",
     "@qm/directory": "workspace:^",
     "@qm/memory": "workspace:^",
     "@qm/orchestrator": "workspace:^",

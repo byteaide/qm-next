@@ -37,25 +37,6 @@ They are still present; the architecture gate acknowledges them.
   notes: Provider adapters legitimately name platforms. Core service code
     must not (pnpm check:im enforces; architecture gate inherits the same
     boundary).
-
-- id: KV-006
-  rule: legacy RunEventBus publish without `seq` from SequenceAllocator
-  phase: 1
-  location: packages/orchestrator/src/orchestrator.ts (publishes to legacy bus)
-  notes: The orchestrator still publishes on the legacy bus where the
-    publisher assigns `seq` itself. Phase 1 routes new writes through the
-    typed envelope and the SequenceAllocator.
-
-- id: KV-007
-  rule: process-local IM dedup Map still present (non-authoritative)
-  phase: 7
-  location:
-    - packages/im-core/src/runtime/registry.ts
-  notes: Phase 5 made the durable Intake Inbox the dedup authority
-    (provider + eventId, ADR-0008); the registry's in-process `seenEvents`
-    Map remains only as a first-level guard ahead of the durable accept.
-    Phase 7 removes it together with the `target.im-intake` rollout flag
-    ("Remove process-local IM dedup as the authoritative mechanism").
 ```
 
 ## Phase-resolved entries
@@ -133,3 +114,19 @@ hits remain in the tree.
     in the same slice; durable intake is unconditional. Registry tests
     assert the pass-through contract and the im-intake wiring tests
     cover the durable dedup invariant.
+
+- id: KV-006
+  rule: legacy RunEventBus publish without `seq` from SequenceAllocator
+  phase: 7 (resolved — chore/architecture-cutover, slice 7.6)
+  resolution: the legacy `RunEventBus` contract (`run-events.ts`), its
+    memory implementation, the orchestrator's self-sequenced
+    delta/progress/status publishing, and the web legacy SSE
+    `/api/runs/:id/events` stream are deleted. The orchestrator produces
+    typed `attempt.started` / `progress` (redacted excerpts, ADR-0014) /
+    `attempt.finished` events through the target event log — `seq` comes
+    from the SequenceAllocator inside the bus; the turn runner publishes
+    the Run-terminal `run.finished` after the RunStore commits, so the
+    orchestrator owns no subscriber truth (ADR-0001). The web SPA rides
+    `/api/runs/:id/observation/subscribe` (`run_observation` frames over
+    the durable log), and the api `/v1` observation routes are wired
+    unconditionally.

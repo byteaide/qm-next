@@ -785,9 +785,9 @@ Remove obsolete paths and make the target model the only production model.
 ### Cleanup checklist
 
 - [x] Remove legacy Run terminal `done` writes. (slice 7.4 — stores stamp `runSource='target'` unconditionally; the `status='done'` write branch is deleted. Historical rows keep reading through the Phase 1 projection until the data migration rewrites them physically.)
-- [ ] Remove closing event streams on Attempt failure. (verify remaining site — see TIA §10)
-- [ ] Remove orchestrator-owned subscriber truth. (open — blocked on the KV-006 legacy-bus cutover below)
-- [ ] Remove Web polling/replay compensation that duplicates Run Observation. (open — the web legacy SSE `/api/runs/:id/events` still consumes the legacy bus; requires a target-log progress producer and the client retarget to `/observation/subscribe`)
+- [x] Remove closing event streams on Attempt failure. (slice 7.6 — the legacy SSE `finish()` compensation path died with the `/api/runs/:id/events` deletion; the observation subscribe route ends the stream at the terminal event, so an Attempt failure closes its stream naturally.)
+- [x] Remove orchestrator-owned subscriber truth. (slice 7.6 — KV-006: the orchestrator publishes typed non-terminal events only (`attempt.started` / redacted `progress` / `attempt.finished`) through the target event log with allocator-assigned `seq`; the turn runner publishes `run.finished` after the RunStore commits; the legacy bus and the orchestrator's stream close are deleted.)
+- [x] Remove Web polling/replay compensation that duplicates Run Observation. (slice 7.6 — the web legacy SSE route and its `runEvents.replay` compensation are deleted; the SPA consumes `/api/runs/:id/observation/subscribe` typed `run_observation` frames, with one final poll for the run wire at the terminal event.)
 - [ ] Remove Web/IM successor-Run approval logic. (open — the bridge still creates successor Runs on approval decisions; the continuation helpers exist unused)
 - [x] Remove `api.cronsRuntime` compatibility fields. (slice 7.2 — `wire-cron-runtime.ts` deleted; cron/scheduler/deliveries read lazily from the Cordis registry; zero-hit architecture test)
 - [x] Remove API route-local OAuth pending state. (resolved in Phase 6 — KV-003)
@@ -802,6 +802,7 @@ Additional gate-repair slices completed on this branch (recorded in the TIA chan
 
 - slice 7.1 — repo-wide `pnpm typecheck` repair to green (debt recorded at `16c9370`).
 - slice 7.5a — KV-005: sandbox policy onto the typed `CommandDecision` shape (`LegacyCommandDecision` deleted).
+- slice 7.6 — KV-006: legacy RunEventBus + web legacy SSE deleted; target event log is the only Run event producer; web SPA on the observation subscribe stream.
 
 ### Phase gate
 

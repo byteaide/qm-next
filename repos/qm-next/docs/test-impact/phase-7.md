@@ -110,8 +110,8 @@ baseline (11.8 s) as a coarse regression tripwire.
 
 | Question | Owner | Due |
 |---|---|---|
-| "Remove closing event streams on Attempt failure" — verify whether any attempt-failure stream-close site remains post-Phase-1; candidate: legacy SSE `finish()` path in web-ui server (dies with the KV-006 legacy-bus cutover) | tiger.w | before Phase Gate |
-| "Remove orchestrator-owned subscriber truth" — blocked on the KV-006 legacy-bus cutover: the orchestrator's legacy `runEvents` publish path (deltas/progress/status with self-assigned `seq`) must be replaced by target event-log production (progress events with redacted excerpts + terminal events via `appendTerminalEvent`) before the legacy bus and the web legacy SSE stream can be deleted | tiger.w | before Phase Gate |
+| "Remove closing event streams on Attempt failure" — RESOLVED slice 7.6: the legacy SSE `finish()` compensation died with the `/api/runs/:id/events` deletion; the observation subscribe route ends the stream at the terminal event | tiger.w | resolved 2026-09-20 |
+| "Remove orchestrator-owned subscriber truth" — RESOLVED slice 7.6: the orchestrator publishes typed non-terminal events (`attempt.started`, redacted `progress`, `attempt.finished`) through the target event log; the turn runner publishes `run.finished` after the RunStore commits (post-commit notification, ADR-0013). Deviation note: full `appendInTx`-inside-the-store-transaction atomicity for terminal events remains available via `completeRunWithEvent` for a future store-owned-log composition; the runner-level post-commit publish already guarantees subscribers never observe pre-commit state and satisfies the KV-006 rule (typed envelope + allocator seq) | tiger.w | resolved 2026-09-20 |
 | "Remove Web/IM successor-Run approval logic" — the bridge still creates successor Runs on approval decisions; the continuation helpers (`beginContinuationAttempt` / `applyApprovalDecision`) exist but are unwired in production. Rework is approval-flow surgery and is sequenced after the KV-006 cutover | tiger.w | before Phase Gate |
 | Superseded-ADR marking: ADR-0005 (legacy projection) stays authoritative until `migrate:qm` physically rewrites historical rows; mark superseded only after the data migration ships | tiger.w | before Phase Gate |
 
@@ -125,6 +125,7 @@ baseline (11.8 s) as a coarse regression tripwire.
 | 2026-09-20 | slice 7.3 — KV-007 resolved: registry `seenEvents` Map deleted (pass-through contract test replaces the dedup test; im-bridge duplicate-click test rewritten with layering rationale); `target.im-intake` flag + test deleted (§4 row) | tiger.w |
 | 2026-09-20 | slice 7.4 — write-path cutover: stores stamp `runSource='target'`, legacy `status='done'` write branch removed, claim/busy/waitFor semantics moved to `targetState`; `target.run-observation` flag + test deleted (§4 row); legacy-'done' assertions across store/orchestrator/runs/im-bridge/web-ui/boot/triggers/api tests rewritten to target semantics | tiger.w |
 | 2026-09-20 | slice 7.5a — KV-005 resolved: `LegacyCommandDecision` deleted; sandbox `PolicyVerdict` shaped like the typed `CommandDecision` | tiger.w |
+| 2026-09-20 | slice 7.6 — KV-006 resolved: legacy `RunEventBus` contract + memory implementation deleted; orchestrator publishes typed non-terminal events with allocator seq (progress excerpts via `redactSecrets`); turn runner publishes post-commit `run.finished`; web legacy SSE route deleted, SPA retargeted to `/observation/subscribe` (`run_observation` frames, stream ends at terminal); api `/v1` observation routes wired unconditionally; orchestrator/web-ui/portal tests rewritten against the shared in-memory event log (§3 rows resolved) | tiger.w |
 
 ## 12. Gate self-check
 

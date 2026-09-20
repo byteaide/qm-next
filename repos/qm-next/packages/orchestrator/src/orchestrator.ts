@@ -19,15 +19,12 @@ import type {
   Orchestrator,
   OrchestratorDeps,
   PendingApproval,
-  LegacyRunDeltaEvent,
-  LegacyRunEvent,
-  LegacyRunEventDraft,
-  LegacyRunProgressEvent,
   Session,
   SessionEntry,
   TurnInput,
   TurnResult,
 } from '@qm/types'
+import { redactSecrets } from '@qm/runs'
 import { createMemoryAdmissionRecordStore, runAdmissionWaterfall } from '@qm/admission'
 import type { AdmissionRecordStore } from '@qm/admission'
 import { buildStagePorts } from './admission-integration.ts'
@@ -109,13 +106,20 @@ export class OrchestratorService extends Service implements Orchestrator {
       return { status: 'refused', reason: errMessage(err) }
     }
 
-    const events = deps.runEvents && input.runId ? deps.runEvents : undefined
-    let seq = 0
-    const publish = (event: LegacyRunEventDraft): void => {
-      events?.publish({ ...event, runId: input.runId!, sessionId: session.id, seq } as LegacyRunEvent)
-      seq += 1
+    // Phase 7 / KV-006 cutover — the orchestrator produces non-terminal
+    // events only, through the typed envelope (seq allocated by the
+    // SequenceAllocator inside the bus; ADR-0001 §2.5). Terminal truth is
+    // published by the turn runner AFTER the RunStore commits, so this
+    // service owns no subscriber notification. Publications are tracked
+    // and awaited before the turn returns: observation delivery must be
+    // ordered and settled, never racing the Run's completion.
+    const events = deps.runEventLog && input.runId ? deps.runEventLog : undefined
+    const publishes: Array<Promise<unknown>> = []
+    if (events) {
+      publishes.push(
+        events.publish({ kind: 'attempt.started', runId: input.runId!, sessionId: session.id }).catch(() => undefined),
+      )
     }
-    if (events) publish({ kind: 'status', status: 'running' })
     try {
       const history = await deps.sessions.getEntries(session.id)
       const userEntry = await deps.sessions.append(lease, {
@@ -157,8 +161,17 @@ export class OrchestratorService extends Service implements Orchestrator {
         },
         ...(events
           ? {
-              onDelta: (text: string) => publish({ kind: 'delta', text } satisfies Omit<LegacyRunDeltaEvent, 'runId' | 'sessionId' | 'seq'>),
-              onProgress: (p: { toolCalls: number }) => publish({ kind: 'progress', toolCalls: p.toolCalls } satisfies Omit<LegacyRunProgressEvent, 'runId' | 'sessionId' | 'seq'>),
+              // Deltas surface as typed progress events carrying a
+              // producer-side redacted excerpt (ADR-0014 §2); the raw
+              // assistant text never enters the durable log. Failures
+              // are swallowed: observation must never break the turn.
+              onDelta: (text: string) => {
+                publishes.push(
+                  events
+                    .publish({ kind: 'progress', runId: input.runId!, sessionId: session.id, redactedExcerpt: redactSecrets(text) })
+                    .catch(() => undefined),
+                )
+              },
             }
           : {}),
       })
@@ -192,16 +205,24 @@ export class OrchestratorService extends Service implements Orchestrator {
         }
       }
       if (events) {
-        publish({ kind: 'status', status: finalResult.status })
-        events.close(input.runId!)
+        publishes.push(
+          events
+            .publish({ kind: 'attempt.finished', runId: input.runId!, sessionId: session.id, attemptState: 'succeeded' })
+            .catch(() => undefined),
+        )
       }
+      await Promise.all(publishes)
       return finalResult
     } catch (err) {
       const failed: TurnResult = { status: 'failed', sessionId: session.id, reason: errMessage(err) }
       if (events) {
-        publish({ kind: 'status', status: 'failed' })
-        events.close(input.runId!)
+        publishes.push(
+          events
+            .publish({ kind: 'attempt.finished', runId: input.runId!, sessionId: session.id, attemptState: 'failed' })
+            .catch(() => undefined),
+        )
       }
+      await Promise.all(publishes)
       return failed
     } finally {
       await deps.sessions.releaseLease(lease)

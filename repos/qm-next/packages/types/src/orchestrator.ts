@@ -11,7 +11,7 @@ import type { HarnessRegistry } from './harness.ts'
 import type { Principal, ScopeId } from './identity.ts'
 import type { ModelGateway } from './model.ts'
 import type { BudgetTracker, RateLimiter } from './ratelimit.ts'
-import type { RunEventBus } from './run-events.ts'
+import type { TargetRunEventBus } from './run-observation.ts'
 import type { RunStore } from './run.ts'
 import type { SessionStore } from './session-store.ts'
 import type { ToolContext } from './tools.ts'
@@ -40,8 +40,15 @@ export interface OrchestratorDeps {
   resolution: ResolutionService
   rateLimiter: RateLimiter
   budget?: BudgetTracker
-  /** Optional run event stream (M3): harness deltas/progress surface here. */
-  runEvents?: RunEventBus
+  /**
+   * Optional target Run event log (Phase 7 / KV-006 cutover). The
+   * orchestrator produces non-terminal attempt/progress events through
+   * the typed envelope (`seq` allocated by the SequenceAllocator inside
+   * the bus); terminal `run.finished` events are published by the turn
+   * runner AFTER the RunStore commits, so the orchestrator owns no
+   * subscriber truth (ADR-0001, ADR-0013).
+   */
+  runEventLog?: TargetRunEventBus
   /** Optional model usage recorder (P1): powers recordModelCall and admin sinks. */
   modelGateway?: ModelGateway
   /**

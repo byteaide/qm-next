@@ -2,16 +2,13 @@
  * Target Run Observation contract — implements ADR-0001 (snapshot + cursor
  * replay/live) and ADR-0014 (observation redacts secrets in depth).
  *
- * The legacy in-memory `RunEventBus` (`./run-events.ts`) keeps M3's web
- * surface running during migration; new writes must use the typed
- * envelope below. Persistence shape is the same on memory and Postgres
- * implementations; both pass the contract suite in `tests/lifecycle`.
- *
- * Note on naming: the legacy module reserves `RunEvent` / `RunEventBus` /
- * `RunEventDraft`. The target contract uses the `Target*`-prefixed names
- * below so that both can coexist in `@qm/types` during the migration
- * window. Phase 1 cuts over Run Observation and the legacy aliases in
- * `./run-events.ts` are deleted.
+ * Phase 7 (KV-006 cutover): this is the ONLY Run event contract. The
+ * legacy in-memory `RunEventBus` (`./run-events.ts`) and its aliases were
+ * deleted together with the legacy web SSE stream; every producer now
+ * publishes the typed envelope below through the durable log, with `seq`
+ * allocated by the SequenceAllocator. Persistence shape is the same on
+ * memory and Postgres implementations; both pass the contract suite in
+ * `tests/lifecycle`.
  */
 import type { EventCursor, RunSnapshot } from './run-lifecycle.ts'
 

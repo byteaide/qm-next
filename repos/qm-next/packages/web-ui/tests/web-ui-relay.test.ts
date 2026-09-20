@@ -15,7 +15,8 @@ import { createKeychain, deriveConnectorKey } from '@qm/credentials'
 import { createMemoryDirectoryStore } from '@qm/directory'
 import { createMemoryScopeMemory } from '@qm/memory'
 import { createHarnessRouter, createMockHarness, OrchestratorService } from '@qm/orchestrator'
-import { createMemoryRunEventBus, createMemoryRunStore, createMemoryMap, createMemorySessionStore } from '@qm/store'
+import { createMemoryRunStore, createMemoryMap, createMemorySessionStore } from '@qm/store'
+import { createInMemoryEventLog, createMemorySequenceAllocator } from '@qm/concurrency'
 import { createMemoryCronStore } from '@qm/triggers'
 import { createMemorySkillStore } from '@qm/skills'
 import { createTurnRunner, createApiServer, mintSignedPayload } from '@qm/api'
@@ -48,7 +49,7 @@ interface RelayRig {
 async function buildRig(overrides: Partial<WebUiDeps> = {}): Promise<RelayRig> {
   const sessions = createMemorySessionStore()
   const runs = createMemoryRunStore()
-  const runEvents = createMemoryRunEventBus()
+  const log = createInMemoryEventLog({ allocator: createMemorySequenceAllocator() })
   const mock = createMockHarness({
     script: [
       { reply: 'need a yes', pausedOnApproval: true, pendingApprovals: [{ command: 'drop-tables', reason: 'destructive' }] },
@@ -71,9 +72,9 @@ async function buildRig(overrides: Partial<WebUiDeps> = {}): Promise<RelayRig> {
     },
     resolution,
     rateLimiter: { check: async () => ({ allowed: true }) },
-    runEvents,
+    runEventLog: log.bus,
   })
-  const runner = createTurnRunner({ orchestrator, runs }, { tickMs: 5 })
+  const runner = createTurnRunner({ orchestrator, runs, runEventLog: log.bus }, { tickMs: 5 })
   runner.start()
 
   const grantLedger = createMemoryGrantLedger()
@@ -115,7 +116,7 @@ async function buildRig(overrides: Partial<WebUiDeps> = {}): Promise<RelayRig> {
       sessions,
       runs,
       resolution,
-      runEvents,
+      runObservation: log.observation,
       skills: createMemorySkillStore(),
       crons: createMemoryCronStore(),
       directory: createMemoryDirectoryStore(),

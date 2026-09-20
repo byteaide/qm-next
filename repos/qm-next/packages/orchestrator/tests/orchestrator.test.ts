@@ -24,7 +24,7 @@ import type {
   TurnResolution,
 } from '@qm/types'
 import { Context } from '@qm/cordis'
-import { createMemoryRunEventBus } from '@qm/store'
+import { createInMemoryEventLog, createMemorySequenceAllocator } from '@qm/concurrency'
 import { createHarnessRouter, createMockHarness, OrchestratorService } from '../src/index.ts'
 
 const SCOPE: ScopeId = 'org:test'
@@ -404,34 +404,41 @@ test('async queue path: enqueue, claim, handleTurn, complete', async () => {
   assert.equal(stored?.result?.reply, 'echo: hello')
 })
 
-test('run events: deltas, progress and terminal status publish for runId turns only', async () => {
-  const bus = createMemoryRunEventBus()
+test('run events: typed attempt/progress events publish for runId turns only, seq from the allocator', async () => {
+  const log = createInMemoryEventLog({ allocator: createMemorySequenceAllocator() })
   const harness = createMockHarness({ defaultReply: 'streamed', deltas: ['he', 'llo'] })
   const registry = createHarnessRouter({ defaultId: 'mock' })
   registry.register(harness)
-  const orch = boot(buildDeps({ harness: registry, runEvents: bus }))
+  const orch = boot(buildDeps({ harness: registry, runEventLog: log.bus }))
 
   const live: string[] = []
-  bus.subscribe('run-1', (event) => live.push(`${event.kind}@${event.seq}`))
+  const unsubscribe = log.bus.subscribe({ runId: 'run-1', seq: -1 }, (event) => live.push(`${event.kind}@${event.seq}`))
   const result = await orch.handleTurn(turnInput({ runId: 'run-1' }))
   assert.equal(result.status, 'ok')
+  unsubscribe()
 
-  const events = bus.replay('run-1')
+  const events = log.readAll('run-1')
   const describe = (e: (typeof events)[number]): string =>
-    e.kind === 'delta' ? `delta:${e.text}` : e.kind === 'status' ? `status:${e.status}` : `progress:${e.toolCalls}`
+    e.kind === 'progress' ? `progress:${e.redactedExcerpt}` : `${e.kind}`
+  // Phase 7 / KV-006: the orchestrator publishes non-terminal events only
+  // (attempt.started, progress with redacted excerpts); terminal truth is
+  // the runner's post-commit run.finished, not an orchestrator publish.
   assert.deepEqual(
     events.map(describe),
-    ['status:running', 'delta:he', 'delta:llo', 'status:ok'],
+    ['attempt.started', 'progress:he', 'progress:llo', 'attempt.finished'],
   )
   assert.deepEqual(live, events.map((e) => `${e.kind}@${e.seq}`))
-  for (const [index, event] of events.entries()) {
+  for (let index = 0; index < events.length; index++) {
+    const event = events[index]!
+    // Monotonic from 0 — the allocator's contract, not a self-assigned seq.
     assert.equal(event.seq, index)
     assert.equal(event.runId, 'run-1')
     assert.equal(event.sessionId, result.sessionId)
+    assert.equal(typeof event.ts, 'number')
   }
 
   await orch.handleTurn(turnInput())
-  assert.equal(bus.replay('run-1').length, 4)
+  assert.equal(log.readAll('run-1').length, 4)
 })
 
 test('tool context: the factory result rides the harness turn; null opts out', async () => {

@@ -1,24 +1,22 @@
 /**
  * The web-ui server half: the SPA's HTTP surface over the M1/M3 stores.
- * Cookie or portal-identity principal, turn/run proxy, SSE run-events off
- * the frozen RunEventBus, live skills/crons/contexts views, and per-user
- * relays into the api parity lanes for everything else (files, webhooks,
- * connectors, keychain, memory, deployments, search, user-model-auth) —
- * qm's signed core relays, in-process (13.0).
+ * Cookie or portal-identity principal, turn/run proxy, SSE run
+ * observation off the durable target event log (Phase 7 / KV-006 — the
+ * legacy RunEventBus stream is deleted), live skills/crons/contexts
+ * views, and per-user relays into the api parity lanes for everything
+ * else (files, webhooks, connectors, keychain, memory, deployments,
+ * search, user-model-auth) — qm's signed core relays, in-process (13.0).
  */
 import { randomBytes } from 'node:crypto'
 import { createFireEngine, manualFireKey, renderCronFireInput, type CronSchedule, type CronStore } from '@qm/triggers'
 import { WEBHOOK_SCHEMES } from '@qm/api'
 import type { DirectoryStore } from '@qm/directory'
 import type { SkillStore } from '@qm/skills'
-import { isTerminalTargetState } from '@qm/types'
 import type {
   Conversation,
   Orchestrator,
   ResolutionService,
   Run,
-  RunEvent,
-  RunEventBus,
   RunStore,
   SessionStore,
   TargetRunEvent,
@@ -38,7 +36,6 @@ import {
   runWire,
   sessionWire,
   skillWire,
-  type RunPollWire,
   type SkillItemWire,
 } from './wire.ts'
 
@@ -47,7 +44,8 @@ export interface WebUiDeps {
   sessions: SessionStore
   runs: RunStore
   resolution: ResolutionService
-  runEvents: RunEventBus
+  /** Run Observation port (snapshot/replay/subscribe) over the durable log. */
+  runObservation: TargetRunObservation
   skills: SkillStore
   crons: CronStore
   directory: DirectoryStore
@@ -57,8 +55,6 @@ export interface WebUiDeps {
   publicUrl?: string
   /** Identity verification + principal allow-list (qm WEB_UI hardening). */
   auth?: AuthOptions
-  /** Phase 1 slice 1.4 — Run Observation port (snapshot/replay/subscribe). */
-  runObservation?: TargetRunObservation
 }
 
 export interface WebUiServerOptions {
@@ -411,150 +407,85 @@ export function createWebUiServer(deps: WebUiDeps, opts: WebUiServerOptions): Fa
     return reply.code(409).send({ error: 'conflict', reason: 'unsupported' })
   })
 
-  app.get('/api/runs/:id/events', async (req, reply) => {
+  // Run Observation surface (Phase 7 / KV-006 cutover) — the only Run
+  // stream. Consumes `TargetRunObservation` directly in-process over the
+  // durable event log (ADR-0001 + ADR-0014 §2 + ADR-0013). The subscribe
+  // route closes the stream once a terminal event passes so browsers and
+  // inject-based clients observe a natural end-of-stream.
+  app.get('/api/runs/:id/observation/snapshot', async (req, reply) => {
     const user = authed(req)
     if (!user) return unauthorized(reply)
     const id = (req.params as { id: string }).id
     const initial = await deps.runs.get(id)
     if (!initial) return notFound(reply)
+    const snap = await deps.runObservation.snapshot(id, {
+      sessionId: initial.sessionId,
+      callerPrincipalId: user,
+      scope: 'principal',
+    })
+    if (!snap) return notFound(reply)
+    return reply.code(200).send(snap)
+  })
+
+  app.get('/api/runs/:id/observation/replay', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const id = (req.params as { id: string }).id
+    const query = req.query as Record<string, string | undefined>
+    const afterStr = query.after
+    const after = afterStr === undefined ? -1 : Number.parseInt(afterStr, 10)
+    if (!Number.isInteger(after) || after < -1) {
+      return reply.code(400).send({ error: 'bad_request', message: '`after` must be an integer >= -1' })
+    }
+    const initial = await deps.runs.get(id)
+    if (!initial) return notFound(reply)
+    const events = await deps.runObservation.replay(
+      { runId: id, seq: after },
+      { sessionId: initial.sessionId, callerPrincipalId: user, scope: 'principal' },
+    )
+    return reply.code(200).send(events)
+  })
+
+  app.get('/api/runs/:id/observation/subscribe', async (req, reply) => {
+    const user = authed(req)
+    if (!user) return unauthorized(reply)
+    const id = (req.params as { id: string }).id
+    const query = req.query as Record<string, string | undefined>
+    const afterStr = query.after
+    const after = afterStr === undefined ? -1 : Number.parseInt(afterStr, 10)
+    if (!Number.isInteger(after) || after < -1) {
+      return reply.code(400).send({ error: 'bad_request', message: '`after` must be an integer >= -1' })
+    }
+    const initial = await deps.runs.get(id)
+    if (!initial) return notFound(reply)
     reply.hijack()
     sseHead(reply)
     const raw = reply.raw
-    let acc = ''
-    let lastSeq = -1
-    let finished = false
-    let heartbeat: ReturnType<typeof setInterval> | undefined
-    const pending: RunEvent[] = []
-    const unsub = deps.runEvents.subscribe(id, (ev) => {
-      if (!finished) pending.push(ev)
-    })
+    let closed = false
     const teardown = (): void => {
-      finished = true
-      if (heartbeat) clearInterval(heartbeat)
-      unsub()
+      if (closed) return
+      closed = true
+      clearInterval(beat)
+      unsubscribe()
     }
-    const finish = async (): Promise<void> => {
-      if (finished) return
-      teardown()
-      const run = await deps.runs.get(id)
-      const wire: RunPollWire | null = run ? runWire(run) : null
-      if (raw.writableEnded) return
-      sseEvent(raw, 'done', {
-        status: wire?.status ?? null,
-        result: wire?.result ?? null,
-        partial: acc,
-        activity: [],
-        replyComplete: false,
-        startedAt: wire?.startedAt ?? null,
-        finishedAt: wire?.finishedAt ?? null,
-      })
-      raw.end()
-    }
-    const process = (ev: RunEvent): void => {
-      if (finished || ev.seq <= lastSeq) return
-      lastSeq = ev.seq
-      if (ev.kind === 'delta') {
-        acc += ev.text
-        sseEvent(raw, 'partial', { partial: acc })
-      } else if (ev.kind === 'progress') {
-        sseEvent(raw, 'alive', { at: Date.now() })
-      } else if (ev.status !== 'running') {
-        void finish()
-      }
-    }
-    for (const ev of deps.runEvents.replay(id)) process(ev)
-    for (const ev of pending.splice(0)) process(ev)
-    // Phase 7 cutover: terminal truth is `targetState` — target rows never
-    // carry the legacy `status='done'` literal.
-    if (!finished && isTerminalTargetState(initial.targetState)) await finish()
-    if (!finished) sseEvent(raw, 'alive', { at: Date.now() })
     req.raw.on('close', teardown)
-    heartbeat = setInterval(() => {
-      if (finished) return
-      sseComment(raw, 'ping')
+    const beat = setInterval(() => {
+      if (!closed) sseComment(raw, 'ping')
     }, SSE_HEARTBEAT_MS)
-    heartbeat.unref?.()
+    beat.unref?.()
+    const unsubscribe = deps.runObservation.subscribe(
+      { runId: id, seq: after },
+      { sessionId: initial.sessionId, callerPrincipalId: user, scope: 'principal' },
+      (event: TargetRunEvent) => {
+        if (closed) return
+        sseEvent(raw, 'run_observation', event)
+        if (event.kind === 'run.finished' || event.kind === 'run.cancelled') {
+          teardown()
+          raw.end()
+        }
+      },
+    )
   })
-
-  // Phase 1 slice 1.4 — Run Observation routes (mirror the API
-  // surface but consume `TargetRunObservation` directly in-process so
-  // web-ui does not need to relay through the API gateway). The
-  // browser-side runs the existing `/api/runs/:id/events` legacy
-  // stream during the migration window; the observation routes give
-  // new clients the typed envelope (ADR-0014 §2 + ADR-0013).
-  if (deps.runObservation) {
-    app.get('/api/runs/:id/observation/snapshot', async (req, reply) => {
-      const user = authed(req)
-      if (!user) return unauthorized(reply)
-      const id = (req.params as { id: string }).id
-      const initial = await deps.runs!.get(id)
-      if (!initial) return notFound(reply)
-      const snap = await deps.runObservation!.snapshot(id, {
-        sessionId: initial.sessionId,
-        callerPrincipalId: user,
-        scope: 'principal',
-      })
-      if (!snap) return notFound(reply)
-      return reply.code(200).send(snap)
-    })
-
-    app.get('/api/runs/:id/observation/replay', async (req, reply) => {
-      const user = authed(req)
-      if (!user) return unauthorized(reply)
-      const id = (req.params as { id: string }).id
-      const query = req.query as Record<string, string | undefined>
-      const afterStr = query.after
-      const after = afterStr === undefined ? -1 : Number.parseInt(afterStr, 10)
-      if (!Number.isInteger(after) || after < -1) {
-        return reply.code(400).send({ error: 'bad_request', message: '`after` must be an integer >= -1' })
-      }
-      const initial = await deps.runs!.get(id)
-      if (!initial) return notFound(reply)
-      const events = await deps.runObservation!.replay(
-        { runId: id, seq: after },
-        { sessionId: initial.sessionId, callerPrincipalId: user, scope: 'principal' },
-      )
-      return reply.code(200).send(events)
-    })
-
-    app.get('/api/runs/:id/observation/subscribe', async (req, reply) => {
-      const user = authed(req)
-      if (!user) return unauthorized(reply)
-      const id = (req.params as { id: string }).id
-      const query = req.query as Record<string, string | undefined>
-      const afterStr = query.after
-      const after = afterStr === undefined ? -1 : Number.parseInt(afterStr, 10)
-      if (!Number.isInteger(after) || after < -1) {
-        return reply.code(400).send({ error: 'bad_request', message: '`after` must be an integer >= -1' })
-      }
-      const initial = await deps.runs!.get(id)
-      if (!initial) return notFound(reply)
-      reply.hijack()
-      sseHead(reply)
-      const raw = reply.raw
-      let closed = false
-      req.raw.on('close', () => {
-        closed = true
-      })
-      const beat = setInterval(() => {
-        if (!closed) sseComment(raw, 'ping')
-      }, SSE_HEARTBEAT_MS)
-      beat.unref?.()
-      const unsubscribe = deps.runObservation!.subscribe(
-        { runId: id, seq: after },
-        { sessionId: initial.sessionId, callerPrincipalId: user, scope: 'principal' },
-        (event: TargetRunEvent) => {
-          if (closed) return
-          sseEvent(raw, 'run_observation', event)
-        },
-      )
-      req.raw.on('close', () => {
-        beat.unref?.()
-        clearInterval(beat)
-        unsubscribe()
-      })
-    })
-  }
 
   app.get('/api/sessions', async (req, reply) => {
     const user = authed(req)

@@ -75,7 +75,7 @@ export class WebUiService extends Service<WebUiConfig> {
         sessions: api.sessions,
         runs: api.runs,
         resolution: api.resolution,
-        runEvents: api.runEvents,
+        runObservation: api.runObservation,
         skills: this.skills,
         crons: this.crons,
         directory: this.directory,

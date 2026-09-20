@@ -10,7 +10,8 @@ import type { FastifyInstance } from 'fastify'
 import { Context } from '@qm/cordis'
 import { createMemoryDirectoryStore } from '@qm/directory'
 import { createHarnessRouter, createMockHarness, OrchestratorService } from '@qm/orchestrator'
-import { createMemoryRunEventBus, createMemoryRunStore, createMemorySessionStore } from '@qm/store'
+import { createMemoryRunStore, createMemorySessionStore } from '@qm/store'
+import { createInMemoryEventLog, createMemorySequenceAllocator } from '@qm/concurrency'
 import { createMemorySkillStore } from '@qm/skills'
 import { createMemoryCronStore } from '@qm/triggers'
 import type { ResolutionService, ScopeId } from '@qm/types'
@@ -33,7 +34,10 @@ interface TestRig {
 async function buildRig(): Promise<TestRig> {
   const sessions = createMemorySessionStore()
   const runs = createMemoryRunStore()
-  const runEvents = createMemoryRunEventBus()
+  // One shared durable event log: the orchestrator and the runner
+  // publish into `bus`; the web observation routes read through
+  // `observation` (Phase 7 / KV-006 cutover rig).
+  const log = createInMemoryEventLog({ allocator: createMemorySequenceAllocator() })
   const registry = createHarnessRouter({ defaultId: 'mock' })
   registry.register(createMockHarness())
   const resolution: ResolutionService = {
@@ -50,18 +54,18 @@ async function buildRig(): Promise<TestRig> {
     },
     resolution,
     rateLimiter: { check: async () => ({ allowed: true }) },
-    runEvents,
+    runEventLog: log.bus,
   })
   const skills = createMemorySkillStore()
   const crons = createMemoryCronStore()
   const directory = createMemoryDirectoryStore()
-  const runner = createTurnRunner({ orchestrator, runs }, { tickMs: 5 })
+  const runner = createTurnRunner({ orchestrator, runs, runEventLog: log.bus }, { tickMs: 5 })
   runner.start()
   const app = createWebUiServer(
-    { orchestrator, sessions, runs, resolution, runEvents, skills, crons, directory },
+    { orchestrator, sessions, runs, resolution, runObservation: log.observation, skills, crons, directory },
     { host: '127.0.0.1', port: 0, user: 'dev' },
   )
-  return { deps: { orchestrator, sessions, runs, resolution, runEvents, skills, crons, directory }, sessions, runs, skills, crons, runner, app }
+  return { deps: { orchestrator, sessions, runs, resolution, runObservation: log.observation, skills, crons, directory }, sessions, runs, skills, crons, runner, app }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -95,7 +99,7 @@ test('auth: /me gate, signin cookie, protected routes reject anonymous callers',
   }
 })
 
-test('turn flow: POST /api/turn queues, run reaches done with echo reply, SSE stream replays and finishes', async () => {
+test('turn flow: POST /api/turn queues, run reaches succeeded with echo reply, observation stream replays and finishes', async () => {
   const rig = await buildRig()
   try {
     const submitted = await rig.app.inject({
@@ -116,21 +120,43 @@ test('turn flow: POST /api/turn queues, run reaches done with echo reply, SSE st
     assert.equal(poll.result?.status, 'ok')
     assert.equal(poll.result?.reply, 'echo: hello web')
 
-    const stream = await rig.app.inject({ method: 'GET', url: `/api/runs/${runId}/events`, headers: COOKIE })
+    // Observation subscribe (KV-006): typed run_observation frames replay
+    // from the durable log; the stream ends after the terminal event.
+    const stream = await rig.app.inject({
+      method: 'GET',
+      url: `/api/runs/${runId}/observation/subscribe?after=-1`,
+      headers: COOKIE,
+    })
     assert.equal(stream.statusCode, 200)
-    assert.match(stream.body, /event: done/)
-    const doneLine = stream.body.split('\n').find((line) => line.startsWith('data: ') && line.includes('"status"'))
-    assert.ok(doneLine)
-    const done = JSON.parse(doneLine.slice('data: '.length)) as { status: string; result: { reply?: string } | null }
-    assert.equal(done.status, 'succeeded')
-    assert.equal(done.result?.reply, 'echo: hello web')
+    assert.match(stream.headers['content-type'] ?? '', /text\/event-stream/)
+    assert.match(stream.body, /event: run_observation/)
+    const frames = stream.body
+      .split('\n')
+      .filter((line) => line.startsWith('data: '))
+      .map((line) => JSON.parse(line.slice('data: '.length)) as { kind?: string; outcome?: string })
+    assert.ok(frames.some((f) => f.kind === 'attempt.started'))
+    const finished = frames.find((f) => f.kind === 'run.finished')
+    assert.ok(finished)
+    assert.equal(finished.outcome, 'succeeded')
+    // The stream closed after the terminal frame (end-of-stream contract).
+    assert.ok(stream.body.trimEnd().length > 0)
+    assert.ok(!stream.body.endsWith(': ping\n\n'))
 
-    const again = await rig.app.inject({ method: 'GET', url: `/api/runs/${runId}/events`, headers: COOKIE })
-    assert.equal(again.statusCode, 200)
-    assert.match(again.body, /event: done/)
-    assert.match(again.body, /echo: hello web/)
+    // Replay from the snapshot route stays consistent with the log.
+    const snap = await rig.app.inject({
+      method: 'GET',
+      url: `/api/runs/${runId}/observation/snapshot`,
+      headers: COOKIE,
+    })
+    assert.equal(snap.statusCode, 200)
+    const snapBody = snap.json() as { state: string; outcome?: string }
+    assert.equal(snapBody.state, 'succeeded')
 
-    const missing = await rig.app.inject({ method: 'GET', url: '/api/runs/nope/events', headers: COOKIE })
+    const missing = await rig.app.inject({
+      method: 'GET',
+      url: '/api/runs/nope/observation/subscribe',
+      headers: COOKIE,
+    })
     assert.equal(missing.statusCode, 404)
   } finally {
     await rig.runner.stop()

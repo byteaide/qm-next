@@ -5,7 +5,6 @@ export * from './turn.ts'
 export * from './session.ts'
 export * from './session-store.ts'
 export * from './run.ts'
-export * from './run-events.ts'
 export * from './run-signals.ts'
 export * from './harness.ts'
 export * from './model.ts'
@@ -14,10 +13,9 @@ export * from './sandbox.ts'
 export * from './tools.ts'
 export * from './ratelimit.ts'
 export * from './orchestrator.ts'
-// Phase 0 target contracts — see docs/implementation-plan.md §Phase 0.
-// These types compile and are referenced by ADR JSDoc; runtime behavior
-// continues to use the legacy contracts above until Phase 1+ switches
-// the write paths.
+// Target contracts — see docs/implementation-plan.md §Phase 0.
+// Phase 7 removed the last legacy contract (`run-events.ts`, the M3
+// RunEventBus); runtime behavior now rides the target contracts only.
 export * from './run-lifecycle.ts'
 export * from './run-observation.ts'
 export * from './command-gate.ts'

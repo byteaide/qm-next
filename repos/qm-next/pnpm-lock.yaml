@@ -609,10 +609,16 @@ importers:
       '@qm/model':
         specifier: workspace:^
         version: link:../model
+      '@qm/runs':
+        specifier: workspace:^
+        version: link:../runs
       '@qm/types':
         specifier: workspace:^
         version: link:../types
     devDependencies:
+      '@qm/concurrency':
+        specifier: workspace:^
+        version: link:../concurrency
       '@qm/store':
         specifier: workspace:^
         version: link:../store
@@ -638,6 +644,9 @@ importers:
         specifier: ^11.5.2
         version: 11.5.2
     devDependencies:
+      '@qm/concurrency':
+        specifier: workspace:^
+        version: link:../concurrency
       '@qm/credentials':
         specifier: workspace:^
         version: link:../credentials
@@ -897,6 +906,9 @@ importers:
       '@mariozechner/mini-lit':
         specifier: ^0.2.0
         version: 0.2.1(lit@3.3.3)
+      '@qm/concurrency':
+        specifier: workspace:^
+        version: link:../concurrency
       '@qm/credentials':
         specifier: workspace:^
         version: link:../credentials

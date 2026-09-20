@@ -16,7 +16,8 @@ import { createKeychain, deriveConnectorKey } from '@qm/credentials'
 import { createMemoryDirectoryStore } from '@qm/directory'
 import { createMemoryScopeMemory } from '@qm/memory'
 import { createHarnessRouter, createMockHarness, OrchestratorService } from '@qm/orchestrator'
-import { createMemoryRunEventBus, createMemoryRunStore, createMemoryMap, createMemorySessionStore } from '@qm/store'
+import { createMemoryRunStore, createMemoryMap, createMemorySessionStore } from '@qm/store'
+import { createInMemoryEventLog, createMemorySequenceAllocator } from '@qm/concurrency'
 import { createMemoryCronStore } from '@qm/triggers'
 import { createMemorySkillStore } from '@qm/skills'
 import { createTurnRunner, createApiServer, createMemoryAdminService } from '@qm/api'
@@ -52,7 +53,7 @@ interface Rig {
 async function buildRig(): Promise<Rig> {
   const sessions = createMemorySessionStore()
   const runs = createMemoryRunStore()
-  const runEvents = createMemoryRunEventBus()
+  const log = createInMemoryEventLog({ allocator: createMemorySequenceAllocator() })
   const registry = createHarnessRouter({ defaultId: 'mock' })
   registry.register(createMockHarness())
   const resolution: ResolutionService = {
@@ -69,9 +70,9 @@ async function buildRig(): Promise<Rig> {
     },
     resolution,
     rateLimiter: { check: async () => ({ allowed: true }) },
-    runEvents,
+    runEventLog: log.bus,
   })
-  const runner = createTurnRunner({ orchestrator, runs }, { tickMs: 5 })
+  const runner = createTurnRunner({ orchestrator, runs, runEventLog: log.bus }, { tickMs: 5 })
   runner.start()
 
   const grantLedger = createMemoryGrantLedger()
@@ -114,7 +115,7 @@ async function buildRig(): Promise<Rig> {
       sessions,
       runs,
       resolution,
-      runEvents,
+      runObservation: log.observation,
       skills: createMemorySkillStore(),
       crons: createMemoryCronStore(),
       directory: createMemoryDirectoryStore(),
@@ -186,8 +187,8 @@ test('portal SSO local bypass → portal-mode identity → proxied turn + SSE + 
     assert.equal(who.user, 'dev@example.com')
     assert.equal(who.mode, 'portal')
 
-    // A turn submitted through the portal front runs and its SSE replay
-    // streams back through the proxy.
+    // A turn submitted through the portal front streams its observation
+    // frames back through the proxy; the terminal frame closes the stream.
     const submitted = await fetch(`${portal.base}/api/turn`, {
       method: 'POST',
       headers: { cookie, 'content-type': 'application/json' },
@@ -198,12 +199,13 @@ test('portal SSO local bypass → portal-mode identity → proxied turn + SSE + 
     assert.ok(runId)
     await rig.runs.waitFor(runId, 5_000)
 
-    const events = await fetch(`${portal.base}/api/runs/${runId}/events`, { headers: { cookie } })
+    const events = await fetch(`${portal.base}/api/runs/${runId}/observation/subscribe?after=-1`, { headers: { cookie } })
     assert.equal(events.status, 200)
     assert.match(events.headers.get('content-type') ?? '', /text\/event-stream/)
     const body = await events.text()
-    assert.match(body, /event: done/)
-    assert.match(body, /echo: hello portal/)
+    assert.match(body, /event: run_observation/)
+    assert.match(body, /"kind":"run\.finished"/)
+    assert.match(body, /"outcome":"succeeded"/)
 
     // Relay lanes carry the acting principal through the signed bearer.
     const crons = await fetch(`${portal.base}/api/crons`, { headers: { cookie } })

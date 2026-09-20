@@ -82,11 +82,12 @@ import { createHarnessRouter, createMockHarness, createSandboxToolContext, Orche
 import Schema from '@qm/schemastery'
 import { createLocalSandbox } from '@qm/sandbox'
 import {
-  createMemoryRunEventBus,
+  createMemoryMap,
   createMemoryRunStore,
   createMemorySessionStore,
   createPgPool,
   createPostgresMap,
+  createPostgresRunEventLog,
   createPostgresRunStore,
   createPostgresSessionStore,
   createLocalByteStore,
@@ -94,7 +95,6 @@ import {
   type DurableByteStore,
   type PgPool,
 } from '@qm/store'
-import { createMemoryMap } from '@qm/store'
 import { reachDirectory } from '@qm/reach'
 import {
   createVaultConnectorTokenStore,
@@ -124,19 +124,20 @@ import {
 import { createAmbientCursorStore, createPostgresAckEmojiPickStore, createPostgresAgentRequestStore, createPostgresAmbientJudgmentStore } from './services/ambient-stores.ts'
 import type { ChannelPolicyStore as ApiChannelPolicyStore } from './services/channel-policy-store.ts'
 import type { CronScheduler, CronStore } from '@qm/triggers'
-import { createMemoryLeaderLease } from '@qm/concurrency'
+import { createInMemoryEventLog, createMemoryLeaderLease, createMemorySequenceAllocator } from '@qm/concurrency'
 import type {
   Harness,
   IdentityService,
   OrchestratorDeps,
   RateLimiter,
   ResolutionService,
-  RunEventBus,
   RunStore,
   Sandbox,
   SandboxHandle,
   ScopeId,
   SessionStore,
+  TargetRunEventBus,
+  TargetRunObservation,
 } from '@qm/types'
 import { createApiServer } from './server.ts'
 import { createTurnRunner } from './runner.ts'
@@ -502,8 +503,15 @@ export class ApiService extends Service<ApiConfig> {
   /** Sandbox backend when tool execution is configured; torn down on dispose. */
   sandbox?: Sandbox
 
-  /** Run event stream (deltas/progress/status); the SSE surface reads this. */
-  runEvents!: RunEventBus
+  /**
+   * Target Run event log (Phase 7 / KV-006): producers publish typed
+   * envelope events here; Run Observation readers subscribe/replay through
+   * `runObservation`. Replaces the legacy in-memory `RunEventBus`.
+   */
+  runEventLog!: TargetRunEventBus
+
+  /** Read-only Run Observation port over `runEventLog` (ADR-0001, ADR-0014). */
+  runObservation!: TargetRunObservation
 
   /**
    * Phase 7 cutover (KV-002) — Trigger boundary view (ADR-0003, plan §4.6):
@@ -630,7 +638,17 @@ export class ApiService extends Service<ApiConfig> {
     if (databaseUrl) {
       pgClosers.push(sessions as unknown as { close?(): Promise<void> }, runs as unknown as { close?(): Promise<void> })
     }
-    const runEvents = createMemoryRunEventBus()
+    // Phase 7 / KV-006 — the durable target Run event log replaces the
+    // legacy in-memory RunEventBus. Memory mode rides the in-memory log
+    // (in-process durability, contract-parity twin of the Postgres log);
+    // Postgres mode rides `run_event_log` on the shared pool (ADR-0013:
+    // state and events commit side by side; subscribers are notified
+    // only after the producing transaction commits).
+    const runEventLogComposite = databaseUrl && pg
+      ? createPostgresRunEventLog({ pool: await pg.pool() })
+      : createInMemoryEventLog({ allocator: createMemorySequenceAllocator() })
+    const runEventLog = runEventLogComposite.bus
+    const runObservation = runEventLogComposite.observation
     const modelGateway = createModelGateway()
     const customProviders = this.config.customProviders ?? []
     for (const spec of customProviders) validateCustomProviderSpec(spec)
@@ -736,7 +754,7 @@ export class ApiService extends Service<ApiConfig> {
       identity: devIdentity(),
       resolution,
       rateLimiter: allowLimiter(),
-      runEvents,
+      runEventLog,
       modelGateway,
       ...(toolFactory ? { tools: toolFactory } : {}),
     })
@@ -744,7 +762,8 @@ export class ApiService extends Service<ApiConfig> {
     this.sessions = sessions
     this.resolution = resolution
     this.orchestrator = orchestrator
-    this.runEvents = runEvents
+    this.runEventLog = runEventLog
+    this.runObservation = runObservation
     // Instance registry + deploy drain (21.0): with databaseUrl every
     // instance heartbeats into `instance_heartbeats`. Same-build instances
     // share the run queue (灰度双跑 — entry-side split is the LB's weights);
@@ -774,7 +793,7 @@ export class ApiService extends Service<ApiConfig> {
       this.drain = drain
     }
     const runner = createTurnRunner(
-      { orchestrator, runs },
+      { orchestrator, runs, runEventLog },
       {
         workerId: instanceId,
         ...(this.config.tickMs !== undefined ? { tickMs: this.config.tickMs } : {}),
@@ -1077,6 +1096,9 @@ export class ApiService extends Service<ApiConfig> {
         runs,
         resolution,
         ...(monitoring ? { monitoring } : {}),
+        // Phase 7 / KV-006 — the Run Observation parity surface is always
+        // wired now that the durable log is the only event producer.
+        runsObservation: { runs, observation: runObservation },
         // Parity surface (11.0): sessions/conversations ride the session
         // store every deployment already has.
         surface: {
