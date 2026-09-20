@@ -41,3 +41,14 @@ export {
   encryptSecret,
   type SecretKey,
 } from './secret-envelope.ts'
+export {
+  createConnectorTokenVault,
+  deriveConnectorTokenKeks,
+  CONNECTOR_ACCOUNT_TYPES,
+  type ConnectorAccountType,
+  type ConnectorKek,
+  type ConnectorTokenVault,
+  type OpenedConnectorToken,
+  type SealedConnectorToken,
+  type TokenAuditEntry,
+} from './token-vault.ts'

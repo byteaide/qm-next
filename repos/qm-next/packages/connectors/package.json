@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@qm/processes": "workspace:^",
+    "@qm/runs": "workspace:^",
     "@qm/sandbox": "workspace:^",
     "@qm/store": "workspace:^",
     "@qm/types": "workspace:^"

@@ -140,6 +140,10 @@ export const RUN_METRICS = {
   IM_SUBSCRIBER_LAG: 'im_subscriber_lag',
   IM_SUBSCRIBER_RETRY_TOTAL: 'im_subscriber_retry_total',
   IM_SUBSCRIBER_DEAD_LETTER_TOTAL: 'im_subscriber_dead_letter_total',
+  // Phase 6 — Connector OAuth lifecycle (plan §6.5, ADR-0009/0016/0017).
+  OAUTH_FLOW_TOTAL: 'oauth_flow_total',
+  OAUTH_TOKEN_DECRYPT_TOTAL: 'oauth_token_decrypt_total',
+  OAUTH_REDACTION_HIT_TOTAL: 'oauth_redaction_hit_total',
 } as const
 
 /**
@@ -316,6 +320,39 @@ export function setImSubscriberLag(
 ): void {
   const target = metrics ?? defaultRegistry
   target.set(RUN_METRICS.IM_SUBSCRIBER_LAG, lag, { subscriber })
+}
+
+/**
+ * Phase 6 §6.5 observability — Connector OAuth lifecycle
+ * (ADR-0009, ADR-0016, ADR-0017). `bumpOAuthFlow` ticks per flow step
+ * (`start`, `callback`, `complete`) with `ok`/`fail`;
+ * `bumpOAuthTokenDecrypt` ticks every vault decrypt per provider
+ * (`ok`/`error` — any `error` pages on-call per plan §6.5);
+ * `bumpOAuthRedactionHit` ticks when a token-shaped string is caught
+ * at a log/observation boundary (distinct from the generic
+ * `redaction_hit_total` so an OAuth incident is unambiguous).
+ */
+export function bumpOAuthFlow(
+  metrics: RunMetricsRegistry | undefined,
+  step: 'start' | 'callback' | 'complete',
+  outcome: 'ok' | 'fail',
+): void {
+  const target = metrics ?? defaultRegistry
+  target.inc(RUN_METRICS.OAUTH_FLOW_TOTAL, { step, outcome })
+}
+
+export function bumpOAuthTokenDecrypt(
+  metrics: RunMetricsRegistry | undefined,
+  provider: string,
+  outcome: 'ok' | 'error',
+): void {
+  const target = metrics ?? defaultRegistry
+  target.inc(RUN_METRICS.OAUTH_TOKEN_DECRYPT_TOTAL, { provider, outcome })
+}
+
+export function bumpOAuthRedactionHit(metrics: RunMetricsRegistry | undefined, boundary: 'log' | 'observation' = 'log'): void {
+  const target = metrics ?? defaultRegistry
+  target.inc(RUN_METRICS.OAUTH_REDACTION_HIT_TOTAL, { boundary })
 }
 
 /**
