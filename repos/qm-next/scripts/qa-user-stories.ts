@@ -180,10 +180,12 @@ const mockScreener: SecurityScreener = {
 // in qa-smoke-wave2 — `ctx.api` is the Service instance, not the Fiber).
 ctx.api.screener = mockScreener
 
-// Phase 3I: inject cronsRuntime so /v1/crons is reachable for U18.2.
+// Phase 3I: inject the trigger runtime so /v1/crons is reachable for U18.2.
 // (Parity with qa-smoke-wave2 §S40 — TriggersService requires im-bridge
 // which is too heavy for a user-stories boot, so we wire the routes
-// directly with a memory cron store + scheduler.)
+// directly with a memory cron store + scheduler.) Phase 7 / KV-002: the
+// api reads the runtime lazily from the Cordis registry
+// (`ctx.reflect.get('triggers')`), so the rig provides it there.
 const cronsStore = triggersMod.createMemoryCronStore()
 const cronsScheduler = triggersMod.createCronScheduler({
   crons: cronsStore,
@@ -191,7 +193,7 @@ const cronsScheduler = triggersMod.createCronScheduler({
   runs: ctx.api.runs,
   resolution: ctx.api.resolution,
 })
-ctx.api.cronsRuntime = { crons: cronsStore, scheduler: cronsScheduler }
+ctx.provide('triggers', { crons: cronsStore, scheduler: cronsScheduler })
 
 async function req(
   method: string,

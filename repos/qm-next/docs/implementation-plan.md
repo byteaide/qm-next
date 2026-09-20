@@ -1,6 +1,6 @@
 # Architecture Implementation Plan
 
-Status: **Phases 0–6 complete — Phase 7 in progress — 2026-09-20**  
+Status: **Phases 0–7 complete — 2026-09-20** (Phase 7 cleanup landed; one item resolved by owner waiver: the ADR-0010 approval continuation executor is deferred to a dedicated slice, gap documented in `docs/architecture.md` §7. Release blockers in §5 remain release-PR evidence.)  
 Scope: implementation of the target model recorded in `docs/adr/0001`–`docs/adr/0017` and summarized by `docs/architecture.md`.
 
 This plan deliberately separates behavior changes into phases. A phase is complete only when its phase gate passes in both memory and Postgres modes. Do not begin the next phase while a required gate is red.
@@ -788,7 +788,7 @@ Remove obsolete paths and make the target model the only production model.
 - [x] Remove closing event streams on Attempt failure. (slice 7.6 — the legacy SSE `finish()` compensation path died with the `/api/runs/:id/events` deletion; the observation subscribe route ends the stream at the terminal event, so an Attempt failure closes its stream naturally.)
 - [x] Remove orchestrator-owned subscriber truth. (slice 7.6 — KV-006: the orchestrator publishes typed non-terminal events only (`attempt.started` / redacted `progress` / `attempt.finished`) through the target event log with allocator-assigned `seq`; the turn runner publishes `run.finished` after the RunStore commits; the legacy bus and the orchestrator's stream close are deleted.)
 - [x] Remove Web polling/replay compensation that duplicates Run Observation. (slice 7.6 — the web legacy SSE route and its `runEvents.replay` compensation are deleted; the SPA consumes `/api/runs/:id/observation/subscribe` typed `run_observation` frames, with one final poll for the run wire at the terminal event.)
-- [ ] Remove Web/IM successor-Run approval logic. (open — the bridge still creates successor Runs on approval decisions; the continuation helpers exist unused)
+- [x] Remove Web/IM successor-Run approval logic. (**resolved by owner decision A, 2026-09-20 — waived from Phase 7 and deferred to a dedicated ADR-0010 continuation-executor slice.** Scope finding: the runtime never enters suspend/resume states — `pending_approval` completes as `succeeded` and decision paths re-drive via a follow-up turn (new Run); the store primitives and decision glue exist but no executor backs them. The gap is documented in `docs/architecture.md` §7; the checklist discipline (decision surfaces submit decisions only) remains the acceptance target of the deferred slice.)
 - [x] Remove `api.cronsRuntime` compatibility fields. (slice 7.2 — `wire-cron-runtime.ts` deleted; cron/scheduler/deliveries read lazily from the Cordis registry; zero-hit architecture test)
 - [x] Remove API route-local OAuth pending state. (resolved in Phase 6 — KV-003)
 - [x] Remove process-local IM dedup as the authoritative mechanism. (slice 7.3 — `seenEvents` Map deleted; durable Intake Inbox accept is the sole authority and unconditional)
@@ -803,6 +803,21 @@ Additional gate-repair slices completed on this branch (recorded in the TIA chan
 - slice 7.1 — repo-wide `pnpm typecheck` repair to green (debt recorded at `16c9370`).
 - slice 7.5a — KV-005: sandbox policy onto the typed `CommandDecision` shape (`LegacyCommandDecision` deleted).
 - slice 7.6 — KV-006: legacy RunEventBus + web legacy SSE deleted; target event log is the only Run event producer; web SPA on the observation subscribe stream.
+
+### Deferred to a dedicated slice (owner decision A, 2026-09-20)
+
+**ADR-0010 completion — approval continuation executor.** Scope: a
+`suspendForApproval` RunStore transition (`awaiting_approval` + executor-lease
+release + durable Approval Continuation), a claimable continuation lane in the
+turn runner, `TurnInput.approval` forwarded into `harness.turns.runTurn`, an
+observation/wire/client representation of the awaiting state, and decision
+surfaces (Web/IM) re-routed through `applyApprovalDecision` so no successor Run
+is created. Existing assets: `beginContinuationAttempt` / `failFromApproval`
+(store), `applyApprovalDecision` (glue), Session Continuation Reservation +
+release-order enforcement (slice 2.6). Acceptance: the Phase 2 resume tests —
+"approval resumes the saved command point, not a blind replay", "no successor
+Run is created", "restart between approval and resume still resumes exactly
+once".
 
 ### Phase gate
 

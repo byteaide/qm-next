@@ -20,7 +20,7 @@
  *
  * Phase 3G note (2026-09-19):
  *   S42 三个 SKIP（memory/skill/cron pg twin）已闭合。
- *   memoryStore / skillStore 注入口在 `packages/api/src/service.ts` 公开（对齐 cronsRuntime）；
+ *   memoryStore / skillStore 注入口在 `packages/api/src/service.ts` 公开；
  *   wave2 在 pg-backed ApiService 启动后注入 PG 双胞胎。
  *   cron store 改为 `createPostgresCronStore(pgUrl)` 而非 in-memory（pg 容器已可用）。
  */
@@ -127,10 +127,12 @@ async function req(
   return { status: res.status, body: parsed }
 }
 
-// Inject cronsRuntime (TriggersService requires im-bridge; not feasible in test.
+// Inject the trigger runtime (TriggersService requires im-bridge; not feasible in test.
 // We directly inject a memory cron store + scheduler using the ApiService's
 // own sessions/runs/resolution — the cron routes are fully real, only the
 // runtime is test-injected, same pattern as mock harness in qa-smoke S3.6.)
+// Phase 7 / KV-002: the api reads the runtime lazily from the Cordis
+// registry (`ctx.reflect.get('triggers')`), so the rig provides it there.
 const crons = createMemoryCronStore()
 const scheduler = createCronScheduler({
   crons,
@@ -138,7 +140,7 @@ const scheduler = createCronScheduler({
   runs: ctx.api.runs,
   resolution: ctx.api.resolution,
 })
-ctx.api.cronsRuntime = { crons, scheduler }
+ctx.provide('triggers', { crons, scheduler })
 
 // ════════════════════════════════════════════════════════════════════════
 // S40. Triggers real trigger (3 cases)
@@ -290,7 +292,7 @@ try {
   const pgToken = await mintSignedPayload({ p: 'qa-smoke' }, SECRET)
   const pgAuthHeaders = { authorization: `Bearer ${pgToken}`, 'content-type': 'application/json' }
 
-  // Inject cronsRuntime + memoryStore + skillStore for pg instance.
+  // Inject trigger runtime + memoryStore + skillStore for pg instance.
   // Phase 3G: 三个 SKIP 闭合 — 用 PG 双胞胎替换默认 in-memory 工厂。
   const pgCrons = createPostgresCronStore(pgUrl)
   const pgScheduler = createCronScheduler({
@@ -299,7 +301,7 @@ try {
     runs: pgCtx.api.runs,
     resolution: pgCtx.api.resolution,
   })
-  pgCtx.api.cronsRuntime = { crons: pgCrons, scheduler: pgScheduler }
+  pgCtx.provide('triggers', { crons: pgCrons, scheduler: pgScheduler })
   pgCtx.api.memoryStore = createPostgresScopeMemory(pgUrl)
   pgCtx.api.skillStore = createPostgresSkillStore(pgUrl)
 
