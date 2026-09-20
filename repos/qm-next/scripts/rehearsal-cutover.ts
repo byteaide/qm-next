@@ -25,7 +25,10 @@ import { fileURLToPath } from 'node:url'
 // types by relative source path (vendor sources are a separate project).
 import { ApiService, Context, Service } from '@qm/api'
 import { createPgPool, type PgPool } from '../packages/store/src/pg-pool.ts'
-import type { Run, RunStore } from '../packages/types/src/run.ts'
+// Phase 7 cutover: target rows complete via `target_state` (the legacy
+// `status='done'` write branch is gone), so terminality is judged with the
+// target-state helper from the same contracts module.
+import { isTerminalTargetState, type Run, type RunStore } from '../packages/types/src/run.ts'
 import type { TurnInput } from '../packages/types/src/turn.ts'
 
 const pgUrl = process.env.QM_CUTOVER_PG_URL
@@ -93,7 +96,7 @@ async function waitAllComplete(runs: RunStore, ids: string[], label: string, tim
     async () => {
       out.length = 0
       for (const id of ids) out.push((await runs.get(id))!)
-      return out.every((run) => run.status === 'done')
+      return out.every((run) => isTerminalTargetState(run.targetState))
     },
     timeoutMs,
   )
@@ -282,7 +285,7 @@ async function main(): Promise<number> {
     const stalledDone = await waitRun(
       keeper.svc.runs,
       stallRun[0]!,
-      (run) => run.status === 'done',
+      (run) => isTerminalTargetState(run.targetState),
       'stalled run taken over after lease expiry',
     )
     assert.equal(stalledDone.attempts, 2, 'the takeover is a second attempt')
@@ -302,10 +305,19 @@ async function main(): Promise<number> {
     pass('two child processes share the queue without sticky routing (both registered, 20/20 attempts=1)')
 
     // ---- exact-once ledger across the whole rehearsal ----
-    const all = await pg.q(`SELECT status, attempts FROM runs WHERE session_id LIKE 'sess-cutover-%'`)
-    const failed = all.filter((row) => row.status === 'failed')
-    const stuck = all.filter((row) => row.status === 'pending' || row.status === 'running')
-    const doubleDone = all.filter((row) => row.status === 'done' && Number(row.attempts) > 2)
+    // Target-written rows keep the legacy `status` column untouched and
+    // complete through `target_state`, so the ledger reads both columns.
+    const all = await pg.q(`SELECT status, target_state, attempts FROM runs WHERE session_id LIKE 'sess-cutover-%'`)
+    const legacyTerminal = ['done', 'failed', 'cancelled']
+    const targetTerminal = ['succeeded', 'failed', 'cancelled']
+    const failed = all.filter((row) => row.status === 'failed' || row.target_state === 'failed')
+    const stuck = all.filter(
+      (row) => !legacyTerminal.includes(String(row.status)) && !targetTerminal.includes(String(row.target_state)),
+    )
+    const doubleDone = all.filter(
+      (row) =>
+        (row.status === 'done' || targetTerminal.includes(String(row.target_state))) && Number(row.attempts) > 2,
+    )
     assert.deepEqual([...failed, ...stuck, ...doubleDone], [], 'ledger: zero failed, zero stuck, zero triple-claimed')
     pass(`ledger clean: ${all.length} runs, every run done with attempts ≤ 2`)
   } catch (err) {
