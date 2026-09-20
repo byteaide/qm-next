@@ -28,7 +28,8 @@ import { createMemoryTargetApprovalStore } from '@qm/approvals'
 import { createHarnessRouter, createMockHarness, OrchestratorService, type MockHarness } from '@qm/orchestrator'
 import { applyApprovalDecision, type ApprovalContinuationDeps } from '@qm/runs'
 import { createMemoryRunStore, createMemorySessionStore } from '@qm/store'
-import type { ResolutionService, Run, RunStore, ScopeId, SessionReservationStore, TargetRunEvent, TargetRunEventBus, TurnResult } from '@qm/types'
+import type { ResolutionService, Run, RunStore, ScopeId, SessionReservationStore, TargetRunEvent } from '@qm/types'
+import type { MockTurnStep } from '@qm/orchestrator'
 import { createTurnRunner, type TurnRunner } from '../src/index.ts'
 
 const SCOPE: ScopeId = 'org:default'
@@ -45,7 +46,7 @@ interface ExecutorRig {
   spawnRunner(workerId: string): TurnRunner
 }
 
-async function buildRig(script: Parameters<typeof createMockHarness>[0]['script']): Promise<ExecutorRig> {
+async function buildRig(script: MockTurnStep[] = []): Promise<ExecutorRig> {
   const sessions = createMemorySessionStore()
   const runs = createMemoryRunStore()
   const log = createInMemoryEventLog({ allocator: createMemorySequenceAllocator() })
