@@ -16,6 +16,10 @@ export interface ConsentLinkRecord {
   accountType: AccountType
   redirectUri: string
   returnTo?: string
+  /** Phase 6 (ADR-0009): provider host + OAuth state born at mint so
+   *  redeem can attach the issued code to the durable flow. */
+  host?: string
+  state?: string
   createdAt: number
 }
 
@@ -25,6 +29,10 @@ export interface ConsentLinkStore {
   mint(rec: Omit<ConsentLinkRecord, 'createdAt'>, now?: number): Promise<{ linkId: string }>
   peek(linkId: string, now?: number): Promise<ConsentRedeemResult>
   redeem(linkId: string, now?: number): Promise<ConsentRedeemResult>
+  /** Phase 6 (ADR-0009): attach the OAuth state born at mint so a
+   *  redeem — possibly on another instance — can attach the issued
+   *  code to the durable flow. */
+  attachState(linkId: string, state: string): Promise<boolean>
 }
 
 const CONSENT_LINK_TTL_MS = 24 * 60 * 60_000
@@ -52,6 +60,11 @@ export function createConsentLinkStore(
       if (!rec) return { ok: false, reason: 'not_found' }
       if ((now ?? clock()) - rec.createdAt > ttl) return { ok: false, reason: 'expired' }
       return { ok: true, rec }
+    },
+    async attachState(linkId, state) {
+      if (!backing.update) return false
+      const next = await backing.update(linkId, (rec) => ({ ...rec, state }))
+      return next != null
     },
   }
 }

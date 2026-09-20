@@ -52,3 +52,14 @@ export {
   type SealedConnectorToken,
   type TokenAuditEntry,
 } from './token-vault.ts'
+export {
+  createConnectorOAuthService,
+  defaultMockExchanger,
+  defaultTokenExchanger,
+  type CallbackOutcome,
+  type ConnectorOAuthService,
+  type ConnectorOAuthServiceOptions,
+  type OAuthProviderSpec,
+  type TokenExchangeResult,
+  type TokenExchanger,
+} from './oauth-flow-service.ts'

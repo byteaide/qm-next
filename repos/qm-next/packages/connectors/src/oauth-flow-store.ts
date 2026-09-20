@@ -21,6 +21,12 @@ export interface OAuthFlow {
   scopes?: readonly string[]
   audienceScopeId?: string
   returnTo?: string
+  /** Phase 6 (ADR-0009): consent link this flow was minted for. */
+  linkId?: string
+  /** Phase 6: mock/consent-issued authorization code (redeemConsent). */
+  code?: string
+  /** Phase 6: provider host cached on the flow for exchange + sealing. */
+  host?: string
   issuedAt: number
   nonce: string
 }
@@ -28,6 +34,10 @@ export interface OAuthFlow {
 export interface OAuthFlowStore {
   start(state: Omit<OAuthFlow, 'issuedAt' | 'nonce'>, now?: number): Promise<string>
   finish(flowId: string, now?: number): Promise<OAuthFlow | null>
+  /** Phase 6: non-destructive read (TTL-aware) for restart-safe checks. */
+  peek(flowId: string, now?: number): Promise<OAuthFlow | null>
+  /** Phase 6: attach the issued authorization code to a pending flow. */
+  attachCode(flowId: string, code: string): Promise<boolean>
 }
 
 const OAUTH_FLOW_TTL_MS = 10 * 60_000
@@ -49,6 +59,17 @@ export function createOAuthFlowStore(
       if (!rec) return null
       if ((now ?? clock()) - rec.issuedAt > ttl) return null
       return rec
+    },
+    async peek(flowId, now) {
+      const rec = await backing.get(flowId).catch(() => null)
+      if (!rec) return null
+      if ((now ?? clock()) - rec.issuedAt > ttl) return null
+      return rec
+    },
+    async attachCode(flowId, code) {
+      if (!backing.update) return false
+      const next = await backing.update(flowId, (rec) => ({ ...rec, code }))
+      return next != null
     },
   }
 }
