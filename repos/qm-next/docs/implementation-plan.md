@@ -1,9 +1,11 @@
 # Architecture Implementation Plan
 
-Status: **Phases 0–4 complete — 2026-09-20**  
-Scope: implementation of the target model recorded in `docs/adr/0001`–`docs/adr/0016` and summarized by `docs/architecture.md`.
+Status: **Phases 0–6 complete — Phase 7 in progress — 2026-09-20**  
+Scope: implementation of the target model recorded in `docs/adr/0001`–`docs/adr/0017` and summarized by `docs/architecture.md`.
 
 This plan deliberately separates behavior changes into phases. A phase is complete only when its phase gate passes in both memory and Postgres modes. Do not begin the next phase while a required gate is red.
+
+Phase 5 merged at `453ca26`. Phase 6 (Connector OAuth + ADR-0017 token vault) landed as slices 6.1–6.7 directly on `main` (through `6b70c85`). Phase 7 opened on `chore/architecture-cutover` with the test impact assessment at `docs/test-impact/phase-7.md`; slice progress is recorded in that file's changelog and in the Phase 7 checklist below.
 
 ## 0. Ground rules
 
@@ -782,19 +784,24 @@ Remove obsolete paths and make the target model the only production model.
 
 ### Cleanup checklist
 
-- [ ] Remove legacy Run terminal `done` writes.
-- [ ] Remove closing event streams on Attempt failure.
-- [ ] Remove orchestrator-owned subscriber truth.
-- [ ] Remove Web polling/replay compensation that duplicates Run Observation.
-- [ ] Remove Web/IM successor-Run approval logic.
-- [ ] Remove `api.cronsRuntime` compatibility fields.
-- [ ] Remove API route-local OAuth pending state.
-- [ ] Remove process-local IM dedup as the authoritative mechanism.
-- [ ] Remove temporary rollout flags after their cutover gate passes.
-- [ ] Update `docs/architecture.md` from “current vs target” to current target behavior.
+- [x] Remove legacy Run terminal `done` writes. (slice 7.4 — stores stamp `runSource='target'` unconditionally; the `status='done'` write branch is deleted. Historical rows keep reading through the Phase 1 projection until the data migration rewrites them physically.)
+- [ ] Remove closing event streams on Attempt failure. (verify remaining site — see TIA §10)
+- [ ] Remove orchestrator-owned subscriber truth. (open — blocked on the KV-006 legacy-bus cutover below)
+- [ ] Remove Web polling/replay compensation that duplicates Run Observation. (open — the web legacy SSE `/api/runs/:id/events` still consumes the legacy bus; requires a target-log progress producer and the client retarget to `/observation/subscribe`)
+- [ ] Remove Web/IM successor-Run approval logic. (open — the bridge still creates successor Runs on approval decisions; the continuation helpers exist unused)
+- [x] Remove `api.cronsRuntime` compatibility fields. (slice 7.2 — `wire-cron-runtime.ts` deleted; cron/scheduler/deliveries read lazily from the Cordis registry; zero-hit architecture test)
+- [x] Remove API route-local OAuth pending state. (resolved in Phase 6 — KV-003)
+- [x] Remove process-local IM dedup as the authoritative mechanism. (slice 7.3 — `seenEvents` Map deleted; durable Intake Inbox accept is the sole authority and unconditional)
+- [x] Remove temporary rollout flags after their cutover gate passes. (slices 7.3/7.4 — `target.im-intake` and `target.run-observation` deleted from the RolloutFlag port surface; the registry itself remains for future flags)
+- [ ] Update `docs/architecture.md` from “current vs target” to current target behavior. (deferred until the KV-006 cutover lands, so the doc does not describe a state that does not exist yet)
 - [ ] Mark superseded ADRs only if applicable.
-- [ ] Verify `done` is **physically absent** on target paths: `rg "term:\s*['\"]done['\"]" packages/` returns zero hits in target runtime code (legacy compatibility shims under `legacy/` are excluded by their location; the grep is in `pnpm test:architecture`).
-- [ ] Verify every rollout flag registered in Phase 0 has a removal PR linked or is removed.
+- [x] Verify `done` is **physically absent** on target paths: `rg "term:\s*['\"]done['\"]" packages/` returns zero hits in target runtime code (legacy compatibility shims under `legacy/` are excluded by their location; the grep is in `pnpm test:architecture`).
+- [x] Verify every rollout flag registered in Phase 0 has a removal PR linked or is removed. (both registered flags are removed on this branch; the TIA §4 records the deleted flag tests)
+
+Additional gate-repair slices completed on this branch (recorded in the TIA changelog):
+
+- slice 7.1 — repo-wide `pnpm typecheck` repair to green (debt recorded at `16c9370`).
+- slice 7.5a — KV-005: sandbox policy onto the typed `CommandDecision` shape (`LegacyCommandDecision` deleted).
 
 ### Phase gate
 

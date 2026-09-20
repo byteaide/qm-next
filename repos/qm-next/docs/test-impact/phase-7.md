@@ -110,16 +110,21 @@ baseline (11.8 s) as a coarse regression tripwire.
 
 | Question | Owner | Due |
 |---|---|---|
-| "Remove closing event streams on Attempt failure" — verify whether any attempt-failure stream-close site remains post-Phase-1, or the item is already satisfied | tiger.w | before Phase Gate |
-| "Remove orchestrator-owned subscriber truth" — confirm orchestrator has no residual subscriber registry after Phase 1 slice 1.4; if none, record as already-satisfied with evidence | tiger.w | before Phase Gate |
-| "Remove Web/IM successor-Run approval logic" — grep-verify no successor-Run creation sites remain post-Phase-2; if none, record as already-satisfied | tiger.w | before Phase Gate |
-| Superseded-ADR marking: decide whether ADR-0005 (legacy projection) should be marked superseded once the legacy union is deleted | tiger.w | before Phase Gate |
+| "Remove closing event streams on Attempt failure" — verify whether any attempt-failure stream-close site remains post-Phase-1; candidate: legacy SSE `finish()` path in web-ui server (dies with the KV-006 legacy-bus cutover) | tiger.w | before Phase Gate |
+| "Remove orchestrator-owned subscriber truth" — blocked on the KV-006 legacy-bus cutover: the orchestrator's legacy `runEvents` publish path (deltas/progress/status with self-assigned `seq`) must be replaced by target event-log production (progress events with redacted excerpts + terminal events via `appendTerminalEvent`) before the legacy bus and the web legacy SSE stream can be deleted | tiger.w | before Phase Gate |
+| "Remove Web/IM successor-Run approval logic" — the bridge still creates successor Runs on approval decisions; the continuation helpers (`beginContinuationAttempt` / `applyApprovalDecision`) exist but are unwired in production. Rework is approval-flow surgery and is sequenced after the KV-006 cutover | tiger.w | before Phase Gate |
+| Superseded-ADR marking: ADR-0005 (legacy projection) stays authoritative until `migrate:qm` physically rewrites historical rows; mark superseded only after the data migration ships | tiger.w | before Phase Gate |
 
 ## 11. Changelog
 
 | Date | Change | Author |
 |---|---|---|
 | 2026-09-20 | Initial submission | tiger.w |
+| 2026-09-20 | slice 7.1 — repo-wide `pnpm typecheck` repair to green (~90 errors fixed against the target contracts; gate debt recorded at `16c9370`) | tiger.w |
+| 2026-09-20 | slice 7.2 — KV-002 resolved: `wire-cron-runtime.ts` + `api.cronsRuntime` deleted; triggers architecture test now asserts zero `cronsRuntime` hits | tiger.w |
+| 2026-09-20 | slice 7.3 — KV-007 resolved: registry `seenEvents` Map deleted (pass-through contract test replaces the dedup test; im-bridge duplicate-click test rewritten with layering rationale); `target.im-intake` flag + test deleted (§4 row) | tiger.w |
+| 2026-09-20 | slice 7.4 — write-path cutover: stores stamp `runSource='target'`, legacy `status='done'` write branch removed, claim/busy/waitFor semantics moved to `targetState`; `target.run-observation` flag + test deleted (§4 row); legacy-'done' assertions across store/orchestrator/runs/im-bridge/web-ui/boot/triggers/api tests rewritten to target semantics | tiger.w |
+| 2026-09-20 | slice 7.5a — KV-005 resolved: `LegacyCommandDecision` deleted; sandbox `PolicyVerdict` shaped like the typed `CommandDecision` | tiger.w |
 
 ## 12. Gate self-check
 

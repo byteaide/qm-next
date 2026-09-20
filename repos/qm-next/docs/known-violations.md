@@ -29,38 +29,6 @@ These are the legacy paths the 2026-09-19 architecture review recorded.
 They are still present; the architecture gate acknowledges them.
 
 ```yaml
-- id: KV-001
-  rule: legacy `done` writes on target Run paths
-  phase: 1
-  location:
-    - packages/types/src/run.ts
-    - packages/store/src/memory-run-store.ts
-    - packages/store/src/postgres-run-store.ts
-    - packages/web-ui/src/server.ts
-    - packages/orchestrator/tests/orchestrator.test.ts
-    - packages/runs/tests/runs.test.ts
-    - packages/store/tests/stores.test.ts
-    - packages/boot/tests/profile.test.ts
-    - packages/web-ui/tests/web-ui.test.ts
-    - packages/web-ui/tests/web-ui-relay.test.ts
-    - packages/api/tests/api.test.ts
-    - packages/api/src/routes/admin-routes.ts
-    - packages/im-bridge/tests/im-bridge.test.ts
-    - packages/triggers/tests/triggers.test.ts
-    - packages/triggers/tests/triggers-service.test.ts
-    - packages/admin/tests/admin.test.ts
-  notes: RunStatus union still carries 'done' as the legacy terminal
-    state. Runtime writes and type references are acknowledged here;
-    Phase 1 freezes the target state machine (`succeeded`/`failed`/
-    `cancelled`) and rejects `done` on target write paths. Tests that
-    assert `status === 'done'` are updated in Phase 1 alongside the
-    runtime migration.
-
-  Note: `packages/api/src/services/surface-context-queue.ts` and
-  `packages/api/src/routes/context-routes.ts` carry `status: 'done'`
-  strings but those are an unrelated `SurfaceContextResult` enum,
-  not `RunStatus`. They are not in scope for KV-001.
-
 - id: KV-004
   rule: IM platform symbols in im-core
   phase: 0  # enforced by the gate already; this entry exists so the
@@ -128,6 +96,21 @@ hits remain in the tree.
     write. Routes are HTTP adapters: validate, normalize, invoke,
     redact. The architecture gate's `new Map<string, OAuthFlow>` grep
     asserts zero hits in production runtime code.
+
+- id: KV-001
+  rule: legacy `done` writes on target Run paths
+  phase: 7 (resolved — chore/architecture-cutover, slice 7.4)
+  resolution: the run stores stamp every fresh row `runSource='target'`
+    and the legacy `status='done'` write branch in `complete()` is
+    deleted — terminal truth lives exclusively in `targetState`
+    (ADR-0001). The web wire and admin metrics project the target state;
+    claim/busy/waitFor semantics consult `targetState`. The
+    `term:\s*'done'` grep gate stays at zero hits, and the
+    `SurfaceContextResult` enum strings in
+    `surface-context-queue.ts` / `context-routes.ts` remain out of scope
+    (unrelated type). Historical physical rows with `status='done'` keep
+    reading through the Phase 1 projection until `migrate:qm` rewrites
+    them.
 
 - id: KV-005
   rule: command policy results collapsed into exit codes
