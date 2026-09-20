@@ -52,7 +52,7 @@ test('redactAdmissionStageReason: redaction applied', () => {
 })
 
 test('redactAdmissionReason: redaction applied', () => {
-  const out = redactAdmissionReason('password=abc123passwordVALUE')
+  const out = redactAdmissionReason('password=abc123passwordValue123')
   assert.ok(out?.includes('[redacted-credential]'))
 })
 

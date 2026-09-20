@@ -88,7 +88,18 @@ export function createMemoryShadowRecordStore(
     async evict(nowValue) {
       const cutoff = nowValue - retentionMs
       let evicted = 0
+      // Keep-newest guarantee: the reviewable sample store never evicts
+      // its most recent record, so a retention sweep cannot empty it.
+      let newestKey: string | undefined
+      let newestTs = Number.NEGATIVE_INFINITY
       for (const [key, value] of records) {
+        if (value.ts > newestTs) {
+          newestTs = value.ts
+          newestKey = key
+        }
+      }
+      for (const [key, value] of records) {
+        if (key === newestKey) continue
         if (value.ts < cutoff) {
           records.delete(key)
           evicted += 1

@@ -107,7 +107,7 @@ if (retry && errorAttemptsAfter < run.maxAttempts && !overClaimed) {
         `UPDATE runs SET status='pending', target_state='queued', failure_reason=NULL,
            lease_token=NULL, lease_expires_at=NULL, worker_id=NULL,
            error_attempts=error_attempts+$4
-         WHERE id=$1 AND lease_token=[redacted-credential] AND status='running' AND ($3::bigint IS NULL OR lease_expires_at <= $3)`,
+         WHERE id=$1 AND lease_token=$2 AND status='running' AND ($3::bigint IS NULL OR lease_expires_at <= $3)`,
         [run.id, run.leaseToken, ifExpiredAt, countsAsError ? 1 : 0],
       )
       return { requeued: rowCount > 0, applied: rowCount > 0 }
@@ -122,7 +122,7 @@ const result: TurnResult = { status: 'failed', sessionId: run.sessionId, reason 
       `UPDATE runs SET status='failed', target_state='failed', failure_reason=$7, result=$4,
          lease_token=NULL, lease_expires_at=NULL, worker_id=NULL, finished_at=$5,
          error_attempts=error_attempts+$6
-       WHERE id=$1 AND lease_token=[redacted-credential] AND status='running' AND ($3::bigint IS NULL OR lease_expires_at <= $3)`,
+       WHERE id=$1 AND lease_token=$2 AND status='running' AND ($3::bigint IS NULL OR lease_expires_at <= $3)`,
       [run.id, run.leaseToken, ifExpiredAt, JSON.stringify(result), Date.now(), countsAsError ? 1 : 0, failureReason],
     )
     if (rowCount > 0) settle(await getRun(run.id))
@@ -153,11 +153,11 @@ const result: TurnResult = { status: 'failed', sessionId: run.sessionId, reason 
     },
 
 async claim(workerId, ttlMs): Promise<Run | null> {
-      const token = [redacted-credential])
+      const token = randomUUID()
       const now = Date.now()
       try {
         const { rows } = await query(
-          `UPDATE runs SET status='running', target_state='running', lease_token=[redacted-credential], lease_expires_at=$2, worker_id=$3,
+          `UPDATE runs SET status='running', target_state='running', lease_token=$1, lease_expires_at=$2, worker_id=$3,
              attempts=attempts+1, started_at=COALESCE(started_at,$4)
            WHERE id = (
              SELECT id FROM runs WHERE status='pending'
@@ -174,11 +174,11 @@ async claim(workerId, ttlMs): Promise<Run | null> {
     },
 
 async claimById(runId, workerId, ttlMs): Promise<Run | null> {
-      const token = [redacted-credential])
+      const token = randomUUID()
       const now = Date.now()
       try {
         const { rows } = await query(
-          `UPDATE runs SET status='running', target_state='running', lease_token=[redacted-credential], lease_expires_at=$2, worker_id=$3,
+          `UPDATE runs SET status='running', target_state='running', lease_token=$1, lease_expires_at=$2, worker_id=$3,
              attempts=attempts+1, started_at=COALESCE(started_at,$4)
            WHERE id = (
              SELECT id FROM runs WHERE id=$5 AND status='pending'

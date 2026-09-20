@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@qm/im-core": "workspace:^",
+    "@qm/runs": "workspace:^",
     "@qm/store": "workspace:^",
     "@qm/types": "workspace:^",
     "pg": "^8.13.0"

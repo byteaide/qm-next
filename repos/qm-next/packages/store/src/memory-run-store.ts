@@ -59,7 +59,7 @@ export function createMemoryRunStore(
 function lease(run: Run, workerId: string, ttlMs: number): Run {
     run.status = 'running'
     run.targetState = 'running'
-    run.leaseToken = [redacted-credential])
+    run.leaseToken = randomUUID()
     run.leaseExpiresAt = Date.now() + ttlMs
     run.workerId = workerId
     run.attempts += 1

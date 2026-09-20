@@ -8,7 +8,7 @@
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { ApiService } from '@qm/api'
+import { ApiService, TriggerRuntimeCordisService } from '@qm/api'
 import { Context } from '@qm/cordis'
 import { ImTurnBridgeService } from '@qm/im-bridge'
 import { TriggersService } from '../src/index.ts'
@@ -16,6 +16,9 @@ import { TriggersService } from '../src/index.ts'
 async function setup(config: { intervalMs?: number } = {}) {
   const ctx = new Context()
   const apiFiber = await ctx.plugin(ApiService, { secrets: ['test-triggers-secret'] })
+  // Phase 4 composition: API exposes the minimal runtime contract; the
+  // TriggersService injects it — never ApiService.
+  const runtimeFiber = await ctx.plugin(TriggerRuntimeCordisService, {})
   const bridgeFiber = await ctx.plugin(ImTurnBridgeService, {})
   const triggersFiber = await ctx.plugin(TriggersService, config)
   return {
@@ -23,6 +26,7 @@ async function setup(config: { intervalMs?: number } = {}) {
     dispose: async () => {
       await triggersFiber.dispose()
       await bridgeFiber.dispose()
+      await runtimeFiber.dispose()
       await apiFiber.dispose()
     },
   }

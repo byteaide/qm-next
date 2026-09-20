@@ -7,6 +7,7 @@
  *   inbound.ts    InboundEvent discriminated union (provider → core)
  *   outbound.ts   OutboundOperation union (core → provider)
  *   delivery.ts   durable outbound queue + claim-loop contracts
+ *   intake.ts     durable intake inbox + subscriber fan-out contracts
  *   provider.ts   ImProvider port every adapter implements
  *   directory.ts  DirectorySync push shapes
  *   registry.ts   ImRegistry + `ctx.im` augmentation
@@ -15,6 +16,7 @@ export * from './types.ts'
 export * from './inbound.ts'
 export * from './outbound.ts'
 export * from './delivery.ts'
+export * from './intake.ts'
 export * from './provider.ts'
 export * from './directory.ts'
 export * from './registry.ts'

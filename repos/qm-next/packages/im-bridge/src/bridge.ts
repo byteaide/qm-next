@@ -191,6 +191,13 @@ export interface ImTurnBridgeOptions {
   agentRequests?: ImTurnBridgeAgentRequests
   /** Keychain-ask resolution sweep; absent means asks are never announced. */
   askResolutions?: ImTurnBridgeAskResolutions
+  /**
+   * Phase 5 intake hook (ADR-0008): invoked after an intake-sourced Turn
+   * is enqueued, with the inbound event id and the created Run id. The
+   * durable intake subscriber uses it to record the Turn identity on the
+   * Intake Record so a redelivery maps to the same Turn.
+   */
+  onTurnCreated?: (eventId: string, runId: string) => void | Promise<void>
   loop?: ImTurnBridgeLoopOptions
 }
 
@@ -247,7 +254,7 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
     return { kind: 'channel', threadRef, audience: [actor] }
   }
 
-  async function enqueueTurn(input: TurnInput, route: ImReplyRoute): Promise<void> {
+  async function enqueueTurn(input: TurnInput, route: ImReplyRoute, source?: { eventId?: string }): Promise<void> {
     const session = await deps.sessions.getOrCreateByThread(
       input.conversation.threadRef,
       input.conversation.kind,
@@ -256,6 +263,7 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
       input.conversation.channelName,
     )
     const { run } = await deps.runs.enqueue({ sessionId: session.id, request: input })
+    if (source?.eventId && options.onTurnCreated) await options.onTurnCreated(source.eventId, run.id)
     rememberRoute(run.id, route)
     scheduleAck(run.id, route, input.text)
     logger.info(`im-bridge: run ${run.id} queued from ${input.surface} session ${session.id}`)
@@ -356,7 +364,7 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
       ...(event.replyToMessageId ? { replyToMessageId: event.replyToMessageId } : {}),
       conversation,
     }
-    await enqueueTurn(input, route)
+    await enqueueTurn(input, route, { eventId: event.eventId })
   }
 
   async function deliverNotice(event: InboundInteractionEvent, text: string): Promise<void> {
@@ -475,7 +483,7 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
       replyToMessageId: event.ref.messageId,
       conversation,
     }
-    await enqueueTurn(input, route)
+    await enqueueTurn(input, route, { eventId: event.eventId })
   }
 
   /** qm's personal-agent handoff prompt, provider-neutral. */
@@ -549,6 +557,7 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
         text: personalAgentTurnText(record),
       },
       originRoute,
+      { eventId: event.eventId },
     )
   }
 

@@ -102,7 +102,7 @@ test('slice-2.2: dev profile may omit env var and falls back to baseline', () =>
   assert.equal(policy.id, PRODUCTION_DEFAULT_POLICY_ID)
 })
 
-test('slice-2.2: production fails closed when an env override names a policy that was not registered', () => {
+test('slice-2.2: production fails closed when an env override names a policy that was not registered', async () => {
   // The ALLOWLIST_POLICY_ID is registered by registerDefaultPolicies,
   // but if an operator wants to forbid the allowlist, they would
   // either not register it or register their own.
@@ -111,11 +111,12 @@ test('slice-2.2: production fails closed when an env override names a policy tha
   // tighter operator who only wants the baseline.
   const gate = configureProductionCommandPolicy(registry, {
     env: { [QM_COMMAND_POLICY_ENV]: BASELINE_DENY_POLICY_ID },
+    policies: ['baseline-deny'],
   })
   assert.ok(gate)
   // ALLOWLIST is not registered (operator tightened) — so asking for
-  // it via a direct gate.evaluate() must throw.
-  assert.throws(
+  // it via a direct gate.evaluate() must reject.
+  await assert.rejects(
     () =>
       createCommandGate(registry).evaluate(
         {

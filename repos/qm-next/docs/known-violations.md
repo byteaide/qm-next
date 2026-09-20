@@ -62,20 +62,16 @@ They are still present; the architecture gate acknowledges them.
   not `RunStatus`. They are not in scope for KV-001.
 
 - id: KV-002
-  rule: late `api.cronsRuntime` writes
-  phase: 4
-  location: packages/triggers/src/service.ts:89, 92
-  notes: Triggers still assign `api.cronsRuntime` from the legacy
-    composition path. Phase 4 removes this in favor of the minimal
-    `TriggerRuntime` contract in `@qm/types`.
-
-- id: KV-002a
-  rule: triggers package imports @qm/api
-  phase: 4
-  location: packages/triggers/src/service.ts:8
-  notes: Triggers still import `ApiService` from `@qm/api` for
-    composition injection. Phase 4 replaces this dependency with
-    the minimal `TriggerRuntime` contract from `@qm/types`.
+  rule: `api.cronsRuntime` compatibility write (single sanctioned seam)
+  phase: 7
+  location:
+    - packages/api/src/wire-cron-runtime.ts
+  notes: Phase 4 removed the late write from `packages/triggers` and made
+    `WireCronRuntimeService` the only writer — the composition seam the
+    TriggersService architecture test asserts. The compatibility field
+    itself is removed in Phase 7 ("Remove `api.cronsRuntime`
+    compatibility fields"), at which point this entry is deleted and the
+    gate asserts zero hits.
 
 - id: KV-003
   rule: route-local OAuth pending Maps
@@ -109,6 +105,17 @@ They are still present; the architecture gate acknowledges them.
   notes: The orchestrator still publishes on the legacy bus where the
     publisher assigns `seq` itself. Phase 1 routes new writes through the
     typed envelope and the SequenceAllocator.
+
+- id: KV-007
+  rule: process-local IM dedup Map still present (non-authoritative)
+  phase: 7
+  location:
+    - packages/im-core/src/runtime/registry.ts
+  notes: Phase 5 made the durable Intake Inbox the dedup authority
+    (provider + eventId, ADR-0008); the registry's in-process `seenEvents`
+    Map remains only as a first-level guard ahead of the durable accept.
+    Phase 7 removes it together with the `target.im-intake` rollout flag
+    ("Remove process-local IM dedup as the authoritative mechanism").
 ```
 
 ## Phase-resolved entries
@@ -117,4 +124,10 @@ Entries move here as the corresponding phase ships. When the entry is
 deleted from the live block above, the architecture gate asserts that no
 hits remain in the tree.
 
-(no entries yet)
+- id: KV-002a
+  rule: triggers package imports @qm/api
+  phase: 4 (resolved — merged in "Merge Phase 1+4")
+  resolution: `packages/triggers` depends only on the minimal
+    `TriggerRuntime` contract from `@qm/types`; the composition seam is
+    `TriggerRuntimeCordisService` in `@qm/api`. The TriggersService
+    architecture test asserts no `@qm/api` dependency or import.

@@ -14,6 +14,7 @@
     "pg": "^8.13.0"
   },
   "devDependencies": {
+    "@qm/concurrency": "workspace:^",
     "@types/pg": "^8.11.0"
   }
 }

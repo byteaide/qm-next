@@ -233,3 +233,56 @@ const reaper = createReaper(runs, sessions, {
 **回滚路径：** §4.6 — flag 切回 baseline；`mode` 切回 `off`/`shadow` 不会破坏 invariants；Enforce 模式唯一的回滚路径是切回 Shadow，不是直接禁掉 Security Screen。
 
 **Linked ADRs:** 0004 (Security Screen Shadow Mode), 0006 (rejections do not create Runs), 0007 (orchestrator seam with fixed waterfall)。
+
+---
+
+## 12. Phase 5 Durable IM Intake 与 Fan-out 指标（plan §5.5）
+
+Phase 5（ADR-0008, ADR-0015）引入 durable Intake Inbox 与显式 subscriber
+fan-out（bridge / mirror / audit）。本节是 §5.5 指标族的 on-call runbook；
+指标经由 `@qm/runs` 的 in-process registry 暴露，生产接线（OTel/Sentry
+backend）沿用 §9-§11 同一通道。
+
+**指标：**
+
+| 指标 | 类型 | Labels | 语义 |
+|---|---|---|---|
+| `im_intake_dedup_total` | counter | `result=new\|duplicate` | 每 accept 一次外部投递 tick 一次；`duplicate` 表示 Intake Key（provider+eventId）重复 |
+| `im_subscriber_lag` | gauge | `subscriber` | subscriber 欠账事件数（latestSeq − cursor）；drain pass 时刷新 |
+| `im_subscriber_retry_total` | counter | `subscriber`, `outcome=ok\|fail` | 每 subscriber 每次派发尝试 |
+| `im_subscriber_dead_letter_total` | counter | `subscriber` | subscriber 耗尽重试、dead-letter 一条记录时 |
+
+**告警（必须 page on-call）：**
+
+- 任何 `im_subscriber_dead_letter_total` 增量（plan §5.5：任何 dead-letter 事件）。
+- `im_subscriber_lag{subscriber}` 超过该 subscriber 配置的 N× 正常节奏
+  （bridge 正常节奏为秒级；mirror/audit 依部署配置）。
+- `im_subscriber_retry_total{outcome="fail"}` 持续增长（重试耗尽的前兆）。
+
+**Runbook 动作：**
+
+1. **Dead-letter 事件**：`list / inspect / replay` 均为 admin-only 操作。
+   - `lastError` 已在记录时 redact（secret-free），可直接读；
+   - `redeliveryUrl` 是 admin-only 操作端点
+     （默认 `/admin/im/intake/dead-letters/{id}/replay`），永不自动重放；
+   - replay 需 actor 身份并写入 audit（fanout `options.audit`）；
+   - replay 失败返回 `replay_failed` + secret-free error，可再次 replay；
+     成功后该 letter 标记 `redeliveredAt`/`redeliveredBy`，二次 replay 返回
+     `already_redelivered`。
+2. **Subscriber lag 增长**：检查该 subscriber 的 sink 健康（bridge → api
+   turn 队列；mirror/audit → 各自 sink）。fan-out 严格按 seq 顺序派发，队头
+   记录重试耗尽后 dead-letter 并跳过，不会阻塞后续记录，也不会阻塞其他
+   subscriber（独立 cursor，ADR-0015）。
+3. **`duplicate` 比例异常升高**：通常是 provider 侧重投；durable inbox 保证
+   只派发一次，无需人工干预；若伴随 `new` 归零，检查 provider 连接。
+4. **重启恢复**：cursor 与 inbox 均为 durable（Postgres twin：`im_intake` /
+   `im_intake_cursors` / `im_intake_dead_letters`）；重启后 fan-out 从各自
+   cursor 继续，bridge subscriber 依 `turnId`（first-writer-wins）保证同一条
+   intake 只映射到同一个 Turn，无重复出站回复。
+
+**Rollout：** intake 路径由 `target.im-intake` RolloutFlag 控制
+（env `QM_ROLLOUT_TARGET_IM_INTAKE`，默认 off = legacy 直连 sink）。
+flag 读取只经由 RolloutFlag port（§Phase 0 边界规则）。Phase 7 清理项负责
+移除 flag 与 process-local registry dedup Map（KV-002 同批）。
+
+**Linked ADRs:** 0008 (IM intake is durable fan-out), 0015 (IM subscribers have independent cursors)。

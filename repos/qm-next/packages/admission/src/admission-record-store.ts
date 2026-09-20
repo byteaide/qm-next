@@ -100,5 +100,3 @@ export function createMemoryAdmissionRecordStore(
 export function allocateAdmissionRecordId(): string {
   return randomUUID()
 }
-
-export { now: undefined as never } // placeholder to keep export shape consistent

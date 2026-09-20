@@ -11,25 +11,35 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  createRunMetricsRegistry,
   RUN_METRICS,
   _resetDefaultRunMetricsRegistryForTests,
   bumpAdmissionDecision,
   bumpAdmissionRecord,
   bumpSecurityScreenDecision,
   bumpSecurityScreenUnavailable,
-  createRunMetricsRegistry,
+  type CounterSnapshot,
 } from '@qm/runs'
 import {
   createMemoryAdmissionRecordStore,
-  createMemoryShadowRecordStore,
-  createSecurityScreenAdapter,
-  resolveScreenConfig,
   runAdmissionWaterfall,
   type StagePorts,
 } from '@qm/admission'
+import { createMemoryShadowRecordStore, createSecurityScreenAdapter, resolveScreenConfig } from '@qm/security'
 import type { AdmissionInput } from '@qm/types'
 
 const principal = { id: 'person:ada', type: 'internal' } as const
+
+/** Snapshot lookup: does this counter series carry exactly these labels? */
+function seriesWith(snap: readonly CounterSnapshot[], name: string, want: Record<string, string>): CounterSnapshot | undefined {
+  return snap.find(
+    (s) => s.name === name && s.byLabels.some((b) => Object.entries(want).every(([k, v]) => b.labels[k] === v)),
+  )
+}
+
+function firstLabels(s: CounterSnapshot | undefined): Record<string, string> {
+  return s?.byLabels[0]?.labels ?? {}
+}
 
 function makeInput(): AdmissionInput {
   return { surface: 'web', actor: { id: 'person:ada', type: 'internal' } }
@@ -90,8 +100,8 @@ test('observability: bumpAdmissionDecision on injected registry', () => {
     .snapshot()
     .find((s) => s.name === RUN_METRICS.ADMISSION_DECISION_TOTAL)
   assert.ok(snap)
-  assert.equal(snap?.labels?.stage, 'identity')
-  assert.equal(snap?.labels?.decision, 'deny')
+  assert.equal(firstLabels(snap).stage, 'identity')
+  assert.equal(firstLabels(snap).decision, 'deny')
 })
 
 test('observability: bumpAdmissionRecord on injected registry', () => {
@@ -101,7 +111,7 @@ test('observability: bumpAdmissionRecord on injected registry', () => {
     .snapshot()
     .find((s) => s.name === RUN_METRICS.ADMISSION_RECORD_TOTAL)
   assert.ok(snap)
-  assert.equal(snap?.labels?.outcome, 'rejected')
+  assert.equal(firstLabels(snap).outcome, 'rejected')
 })
 
 test('observability: bumpSecurityScreenDecision on injected registry', () => {
@@ -111,8 +121,8 @@ test('observability: bumpSecurityScreenDecision on injected registry', () => {
     .snapshot()
     .find((s) => s.name === RUN_METRICS.SECURITY_SCREEN_DECISION_TOTAL)
   assert.ok(snap)
-  assert.equal(snap?.labels?.mode, 'shadow')
-  assert.equal(snap?.labels?.decision, 'unavailable')
+  assert.equal(firstLabels(snap).mode, 'shadow')
+  assert.equal(firstLabels(snap).decision, 'unavailable')
 })
 
 test('observability: bumpSecurityScreenUnavailable on injected registry', () => {
@@ -122,7 +132,7 @@ test('observability: bumpSecurityScreenUnavailable on injected registry', () => 
     .snapshot()
     .find((s) => s.name === RUN_METRICS.SECURITY_SCREEN_UNAVAILABLE_TOTAL)
   assert.ok(snap)
-  assert.equal(snap?.labels?.mode, 'shadow')
+  assert.equal(firstLabels(snap).mode, 'shadow')
 })
 
 test('observability: waterfall ticks admission_decision_total{stage,decision} on every stage', async () => {
@@ -133,15 +143,9 @@ test('observability: waterfall ticks admission_decision_total{stage,decision} on
   })
   await runAdmissionWaterfall({ ports, store, options: { metrics: registry } }, makeInput())
   const snap = registry.snapshot()
-  const identity = snap.find(
-    (s) => s.name === RUN_METRICS.ADMISSION_DECISION_TOTAL && s.labels?.stage === 'identity' && s.labels?.decision === 'allow',
-  )
-  const rateLimit = snap.find(
-    (s) => s.name === RUN_METRICS.ADMISSION_DECISION_TOTAL && s.labels?.stage === 'rate_limit' && s.labels?.decision === 'deny',
-  )
-  const record = snap.find(
-    (s) => s.name === RUN_METRICS.ADMISSION_RECORD_TOTAL && s.labels?.outcome === 'rejected',
-  )
+  const identity = seriesWith(snap, RUN_METRICS.ADMISSION_DECISION_TOTAL, { stage: 'identity', decision: 'allow' })
+  const rateLimit = seriesWith(snap, RUN_METRICS.ADMISSION_DECISION_TOTAL, { stage: 'rate_limit', decision: 'deny' })
+  const record = seriesWith(snap, RUN_METRICS.ADMISSION_RECORD_TOTAL, { outcome: 'rejected' })
   assert.ok(identity)
   assert.ok(rateLimit)
   assert.ok(record)
@@ -165,12 +169,8 @@ test('observability: shadow unavailability ticks unavailable counter (plan §3.3
   const ports = allowPorts({ screen: adapter })
   await runAdmissionWaterfall({ ports, store, options: { metrics: registry } }, makeInput())
   const snap = registry.snapshot()
-  const unavailable = snap.find(
-    (s) => s.name === RUN_METRICS.SECURITY_SCREEN_UNAVAILABLE_TOTAL && s.labels?.mode === 'shadow',
-  )
-  const screenDecision = snap.find(
-    (s) => s.name === RUN_METRICS.SECURITY_SCREEN_DECISION_TOTAL && s.labels?.mode === 'shadow' && s.labels?.decision === 'unavailable',
-  )
+  const unavailable = seriesWith(snap, RUN_METRICS.SECURITY_SCREEN_UNAVAILABLE_TOTAL, { mode: 'shadow' })
+  const screenDecision = seriesWith(snap, RUN_METRICS.SECURITY_SCREEN_DECISION_TOTAL, { mode: 'shadow', decision: 'unavailable' })
   assert.ok(unavailable, 'shadow unavailable counter must tick')
   assert.ok(screenDecision, 'security_screen_decision_total{mode=shadow,decision=unavailable} must tick')
 })
@@ -204,18 +204,12 @@ test('observability: enforce unavailability does NOT tick unavailable counter (p
   const ports = allowPorts({ screen: adapter })
   await runAdmissionWaterfall({ ports, store, options: { metrics: registry } }, makeInput())
   const snap = registry.snapshot()
-  const unavailable = snap.find(
-    (s) => s.name === RUN_METRICS.SECURITY_SCREEN_UNAVAILABLE_TOTAL && s.labels?.mode === 'enforce',
-  )
+  const unavailable = seriesWith(snap, RUN_METRICS.SECURITY_SCREEN_UNAVAILABLE_TOTAL, { mode: 'enforce' })
   // Plan §3.3: Enforce mode unavailability does NOT tick the unavailable
   // counter; it surfaces as admission_decision_total{stage="screen",decision="deny"}.
   assert.equal(unavailable, undefined)
-  const screenReject = snap.find(
-    (s) => s.name === RUN_METRICS.ADMISSION_DECISION_TOTAL && s.labels?.stage === 'screen' && s.labels?.decision === 'deny',
-  )
+  const screenReject = seriesWith(snap, RUN_METRICS.ADMISSION_DECISION_TOTAL, { stage: 'screen', decision: 'deny' })
   assert.ok(screenReject)
-  const recordReject = snap.find(
-    (s) => s.name === RUN_METRICS.ADMISSION_RECORD_TOTAL && s.labels?.outcome === 'rejected',
-  )
+  const recordReject = seriesWith(snap, RUN_METRICS.ADMISSION_RECORD_TOTAL, { outcome: 'rejected' })
   assert.ok(recordReject)
 })

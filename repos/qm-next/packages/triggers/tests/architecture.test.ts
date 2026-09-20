@@ -11,11 +11,12 @@
  * ADR-0003 invariant: the cycle is broken.
  */
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 
-const ROOT = join(import.meta.dirname, '..', '..')
+// tests/ -> triggers/ -> packages/ -> repo root
+const ROOT = join(import.meta.dirname, '..', '..', '..')
 
 test('architecture: packages/triggers/package.json does not declare @qm/api dependency', () => {
   const pkg = JSON.parse(readFileSync(join(ROOT, 'packages/triggers/package.json'), 'utf8')) as {
@@ -30,18 +31,16 @@ test('architecture: no source file under packages/triggers imports @qm/api', () 
   // Walk packages/triggers/src and assert no file contains `from '@qm/api'`.
   // The architecture gate (`pnpm test:architecture`) enforces the same rule
   // by inspecting dependency direction; this is the inline companion.
-  const fs = require('node:fs') as typeof import('node:fs')
-  const path = require('node:path') as typeof import('node:path')
   const offenders: string[] = []
   function walk(dir: string): void {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name)
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
       if (entry.isDirectory()) {
         walk(full)
         continue
       }
       if (!entry.name.endsWith('.ts')) continue
-      const content = fs.readFileSync(full, 'utf8')
+      const content = readFileSync(full, 'utf8')
       if (/from\s+['"]@qm\/api['"]/.test(content)) {
         offenders.push(full)
       }
@@ -69,8 +68,7 @@ test('architecture: @qm/api no longer imports createMemoryLeaderLease from @qm/t
 })
 
 test('architecture: leader-lease primitive lives in @qm/concurrency', () => {
-  const fs = require('node:fs') as typeof import('node:fs')
-  const exists = fs.existsSync(join(ROOT, 'packages/concurrency/src/leader-lease.ts'))
+  const exists = existsSync(join(ROOT, 'packages/concurrency/src/leader-lease.ts'))
   assert.ok(exists, 'packages/concurrency/src/leader-lease.ts must exist (Phase 4 §4.6)')
 })
 
@@ -82,19 +80,17 @@ test('architecture: @qm/triggers re-exports createMemoryLeaderLease from @qm/con
 test('architecture: WireCronRuntimeService is the only writer of api.cronsRuntime', () => {
   // Triggers no longer writes; the composition seam (WireCronRuntimeService)
   // owns the write. Verify there is exactly one writer in the API package.
-  const fs = require('node:fs') as typeof import('node:fs')
-  const path = require('node:path') as typeof import('node:path')
   const apiSrc = join(ROOT, 'packages/api/src')
   const writers: string[] = []
   function walk(dir: string): void {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name)
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
       if (entry.isDirectory()) {
         walk(full)
         continue
       }
       if (!entry.name.endsWith('.ts')) continue
-      const content = fs.readFileSync(full, 'utf8')
+      const content = readFileSync(full, 'utf8')
       if (/api\.cronsRuntime\s*=/.test(content) || /cronsRuntime:\s*\{/.test(content) || /cronsRuntime\s*=\s*\{/.test(content)) {
         writers.push(full)
       }
@@ -104,8 +100,8 @@ test('architecture: WireCronRuntimeService is the only writer of api.cronsRuntim
   // The wire-cron-runtime service is the legitimate writer. Service.ts may
   // declare the type/shape. Other files must not write.
   const allowedWriters = new Set([
-    path.join(apiSrc, 'wire-cron-runtime.ts'),
-    path.join(apiSrc, 'service.ts'),
+    join(apiSrc, 'wire-cron-runtime.ts'),
+    join(apiSrc, 'service.ts'),
   ])
   const offenders = writers.filter((w) => !allowedWriters.has(w))
   assert.deepEqual(offenders, [], `Only wire-cron-runtime.ts may write api.cronsRuntime; offenders: ${offenders.join(', ')}`)

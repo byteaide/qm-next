@@ -35,7 +35,13 @@ export interface RunMetricsRegistry {
   inc(name: string, labels?: CounterLabels): void
   /** Increment a counter by `n` with the given labels. */
   add(name: string, n: number, labels?: CounterLabels): void
-  /** Snapshot all counters. Used by tests and by the metrics scrape. */
+  /**
+   * Set a gauge to `value` with the given labels (Phase 5 §5.5 —
+   * `im_subscriber_lag`). Replaces the previous value for this label
+   * set instead of accumulating; snapshots report the current value.
+   */
+  set(name: string, value: number, labels?: CounterLabels): void
+  /** Snapshot all counters and gauges. Used by tests and the metrics scrape. */
   snapshot(): readonly CounterSnapshot[]
   /** Reset all counters. Test-only — production code MUST NOT call this. */
   reset(): void
@@ -63,6 +69,11 @@ export function createRunMetricsRegistry(): RunMetricsRegistry {
       const c = getOrCreate(name)
       const key = labelsKey(labels)
       c.set(key, (c.get(key) ?? 0) + n)
+    },
+    set(name, value, labels = {}) {
+      const c = getOrCreate(name)
+      const key = labelsKey(labels)
+      c.set(key, value)
     },
     snapshot() {
       const out: CounterSnapshot[] = []
@@ -124,6 +135,11 @@ export const RUN_METRICS = {
   SECURITY_SCREEN_UNAVAILABLE_TOTAL: 'security_screen_unavailable_total',
   // Phase 4 — Trigger Runtime (plan §4 observability).
   TRIGGER_SUBMIT_TOTAL: 'trigger_submit_total',
+  // Phase 5 — Durable IM intake and fan-out (plan §5.5, ADR-0008/0015).
+  IM_INTAKE_DEDUP_TOTAL: 'im_intake_dedup_total',
+  IM_SUBSCRIBER_LAG: 'im_subscriber_lag',
+  IM_SUBSCRIBER_RETRY_TOTAL: 'im_subscriber_retry_total',
+  IM_SUBSCRIBER_DEAD_LETTER_TOTAL: 'im_subscriber_dead_letter_total',
 } as const
 
 /**
@@ -256,6 +272,50 @@ export function bumpTriggerSubmit(
     return
   }
   defaultRegistry.inc(RUN_METRICS.TRIGGER_SUBMIT_TOTAL, { outcome })
+}
+
+/**
+ * Phase 5 §5.5 observability — durable IM intake and fan-out
+ * (ADR-0008, ADR-0015). `bumpImIntakeDedup` ticks the dedup counter per
+ * accepted delivery (`new` or `duplicate`); `bumpImSubscriberRetry`
+ * ticks per subscriber attempt (`ok` or `fail`);
+ * `bumpImSubscriberDeadLetter` ticks when a subscriber exhausts its
+ * attempts (must page on-call); `setImSubscriberLag` sets the per-
+ * subscriber lag gauge (in events). All accept an injectable registry
+ * and fall back to the process-wide in-memory default.
+ */
+export function bumpImIntakeDedup(
+  metrics: RunMetricsRegistry | undefined,
+  result: 'new' | 'duplicate',
+): void {
+  const target = metrics ?? defaultRegistry
+  target.inc(RUN_METRICS.IM_INTAKE_DEDUP_TOTAL, { result })
+}
+
+export function bumpImSubscriberRetry(
+  metrics: RunMetricsRegistry | undefined,
+  subscriber: string,
+  outcome: 'ok' | 'fail',
+): void {
+  const target = metrics ?? defaultRegistry
+  target.inc(RUN_METRICS.IM_SUBSCRIBER_RETRY_TOTAL, { subscriber, outcome })
+}
+
+export function bumpImSubscriberDeadLetter(
+  metrics: RunMetricsRegistry | undefined,
+  subscriber: string,
+): void {
+  const target = metrics ?? defaultRegistry
+  target.inc(RUN_METRICS.IM_SUBSCRIBER_DEAD_LETTER_TOTAL, { subscriber })
+}
+
+export function setImSubscriberLag(
+  metrics: RunMetricsRegistry | undefined,
+  subscriber: string,
+  lag: number,
+): void {
+  const target = metrics ?? defaultRegistry
+  target.set(RUN_METRICS.IM_SUBSCRIBER_LAG, lag, { subscriber })
 }
 
 /**

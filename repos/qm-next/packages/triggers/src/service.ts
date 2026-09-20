@@ -34,6 +34,12 @@ import type { TriggerRuntime } from '@qm/types'
 interface TriggerRuntimeHolder {
   runtime: TriggerRuntime
   opts?: { databaseUrl?: string }
+  /** Stores behind the runtime; composition supplies them so the
+   * scheduler + fire engine consume the contracts (ADR-0003: Triggers
+   * import the ports from `@qm/types`, never `@qm/api`). */
+  runs?: import('@qm/types').RunStore
+  sessions?: import('@qm/types').SessionStore
+  resolution?: import('@qm/types').ResolutionService
 }
 
 export interface TriggersConfig {
@@ -74,6 +80,14 @@ export class TriggersService extends Service<TriggersConfig> {
   async [Service.init]() {
     const runtimeService = this.ctx['trigger-runtime'] as TriggerRuntimeHolder
     const runtime: TriggerRuntime = runtimeService.runtime
+    const runs = runtimeService.runs
+    const sessions = runtimeService.sessions
+    const resolution = runtimeService.resolution
+    if (!runs || !sessions || !resolution) {
+      throw new Error(
+        'triggers requires runs/sessions/resolution from the trigger-runtime composition — mount TriggerRuntimeCordisService (or an equivalent holder) first',
+      )
+    }
     const bridge: ImTurnBridgeService = this.ctx['im-bridge']
     const deliveries: ImDeliveryQueue | undefined = bridge.queue
     if (!deliveries) throw new Error('triggers requires the im-bridge delivery queue — load @qm/im-bridge first')
@@ -94,6 +108,9 @@ export class TriggersService extends Service<TriggersConfig> {
       lease,
       deliveries,
       replyAs,
+      runs,
+      sessions,
+      resolution,
     }
     this.scheduler = createCronScheduler(deps)
     this.triggers = createTriggerSink(deps)

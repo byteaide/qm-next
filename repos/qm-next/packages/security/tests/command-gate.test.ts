@@ -67,17 +67,22 @@ test('slice-2.1: explicit baseline policy starts successfully', () => {
 
 test('slice-2.1: deny/allow/require_approval remain distinguishable', async () => {
   const registry = createCommandPolicyRegistry()
-  registerDefaultPolicies(registry)
+  // Baseline only: each allowlist variant below registers under its own
+  // explicit id, so nothing collides with the canonical default id.
+  registerDefaultPolicies(registry, { policies: ['baseline-deny'] })
   registry.setActive(BASELINE_DENY_POLICY_ID)
   const gate = createCommandGate(registry)
   // Baseline returns require_approval for shell — distinct from deny/allow.
   const decision = await gate.evaluate(makeRequest({ class: 'shell' }), BASELINE_DENY_POLICY_ID)
   assert.equal(decision.decision, 'require_approval')
-  // Allowlist with no rules returns deny — also distinct.
-  const allowlistDecision = await gate.evaluate(makeRequest({ class: 'shell' }), ALLOWLIST_POLICY_ID)
+  // An allowlist with no rules returns deny — also distinct.
+  const emptyAllowlist = createAllowlistPolicy({ id: 'allowlist-empty' })
+  registry.register(emptyAllowlist)
+  const allowlistDecision = await gate.evaluate(makeRequest({ class: 'shell' }), emptyAllowlist.id)
   assert.equal(allowlistDecision.decision, 'deny')
   // Allowlist with a matching rule returns allow.
   const policy = createAllowlistPolicy({
+    id: 'allowlist-shell',
     allow: [{ class: 'shell', ruleId: 'allow-shell' }],
   })
   registry.register(policy)
@@ -145,7 +150,9 @@ test('slice-2.1: pure non-sensitive reads do not require the gate', () => {
 
 test('slice-2.1: operator policy can tighten baseline (allowlist mode)', async () => {
   const registry = createCommandPolicyRegistry()
-  registerDefaultPolicies(registry)
+  // Baseline only — the operator allowlist below registers under the
+  // canonical allowlist id.
+  registerDefaultPolicies(registry, { policies: ['baseline-deny'] })
   registry.setActive(BASELINE_DENY_POLICY_ID)
   const gate = createCommandGate(registry)
 
