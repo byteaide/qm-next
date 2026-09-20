@@ -70,13 +70,6 @@ They are still present; the architecture gate acknowledges them.
     must not (pnpm check:im enforces; architecture gate inherits the same
     boundary).
 
-- id: KV-005
-  rule: command policy results collapsed into exit codes
-  phase: 2
-  location: packages/sandbox/src/policy.ts (legacy string-union return)
-  notes: The legacy sandbox policy returns the legacy string union. Phase 2
-    migrates it to the typed `CommandDecision` interface from `@qm/types`.
-
 - id: KV-006
   rule: legacy RunEventBus publish without `seq` from SequenceAllocator
   phase: 1
@@ -135,3 +128,25 @@ hits remain in the tree.
     write. Routes are HTTP adapters: validate, normalize, invoke,
     redact. The architecture gate's `new Map<string, OAuthFlow>` grep
     asserts zero hits in production runtime code.
+
+- id: KV-005
+  rule: command policy results collapsed into exit codes
+  phase: 7 (resolved — chore/architecture-cutover)
+  resolution: the `LegacyCommandDecision` string alias is deleted from
+    `@qm/types`; `CommandRule.decision` carries the canonical
+    `CommandDecisionValue`, and the sandbox `PolicyVerdict` is shaped like
+    the typed `CommandDecision` (decision + `ruleId` rule identity +
+    reason). Deny/approval outcomes stay structured errors
+    (`CommandDenied` / `NeedsApproval`) — never exit codes.
+
+- id: KV-007
+  rule: process-local IM dedup Map still present (non-authoritative)
+  phase: 7 (resolved — chore/architecture-cutover)
+  resolution: the im-core registry's `seenEvents` Map and its eviction
+    policy are deleted; the registry passes every emitted event through
+    to `onEvent`. Duplicate recognition is the durable Intake Inbox
+    accept's job (provider + eventId, ADR-0008) — restart- and
+    multi-instance-safe. The `target.im-intake` rollout flag was removed
+    in the same slice; durable intake is unconditional. Registry tests
+    assert the pass-through contract and the im-intake wiring tests
+    cover the durable dedup invariant.

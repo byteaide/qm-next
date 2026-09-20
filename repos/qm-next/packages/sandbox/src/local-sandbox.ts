@@ -467,7 +467,7 @@ export function createLocalSandbox(opts: LocalSandboxOptions = {}): Sandbox {
       if (resolvedPolicy) {
         const verdict = evaluateCommandPolicy(command, resolvedPolicy)
         if (verdict.decision !== 'allow') {
-          const reason = verdict.reason ?? verdict.matched ?? 'policy denied'
+          const reason = verdict.reason ?? verdict.ruleId ?? 'policy denied'
           if (verdict.decision === 'deny') {
             if (execOpts?.throwOnPolicy) throw new CommandDenied(command, reason)
             return policyDeniedResult(command, reason)

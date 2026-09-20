@@ -23,16 +23,15 @@ export interface GrantedHandle {
 }
 
 /**
- * Legacy Command Gate decision (M3 sandbox policy engine). The canonical
- * target contract lives in `./command-gate.ts` — Phase 2 migrates the
- * runtime sandbox policy to the typed `CommandDecision` interface. Until
- * then this alias keeps existing imports compiling.
+ * Phase 7 cutover (KV-005): the legacy `LegacyCommandDecision` string
+ * alias is gone — command-policy rules carry the canonical
+ * `CommandDecisionValue` from `./command-gate.ts`, and policy verdicts
+ * are shaped like the typed `CommandDecision` (decision + ruleId +
+ * reason). Decisions are never collapsed into exit codes on target paths.
  */
-export type LegacyCommandDecision = 'allow' | 'deny' | 'require_approval'
-
 export interface CommandRule {
   pattern: string
-  decision: LegacyCommandDecision
+  decision: import('./command-gate.ts').CommandDecisionValue
   reason?: string
 }
 

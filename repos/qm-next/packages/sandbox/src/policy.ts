@@ -20,13 +20,21 @@
  *     default. Callers who need case-insensitive matching should write
  *     the pattern with the `i` flag explicitly.
  */
-import type { CommandPolicy, CommandRule, LegacyCommandDecision } from '@qm/types'
+import type { CommandDecisionValue, CommandPolicy, CommandRule } from '@qm/types'
 import { CommandDenied, NeedsApproval } from '@qm/types'
 
+/**
+ * Phase 7 cutover (KV-005): the verdict is shaped like the typed
+ * `CommandDecision` from `@qm/types/command-gate.ts` — `decision` is the
+ * canonical `CommandDecisionValue`, and the matching rule's identity
+ * travels as `ruleId` so audit can trace the decision. (The Gate layer
+ * adds `requestId`/`ts` when it mintes the durable record.)
+ */
 export interface PolicyVerdict {
-  decision: LegacyCommandDecision
+  decision: CommandDecisionValue
+  /** Identity of the rule that produced the decision (its pattern). */
+  ruleId?: string
   reason?: string
-  matched?: string
 }
 
 interface CompiledRule {
@@ -52,7 +60,7 @@ export function evaluateCommandPolicy(command: string, policy: CommandPolicy): P
     if (regex.test(command)) {
       const verdict: PolicyVerdict = { decision: rule.decision }
       if (rule.reason !== undefined) verdict.reason = rule.reason
-      verdict.matched = rule.pattern
+      verdict.ruleId = rule.pattern
       return verdict
     }
   }
@@ -68,7 +76,7 @@ export function evaluateCommandPolicy(command: string, policy: CommandPolicy): P
 export function assertPolicyAllows(command: string, policy: CommandPolicy): PolicyVerdict | null {
   const verdict = evaluateCommandPolicy(command, policy)
   if (verdict.decision === 'allow') return null
-  const reason = verdict.reason ?? verdict.matched ?? 'policy denied'
+  const reason = verdict.reason ?? verdict.ruleId ?? 'policy denied'
   if (verdict.decision === 'deny') throw new CommandDenied(command, reason)
   throw new NeedsApproval(command, reason)
 }
