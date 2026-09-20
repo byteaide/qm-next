@@ -99,6 +99,12 @@ const fiber = await ctx.plugin(ApiService, {
   keychain: true,
   files: true,
   connectors: true,
+  // Phase 6 (ADR-0009): the OAuth provider registry is deployment
+  // config now — the route-local mock default was deleted. U12 exercises
+  // the full consent loop against this explicitly configured mock.
+  connectorProviders: [
+    { id: 'google-mock', name: 'Google (mock)', host: 'google-mock.example.test', scopes: ['email', 'profile'], clientId: 'qa-smoke', type: 'mock' },
+  ],
   webhooks: true,
   secretDrops: true,
   config: true,
