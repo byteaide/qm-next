@@ -67,6 +67,7 @@ export function createPostgresRunStore(
   const { query, close: closePool }: PgPool = createPgPool(connectionString, RUN_SCHEMA_STATEMENTS)
 
   const terminalListeners: Array<(run: Run) => void> = []
+  const suspensionListeners: Array<(run: Run) => void> = []
   function settle(run: Run | null): void {
     if (!run) return
     // Slice 1.5 — same dual-terminal check as memory-run-store so
@@ -258,6 +259,10 @@ async claimById(runId, workerId, ttlMs): Promise<Run | null> {
          WHERE id=$1 AND lease_token=$2 AND target_state='running'`,
         [runId, leaseToken, JSON.stringify(suspension.result), JSON.stringify(deliveryState)],
       )
+      if (rowCount > 0) {
+        const suspended = await getRun(runId)
+        if (suspended) for (const listener of suspensionListeners) listener(suspended)
+      }
       return rowCount > 0
     },
 
@@ -357,6 +362,10 @@ async claimById(runId, workerId, ttlMs): Promise<Run | null> {
 
     onTerminal(listener): void {
       terminalListeners.push(listener)
+    },
+
+    onSuspension(listener): void {
+      suspensionListeners.push(listener)
     },
 
     get: getRun,

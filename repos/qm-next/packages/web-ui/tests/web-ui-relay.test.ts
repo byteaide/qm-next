@@ -16,7 +16,8 @@ import { createMemoryDirectoryStore } from '@qm/directory'
 import { createMemoryScopeMemory } from '@qm/memory'
 import { createHarnessRouter, createMockHarness, OrchestratorService } from '@qm/orchestrator'
 import { createMemoryRunStore, createMemoryMap, createMemorySessionStore } from '@qm/store'
-import { createInMemoryEventLog, createMemorySequenceAllocator } from '@qm/concurrency'
+import { createInMemoryEventLog, createMemorySequenceAllocator, createMemorySessionReservationStore } from '@qm/concurrency'
+import { createMemoryTargetApprovalStore } from '@qm/approvals'
 import { createMemoryCronStore } from '@qm/triggers'
 import { createMemorySkillStore } from '@qm/skills'
 import { createTurnRunner, createApiServer, mintSignedPayload } from '@qm/api'
@@ -50,6 +51,8 @@ async function buildRig(overrides: Partial<WebUiDeps> = {}): Promise<RelayRig> {
   const sessions = createMemorySessionStore()
   const runs = createMemoryRunStore()
   const log = createInMemoryEventLog({ allocator: createMemorySequenceAllocator() })
+  const approvalsTarget = createMemoryTargetApprovalStore()
+  const reservations = createMemorySessionReservationStore()
   const mock = createMockHarness({
     script: [
       { reply: 'need a yes', pausedOnApproval: true, pendingApprovals: [{ command: 'drop-tables', reason: 'destructive' }] },
@@ -74,7 +77,17 @@ async function buildRig(overrides: Partial<WebUiDeps> = {}): Promise<RelayRig> {
     rateLimiter: { check: async () => ({ allowed: true }) },
     runEventLog: log.bus,
   })
-  const runner = createTurnRunner({ orchestrator, runs, runEventLog: log.bus }, { tickMs: 5 })
+  // ADR-0010 continuation executor — suspend + continuation lane wired.
+  const runner = createTurnRunner(
+    {
+      orchestrator,
+      runs,
+      runEventLog: log.bus,
+      approvals: approvalsTarget,
+      reservations,
+    },
+    { tickMs: 5 },
+  )
   runner.start()
 
   const grantLedger = createMemoryGrantLedger()
@@ -117,6 +130,7 @@ async function buildRig(overrides: Partial<WebUiDeps> = {}): Promise<RelayRig> {
       runs,
       resolution,
       runObservation: log.observation,
+      approvalContinuation: { approvals: approvalsTarget, runs, runEventLog: log.bus, reservations },
       skills: createMemorySkillStore(),
       crons: createMemoryCronStore(),
       directory: createMemoryDirectoryStore(),
@@ -408,7 +422,7 @@ test('scope-resources composes the lanes and redacts webhook secrets', async () 
   }
 })
 
-test('search and approvals ride the convergence: session hits return, pending approvals re-queue', async () => {
+test('search and approvals ride the convergence: awaiting state surfaces, decisions resume the same Run', async () => {
   const rig = await buildRig()
   try {
     const turn = await rig.web.inject({
@@ -419,10 +433,15 @@ test('search and approvals ride the convergence: session hits return, pending ap
     })
     assert.equal(turn.statusCode, 202)
     const { runId } = turn.json() as { runId: string }
-    await rig.runs.waitFor(runId, 5_000)
-    const poll = await rig.web.inject({ method: 'GET', url: `/api/runs/${runId}`, headers: COOKIE })
-    const pollBody = poll.json() as { status: string; result: { status: string; pendingApprovals?: Array<{ requestId: string }> } | null }
-    assert.equal(pollBody.status, 'succeeded')
+    // The Run suspends (non-terminal) — poll for the awaiting state.
+    let pollBody: { status: string; result: { status: string; pendingApprovals?: Array<{ requestId: string }> } | null } | undefined
+    for (let i = 0; i < 100; i++) {
+      const poll = await rig.web.inject({ method: 'GET', url: `/api/runs/${runId}`, headers: COOKIE })
+      pollBody = poll.json() as typeof pollBody
+      if (pollBody?.status === 'awaiting_approval') break
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    assert.equal(pollBody?.status, 'awaiting_approval')
     assert.equal(pollBody.result?.status, 'pending_approval')
     const requestId = pollBody.result?.pendingApprovals?.[0]?.requestId
     assert.ok(requestId)
@@ -431,13 +450,16 @@ test('search and approvals ride the convergence: session hits return, pending ap
       method: 'POST',
       url: `/api/approvals/${encodeURIComponent(requestId)}`,
       headers: COOKIE,
-      payload: { approved: true, scope: 'once' },
+      payload: { approved: true },
     })
     assert.equal(decision.statusCode, 202)
-    const { runId: nextRunId } = decision.json() as { runId: string }
-    await rig.runs.waitFor(nextRunId, 5_000)
-    const nextPoll = await rig.web.inject({ method: 'GET', url: `/api/runs/${nextRunId}`, headers: COOKIE })
-    const nextBody = nextPoll.json() as { result: { status: string; reply?: string } | null }
+    const decisionBody = decision.json() as { runId: string; state: string }
+    assert.equal(decisionBody.runId, runId, 'no successor Run — the SAME Run resumes')
+    assert.equal(decisionBody.state, 'resuming')
+    await rig.runs.waitFor(runId, 5_000)
+    const nextPoll = await rig.web.inject({ method: 'GET', url: `/api/runs/${runId}`, headers: COOKIE })
+    const nextBody = nextPoll.json() as { status: string; result: { status: string; reply?: string } | null }
+    assert.equal(nextBody.status, 'succeeded')
     assert.equal(nextBody.result?.status, 'ok')
     assert.equal(nextBody.result?.reply, 'echo: hello relay')
 

@@ -700,6 +700,29 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
 
   const loop = createDeliveryLoop({ queue, registry: deps.im, ...(options.loop ?? {}) })
   deps.runs.onTerminal(deliver)
+  /**
+   * ADR-0010 continuation executor — Awaiting Approval is
+   * non-terminal, so `onTerminal` never fires for it. Deliver the
+   * approval card / notice at suspension time under a distinct
+   * idempotency key so the terminal reply still lands separately.
+   * Ack reactions stay up: the run is still in flight.
+   */
+  if (deps.runs.onSuspension) {
+    deps.runs.onSuspension((run) => {
+      void (async () => {
+        const route = routes.get(run.id)
+        if (!route) return
+        if (!isPendingApprovalResult(run)) return
+        if (!options.approvalContinuation) await rememberPendingApprovals(run, route)
+        const cards = options.approvalCards ?? deps.im.get(route.destination.type)?.approvalCardRenderer
+        const delivery = imRunResultDelivery(run, route, options.replyAs ?? 'markdown', cards)
+        if (!delivery) return
+        await queue.enqueue({ ...delivery, idempotencyKey: `run:${run.id}:suspended` })
+      })().catch((err) => {
+        logger.error(`im-bridge: failed to enqueue approval delivery for run ${run.id}:`, err)
+      })
+    })
+  }
 
   /**
    * qm's keychain-ask flow: each resolved ask becomes a personal turn in

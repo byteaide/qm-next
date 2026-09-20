@@ -261,6 +261,15 @@ export interface RunStore {
 
   onTerminal(listener: (run: Run) => void): void
 
+  /**
+   * ADR-0010 continuation executor — listener fired after
+   * `suspendForApproval` commits. Delivery surfaces (IM cards) use it
+   * to present the approval at suspension time: Awaiting Approval is
+   * non-terminal, so `onTerminal` never fires for it. Implementations
+   * without suspension support may omit this.
+   */
+  onSuspension?(listener: (run: Run) => void): void
+
   get(runId: string): Promise<Run | null>
 
   activeForThread(sessionId: string): Promise<Run | null>

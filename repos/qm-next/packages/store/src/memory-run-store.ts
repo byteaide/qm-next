@@ -26,6 +26,7 @@ export function createMemoryRunStore(
   const events = new EventEmitter()
   events.setMaxListeners(0)
   const terminalListeners: Array<(run: Run) => void> = []
+  const suspensionListeners: Array<(run: Run) => void> = []
 
   function sessionHasRunning(sessionId: string, exceptId?: string): boolean {
     // Phase 7 cutover: a session is busy iff another claimed run is
@@ -230,6 +231,7 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
         },
       }
       assertTargetRunInvariant(run)
+      for (const listener of suspensionListeners) listener({ ...run })
       return true
     },
 
@@ -319,6 +321,10 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
 
     onTerminal(listener) {
       terminalListeners.push(listener)
+    },
+
+    onSuspension(listener) {
+      suspensionListeners.push(listener)
     },
 
     async get(runId) {

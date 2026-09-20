@@ -14,12 +14,14 @@ import {
   createMemoryAmbientJudgmentStore,
   createMemoryApprovalStore,
   createMemoryChannelPolicyStore,
+  createMemoryTargetApprovalStore,
   encodeAgentRequestValue,
   type AmbientCursorStore,
   type AmbientJudge,
   type AmbientJudgmentStore,
   type AgentRequestStore,
 } from '@qm/approvals'
+import { createInMemoryEventLog, createMemorySequenceAllocator, createMemorySessionReservationStore } from '@qm/concurrency'
 import type { ImCapabilities, ImProvider, ImProviderStartContext, InboundInteractionEvent, InboundMessageEvent, OutboundOperation, SendOperation } from '@qm/im-core'
 import { createImRegistry } from '@qm/im-core/runtime'
 import { createHarnessRouter, createMockHarness, OrchestratorService, type MockTurnStep } from '@qm/orchestrator'
@@ -173,6 +175,8 @@ async function waitFor(condition: () => boolean | Promise<boolean>, ms = 2000): 
 
 interface Harness {
   runs: ReturnType<typeof createMemoryRunStore>
+  /** ADR-0010 continuation executor — the target ApprovalStore. */
+  approvalsTarget: ReturnType<typeof createMemoryTargetApprovalStore>
   bridge: ImTurnBridge
   cells: RecorderCells
   sent: OutboundOperation[]
@@ -208,6 +212,9 @@ async function setup(
 ): Promise<Harness> {
   const sessions = createMemorySessionStore()
   const runs = createMemoryRunStore()
+  const log = createInMemoryEventLog({ allocator: createMemorySequenceAllocator() })
+  const approvalsTarget = createMemoryTargetApprovalStore()
+  const reservations = createMemorySessionReservationStore()
   const harnessRouter = createHarnessRouter({ defaultId: 'mock' })
   harnessRouter.register(
     createMockHarness({
@@ -222,8 +229,18 @@ async function setup(
     identity: devIdentity(),
     resolution: devResolution(),
     rateLimiter: { check: async () => ({ allowed: true }) },
+    runEventLog: log.bus,
   })
-  const runner = createTurnRunner({ orchestrator, runs })
+  // ADR-0010 continuation executor — the runner suspends pending
+  // approvals and the continuation lane resumes them; clicks route
+  // through the target glue (no successor Run).
+  const runner = createTurnRunner({
+    orchestrator,
+    runs,
+    runEventLog: log.bus,
+    approvals: approvalsTarget,
+    reservations,
+  })
   runner.start()
   const sent: OutboundOperation[] = []
   const cells: RecorderCells = {}
@@ -248,6 +265,7 @@ async function setup(
     {
       ...(opts.actorType ? { actorType: opts.actorType } : {}),
       approvalStore,
+      approvalContinuation: { approvals: approvalsTarget, runs, runEventLog: log.bus, reservations },
       ...(ambient ? { ambient } : {}),
       ...(opts.ack ? { ack: opts.ack } : {}),
       ...(opts.agentRequests ? { agentRequests: opts.agentRequests } : {}),
@@ -258,6 +276,7 @@ async function setup(
   const disposer = await registry.register(recorderProvider(sent, cells, opts.providerCardRenderer !== false, opts.react === true))
   return {
     runs,
+    approvalsTarget,
     bridge,
     cells,
     sent,
@@ -416,13 +435,13 @@ test('a failed run delivers the failure notice', async () => {
   }
 })
 
-test('pending approval records durably; approve resumes and a duplicate click is deduped', async () => {
+test('pending approval records durably; approve resumes the same Run and a duplicate click is deduped', async () => {
   const t = await setup({
     script: [{ reply: '', pausedOnApproval: true, pendingApprovals: [{ command: 'deploy', reason: 'needs sign-off' }] }],
   })
   try {
     await t.cells.ctx!.emit(messageEvent())
-    assert.ok(await waitFor(() => t.sent.length === 1), 'expected approval card delivery')
+    assert.ok(await waitFor(() => t.sent.length === 1), 'expected approval card delivery at suspension')
     const cardOp = t.sent[0] as SendOperation
     assert.equal(cardOp.op, 'send')
     assert.ok(cardOp.body.card)
@@ -442,33 +461,34 @@ test('pending approval records durably; approve resumes and a duplicate click is
     assert.equal(firstRun.result?.status, 'pending_approval')
     assert.equal(approveValue.requestId, firstRun.result?.pendingApprovals?.[0]?.requestId)
 
-    const recorded = await t.bridge.approvals.get(approveValue.requestId)
+    // ADR-0010 — the request is durable in the target registry, tied to
+    // the SAME Run and the original requester.
+    const recorded = await t.approvalsTarget.get(approveValue.requestId)
     assert.ok(recorded, 'pending approval was recorded before the card went out')
     assert.equal(recorded.status, 'pending')
-    assert.equal(recorded.requesterId, 'feishu:u1')
+    assert.equal(recorded.requesterPrincipalId, 'feishu:u1')
     assert.equal(recorded.runId, firstRun.id)
-    assert.equal(recorded.threadId, 'om_thread1')
 
     await t.cells.ctx!.emit(interactionEvent(approveValue))
-    assert.ok(await waitFor(() => t.sent.length === 2), 'expected approve reply delivery')
-    assert.ok(await waitFor(async () => (await t.runs.list()).length === 2), 'expected approval follow-up turn')
+    assert.ok(await waitFor(() => t.sent.length === 2), 'expected approve notice delivery')
+
+    // The SAME Run resumed and completed; the terminal reply delivers.
+    assert.ok(
+      await waitFor(async () => (await t.runs.get(firstRun.id))?.targetState === 'succeeded'),
+      'the same Run resumed to success',
+    )
+    assert.ok(await waitFor(() => t.sent.length === 3), 'approve notice + terminal reply')
+    const approveReply = t.sent[2] as SendOperation | undefined
+    assert.equal(approveReply?.body.markdown, 'echo: hello bot')
 
     await t.cells.ctx!.emit(interactionEvent(rejectValue, 'e3'))
     await new Promise((resolve) => setTimeout(resolve, 50))
-    assert.equal((await t.runs.list()).length, 2, 'duplicate click on a decided approval submits nothing')
-    assert.equal(t.sent.length, 2, 'duplicate click delivers nothing')
+    assert.equal((await t.runs.list()).length, 1, 'duplicate click on a decided approval submits nothing — and no successor Run ever exists')
+    assert.equal(t.sent.length, 3, 'duplicate click delivers nothing')
 
-    const decided = await t.bridge.approvals.get(approveValue.requestId)
+    const decided = await t.approvalsTarget.get(approveValue.requestId)
     assert.ok(decided)
     assert.equal(decided.status, 'approved')
-
-    const all = await t.runs.list()
-    const approveRun = all.find((run) => run.request.text === 'Approve: deploy')
-    assert.ok(approveRun)
-    assert.deepEqual(approveRun.request.approval, { requestId: approveValue.requestId, approved: true })
-    assert.equal(approveRun.request.conversation.threadRef, 'feishu:oc_chat1:om_thread1')
-    const approveReply = t.sent[1] as SendOperation | undefined
-    assert.equal(approveReply?.body.markdown, 'echo: Approve: deploy')
   } finally {
     await t.dispose()
   }
@@ -492,13 +512,16 @@ test('a click by anyone but the requester is refused with a notice and the appro
     assert.match((notice.body as { text: string })['text'], /Only the person who requested/)
     assert.equal((await t.runs.list()).length, 1, 'non-requester click submits no turn')
 
-    const stillPending = await t.bridge.approvals.get(approveValue.requestId)
+    const stillPending = await t.approvalsTarget.get(approveValue.requestId)
     assert.ok(stillPending)
     assert.equal(stillPending.status, 'pending')
 
     await t.cells.ctx!.emit(interactionEvent(approveValue, 'e-click-3'))
-    assert.ok(await waitFor(async () => (await t.runs.list()).length === 2), 'requester can still decide afterwards')
-    const decided = await t.bridge.approvals.get(approveValue.requestId)
+    assert.ok(
+      await waitFor(async () => (await t.runs.get((await t.runs.list())[0]!.id))?.targetState === 'succeeded'),
+      'requester can still decide afterwards — the same Run resumes',
+    )
+    const decided = await t.approvalsTarget.get(approveValue.requestId)
     assert.ok(decided)
     assert.equal(decided.status, 'approved')
   } finally {
