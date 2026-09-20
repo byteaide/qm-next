@@ -793,8 +793,8 @@ Remove obsolete paths and make the target model the only production model.
 - [x] Remove API route-local OAuth pending state. (resolved in Phase 6 — KV-003)
 - [x] Remove process-local IM dedup as the authoritative mechanism. (slice 7.3 — `seenEvents` Map deleted; durable Intake Inbox accept is the sole authority and unconditional)
 - [x] Remove temporary rollout flags after their cutover gate passes. (slices 7.3/7.4 — `target.im-intake` and `target.run-observation` deleted from the RolloutFlag port surface; the registry itself remains for future flags)
-- [ ] Update `docs/architecture.md` from “current vs target” to current target behavior. (deferred until the KV-006 cutover lands, so the doc does not describe a state that does not exist yet)
-- [ ] Mark superseded ADRs only if applicable.
+- [x] Update `docs/architecture.md` from “current vs target” to current target behavior. (done — the doc now describes the post-cutover runtime: durable event log as the only Run event source, observation-only web stream, deleted legacy contracts; the one remaining non-target area — the ADR-0010 approval continuation executor — is described honestly as the open gap.)
+- [x] Mark superseded ADRs only if applicable. (evaluated — none applicable: ADR-0005 (legacy projection) remains authoritative until `migrate:qm` physically rewrites historical rows; the superseded mark ships with the data migration, per TIA §10.)
 - [x] Verify `done` is **physically absent** on target paths: `rg "term:\s*['\"]done['\"]" packages/` returns zero hits in target runtime code (legacy compatibility shims under `legacy/` are excluded by their location; the grep is in `pnpm test:architecture`).
 - [x] Verify every rollout flag registered in Phase 0 has a removal PR linked or is removed. (both registered flags are removed on this branch; the TIA §4 records the deleted flag tests)
 
