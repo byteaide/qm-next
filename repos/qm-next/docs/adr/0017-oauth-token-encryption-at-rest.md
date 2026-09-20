@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # OAuth token encryption at rest
