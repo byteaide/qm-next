@@ -146,8 +146,95 @@ async function runStoreCases(t: import('node:test').TestContext, make: () => Pro
     await h.close()
   })
 
-  await t.test('reapExpired requeues lapsed leases', async () => {
+  await t.test('approval suspension + continuation claim (ADR-0010)', async (t) => {
     const h = await make()
+    const { run } = await h.store.enqueue({ sessionId: freshSessionId(), request: turnInput('gate me') })
+    const claimed = await h.store.claim('worker-1', 5_000)
+    assert.ok(claimed)
+    if (!h.store.suspendForApproval || !h.store.claimNextContinuation || !h.store.beginContinuationAttempt || !h.store.failFromApproval) {
+      await h.close()
+      return t.skip('store lacks the ADR-0010 continuation methods')
+    }
+    // Token discipline: only the owning executor may suspend.
+    assert.equal(
+      await h.store.suspendForApproval(run.id, 'bogus-token', {
+        requestId: 'req-1',
+        commandRequestId: 'cmd-1',
+        attemptId: 'a1',
+        suspendedAt: Date.now(),
+        result: { status: 'pending_approval', sessionId: run.sessionId },
+      }),
+      false,
+    )
+    assert.equal(
+      await h.store.suspendForApproval(run.id, claimed.leaseToken!, {
+        requestId: 'req-1',
+        commandRequestId: 'cmd-1',
+        attemptId: 'a1',
+        suspendedAt: Date.now(),
+        result: { status: 'pending_approval', sessionId: run.sessionId },
+      }),
+      true,
+    )
+    const suspended = await h.store.get(run.id)
+    assert.equal(suspended?.targetState, 'awaiting_approval')
+    assert.equal(suspended?.leaseToken, null)
+    assert.equal(suspended?.deliveryState?.pendingApproval?.commandRequestId, 'cmd-1')
+    assert.equal(suspended?.result?.status, 'pending_approval')
+    // A suspended Run is never claimable as a fresh run.
+    assert.equal(await h.store.claim('worker-2', 5_000), null)
+    // The decision flips the Run to continuation-claimable, idempotently.
+    assert.equal(await h.store.beginContinuationAttempt(run.id, 'a2', 'cmd-1'), true)
+    assert.equal(await h.store.beginContinuationAttempt(run.id, 'a3', 'cmd-1'), false, 'duplicate commandRequestId is a no-op')
+    const claimable = await h.store.get(run.id)
+    assert.equal(claimable?.targetState, 'running')
+    assert.equal(claimable?.leaseToken, null)
+    // The continuation lane claims without re-counting attempts.
+    const attemptsBefore = claimable!.attempts
+    const cont = await h.store.claimNextContinuation('worker-2', 5_000)
+    assert.ok(cont)
+    assert.equal(cont.id, run.id)
+    assert.ok(cont.leaseToken)
+    assert.equal(cont.attempts, attemptsBefore)
+    assert.equal(await h.store.claimNextContinuation('worker-3', 5_000), null, 'a claimed continuation is not claimable twice')
+    // A resumed Run is protected from decision-driven failure.
+    assert.equal(await h.store.failFromApproval(run.id, 'approval_expired'), false)
+    // Completion rides the normal lease-guarded path.
+    assert.equal(await h.store.complete(run.id, cont.leaseToken!, { status: 'ok', reply: 'resumed' }), true)
+    await h.close()
+  })
+
+  await t.test('failFromApproval only fails an awaiting Run (ADR-0010)', async (t) => {
+    const h = await make()
+    const { run } = await h.store.enqueue({ sessionId: freshSessionId(), request: turnInput('reject me') })
+    const claimed = await h.store.claim('worker-1', 5_000)
+    assert.ok(claimed)
+    if (!h.store.suspendForApproval || !h.store.failFromApproval) {
+      await h.close()
+      return t.skip('store lacks the ADR-0010 continuation methods')
+    }
+    // A live (running) Run is never failed by a stale decision.
+    assert.equal(await h.store.failFromApproval(run.id, 'approval_denied'), false)
+    const done = h.store.waitFor(run.id)
+    assert.equal(
+      await h.store.suspendForApproval(run.id, claimed.leaseToken!, {
+        requestId: 'req-2',
+        commandRequestId: 'cmd-2',
+        attemptId: 'a1',
+        suspendedAt: Date.now(),
+        result: { status: 'pending_approval', sessionId: run.sessionId },
+      }),
+      true,
+    )
+    assert.equal(await h.store.failFromApproval(run.id, 'approval_denied'), true)
+    const finished = await done
+    assert.equal(finished.targetState, 'failed')
+    assert.equal(finished.failureReason, 'approval_denied')
+    assert.equal(await h.store.failFromApproval(run.id, 'approval_denied'), false, 'idempotent — duplicate decisions are no-ops')
+    await h.close()
+  })
+
+    await t.test('reapExpired requeues lapsed leases', async () => {    const h = await make()
     const session = freshSessionId()
     const { run } = await h.store.enqueue({ sessionId: session, request: turnInput('slow') })
     const claimed = await h.store.claim('worker-1', 40)

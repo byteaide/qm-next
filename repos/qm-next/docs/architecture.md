@@ -13,7 +13,7 @@
 | Observation | durable log 是唯一事件源：snapshot + cursor replay/live；授权经 RunVisibilityToken；web SSE 与 `/v1` 路由同源；legacy 内存 bus 与 polling 补偿已删除 | 0001, 0014 |
 | Admission | Orchestrator 内部固定 Admission Waterfall（identity/authz → rate limit → budget → screen → resolution）；拒绝产生 Admission Record，绝不创建 Run；Screen 首期 Shadow，后显式 Enforce | 0004, 0006, 0007 |
 | Command Gate | side-effecting operation 与 sensitive read 必过 Gate；decision 是结构化的 `allow/deny/require_approval`（typed `CommandDecision`），生产启动必须显式选择 Baseline Policy | 0002 |
-| Approval | requester-only；24h 默认 TTL；决策单次迁移、幂等。同 Run suspended/resumed 的 **store 原语与决策 glue 已就位**（`beginContinuationAttempt` / `applyApprovalDecision`），但运行时续跑执行器未接线——决策面仍以 follow-up turn（新 Run）驱动 harness 重放。这是 ADR-0010 最后一个未落地部分，见 `docs/implementation-plan.md` Phase 7 checklist | 0010, 0012 |
+| Approval | requester-only；24h 默认 TTL；决策单次迁移、幂等。同 Run suspended/resumed 全链路已落地（ADR-0010 continuation executor，2026-09-20）：`suspendForApproval` 挂起（awaiting_approval + 释放 executor lease + 持久化 Approval Continuation）、turn runner 的 continuation lane 凭 `claimNextContinuation` 恢复保存的命令点（`TurnInput.approval` 带 commandRequestId，非盲目重放）、Web/IM 决策面统一走 `applyApprovalDecision`，不再产生 successor Run | 0010, 0012 |
 | IM intake | durable Inbox + independent subscriber cursors + retry/dead-letter；进程内 dedup 已删除，durable accept（provider + eventId）是唯一去重权威 | 0008, 0015 |
 | Trigger | `packages/types` 中最小 `TriggerRuntime` contract；composition 注入；`api.cronsRuntime` 兼容字段已删除 | 0003 |
 | Connector OAuth | Connector context owns lifecycle；durable `oauth_flows`/`consent_links` store；HTTP 只是 adapter | 0009, 0016 |
@@ -184,19 +184,26 @@ IM delivery
   → executor claim + heartbeat/renew
   → harness execution
       → Command Gate（side effects / sensitive reads）
-      → allow 执行；deny 结构化失败；approval required → pending approval 结果
-  → RunStore 状态转移 + run.finished 事件（store 提交后由 runner 发布）
+      → allow 执行；deny 结构化失败；approval required → 挂起同一 Run（awaiting_approval，
+        见下方 Approval 当前形状）
+  → RunStore 状态转移；终态由 runner 在 store 提交后发布 run.finished 事件
   → post-commit Run Observation notification（durable log → observation routes）
 ```
 
-Approval（当前形状与差距）：
+Approval（当前形状）：
 
 ```
-决策面（Web / IM 卡片）→ approvals.decide（requester-only、单次迁移、幂等）
-  → 决策以 follow-up turn（新 Run）驱动 harness 重放——这是 ADR-0010
-    的临时形状：同 Run continuation 的 store 原语与 glue 已存在
-    （beginContinuationAttempt / applyApprovalDecision），运行时
-    续跑执行器待接线（见 implementation-plan Phase 7 checklist）。
+runner: harness 返回 pending_approval → approvals.create（持久 Approval Request）
+  → Session Continuation Reservation.reserve → RunStore.suspendForApproval
+    （targetState=awaiting_approval、释放 executor lease、deliveryState.pendingApproval
+     持久化 Approval Continuation + pending_approval result 快照）
+  → attempt.suspended + approval.requested 事件（observation 快照投到 awaiting_approval）
+决策面（Web / IM 卡片）→ applyApprovalDecision（approvals.decide：requester-only、单次迁移、幂等）
+  → approved：beginContinuationAttempt 把同一 Run 置回可认领态 → runner continuation lane
+    （claimNextContinuation，持久发现、重启后恰好恢复一次）以 TurnInput.approval
+    （含 commandRequestId）恢复保存的命令点，同一 Run 至终态
+  → rejected/expired：failFromApproval（awaiting-only 守卫）→ approval.decided/expired
+    + run.finished 事件 → 之后才释放 Reservation（plan §2.6 释放顺序）
 ```
 
 新 provider 同构接入：实现 `ImProvider`（入站 mapper 诚实寻址 + 出站 + `format` + 目录拉取 + 自带审批卡渲染）注册进同一 registry 即可——投递按 `Destination.type` 认领到对应 adapter，core 零改动（`pnpm check:im` 门禁保证）。v1 只随包发布飞书；slack（历史实现见 git）/钉钉/企微延期。
