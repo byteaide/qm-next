@@ -1,6 +1,6 @@
 # Architecture Implementation Plan
 
-Status: **Draft — 2026-09-19**  
+Status: **Phases 0–4 complete — 2026-09-20**  
 Scope: implementation of the target model recorded in `docs/adr/0001`–`docs/adr/0016` and summarized by `docs/architecture.md`.
 
 This plan deliberately separates behavior changes into phases. A phase is complete only when its phase gate passes in both memory and Postgres modes. Do not begin the next phase while a required gate is red.
@@ -74,6 +74,7 @@ A release blocker is **never** conditional on "if infrastructure is available". 
 ## Phase 0 — Target contracts and architecture gates
 
 **Branch:** `chore/architecture-gates`
+**Status:** Complete — merged to main (commit `0be39c1`). Test impact assessment merged at `docs/test-impact/phase-0.md`.
 
 ### Scope
 
@@ -126,14 +127,14 @@ The architecture gate should fail when:
 
 ### Phase gate
 
-- [ ] `pnpm test:architecture` exists, runs in CI, and is non-waivable per `docs/gate-enforcement.md` §6.
-- [ ] Target type contracts compile.
-- [ ] Legacy code still passes existing tests.
-- [ ] `docs/known-violations.md` exists with seeded entries mapped to later phases.
-- [ ] `docs/test-impact/phase-0.md` is merged.
-- [ ] Memory and PG implementations of `LeaseStore`, `SequenceAllocator`, `SessionReservationStore`, `RolloutFlag` pass the same contract suite.
-- [ ] Concurrency primitive ports carry ADR references in their JSDoc.
-- [ ] No runtime behavior changes.
+- [x] `pnpm test:architecture` exists, runs in CI, and is non-waivable per `docs/gate-enforcement.md` §6.
+- [x] Target type contracts compile.
+- [x] Legacy code still passes existing tests.
+- [x] `docs/known-violations.md` exists with seeded entries mapped to later phases.
+- [x] `docs/test-impact/phase-0.md` is merged.
+- [x] Memory and PG implementations of `LeaseStore`, `SequenceAllocator`, `SessionReservationStore`, `RolloutFlag` pass the same contract suite.
+- [x] Concurrency primitive ports carry ADR references in their JSDoc.
+- [x] No runtime behavior changes.
 
 **Linked ADRs:** 0001, 0003, 0010, 0013.
 
@@ -142,6 +143,7 @@ The architecture gate should fail when:
 ## Phase 1 — Run-owned lifecycle and observation
 
 **Branch:** `feat/run-lifecycle`
+**Status:** Complete — merged to main (slices 1.1–1.6, commit range `a8f63b1`–`45fa310`; merge `1132b6e`). Test impact assessment merged at `docs/test-impact/phase-1.md`.
 
 ### Goals
 
@@ -279,6 +281,7 @@ pnpm test:user-stories
 ## Phase 2 — Command Gate and Approval Continuation
 
 **Branch:** `feat/command-gate`
+**Status:** Complete — merged to main (slices 2.1–2.7, commit range `0009c07`–`11830ad`; merge `1132b6e`). Test impact assessment merged at `docs/test-impact/phase-2.md`.
 
 ### Goals
 
@@ -447,6 +450,7 @@ pnpm test:pg
 ## Phase 3 — Turn Admission and Security Screen
 
 **Branch:** `feat/turn-admission`
+**Status:** Complete — merged to main (slices 3.1–3.3, commit range `694f329`–`b039490`; merge `c67c13c`). Test impact assessment merged at `docs/test-impact/phase-3.md`.
 
 ### Goals
 
@@ -551,6 +555,7 @@ pnpm test:pg
 ## Phase 4 — Trigger Runtime decoupling
 
 **Branch:** `refactor/trigger-runtime`
+**Status:** Complete — merged to main (slices 4.1–4.4, commit range `92d3a3c`–`8585c08`; merge `72f9e19`). Test impact assessment merged at `docs/test-impact/phase-4.md`.
 
 ### Goals
 
