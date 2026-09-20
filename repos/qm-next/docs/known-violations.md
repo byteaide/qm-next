@@ -105,6 +105,17 @@ They are still present; the architecture gate acknowledges them.
   notes: The orchestrator still publishes on the legacy bus where the
     publisher assigns `seq` itself. Phase 1 routes new writes through the
     typed envelope and the SequenceAllocator.
+
+- id: KV-007
+  rule: process-local IM dedup Map still present (non-authoritative)
+  phase: 7
+  location:
+    - packages/im-core/src/runtime/registry.ts
+  notes: Phase 5 made the durable Intake Inbox the dedup authority
+    (provider + eventId, ADR-0008); the registry's in-process `seenEvents`
+    Map remains only as a first-level guard ahead of the durable accept.
+    Phase 7 removes it together with the `target.im-intake` rollout flag
+    ("Remove process-local IM dedup as the authoritative mechanism").
 ```
 
 ## Phase-resolved entries

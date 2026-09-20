@@ -17,11 +17,10 @@ import {
   createMemoryIntakeInbox,
   createMirrorSubscriber,
   type IntakeFanout,
-  type IntakeRecord,
-  type IntakeSubscriber,
 } from '@qm/im-core/runtime'
+import type { IntakeRecord, IntakeSubscriber } from '@qm/im-core'
 import { createRunMetricsRegistry, RUN_METRICS, type CounterSnapshot } from '@qm/runs'
-import type { InboundMessageEvent } from '@qm/im-core'
+import type { InboundMessageEvent, IntakeSubscriberContext } from '@qm/im-core'
 
 function messageEvent(eventId: string, text: string): InboundMessageEvent {
   return {
@@ -72,7 +71,7 @@ function makeFixture(subscribers: IntakeSubscriber[]): Fixture {
   for (const s of subscribers) received.set(s.name, [])
   const wrapped: IntakeSubscriber[] = subscribers.map((s) => ({
     name: s.name,
-    async handle(record, ctx) {
+    async handle(record: IntakeRecord, ctx: IntakeSubscriberContext) {
       const f = failures.get(s.name)
       if (f && f.left > 0) {
         f.left -= 1

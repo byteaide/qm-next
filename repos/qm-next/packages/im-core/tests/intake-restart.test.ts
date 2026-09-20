@@ -11,12 +11,14 @@ import {
   createMemoryIntakeCursorStore,
   createMemoryIntakeDeadLetterStore,
   createMemoryIntakeInbox,
-  type ImIntakeCursorStore,
-  type ImIntakeDeadLetterStore,
-  type ImIntakeInbox,
-  type IntakeRecord,
-  type IntakeSubscriber,
 } from '@qm/im-core/runtime'
+import type {
+  ImIntakeCursorStore,
+  ImIntakeDeadLetterStore,
+  ImIntakeInbox,
+  IntakeRecord,
+  IntakeSubscriber,
+} from '@qm/im-core'
 import type { InboundMessageEvent } from '@qm/im-core'
 
 function messageEvent(provider: string, eventId: string, text: string): InboundMessageEvent {
