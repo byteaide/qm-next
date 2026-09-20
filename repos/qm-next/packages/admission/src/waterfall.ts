@@ -164,9 +164,9 @@ export async function runAdmissionWaterfall(
       reason: redactAdmissionStageReason(screenOutcome.reason),
       latencyMs: now() - sStart,
     })
+    bumpStageMetric(metrics, 'screen', screenOutcome.decision === 'allow' ? 'allow' : 'deny')
     bumpScreenDecisionMetric(metrics, screenOutcome.mode, screenOutcome.decision)
     if (screenOutcome.mode === 'enforce' && screenOutcome.decision !== 'allow') {
-      bumpScreenUnavailableMetric(metrics, 'enforce')
       return reject(id, input, history, `security screen denied: ${screenOutcome.reason ?? 'unspecified'}`, ts, now, deps, screenOutcome)
     }
     if (screenOutcome.mode === 'shadow' && screenOutcome.decision === 'unavailable') {

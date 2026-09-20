@@ -144,8 +144,9 @@ export function createIntakeFanout(options: IntakeFanoutOptions): IntakeFanout {
             attempts,
             lastError: message,
             failedAt: now(),
-            redeliveryUrl: redeliveryUrlFor(options.redeliveryUrlTemplate, record.id),
+            redeliveryUrl: '',
           }
+          letter.redeliveryUrl = redeliveryUrlFor(options.redeliveryUrlTemplate, letter.id)
           await options.deadLetters.record(letter)
           bumpImSubscriberDeadLetter(options.metrics, subscriber.name)
           logger.warn(

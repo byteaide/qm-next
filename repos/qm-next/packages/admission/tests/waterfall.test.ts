@@ -177,7 +177,7 @@ test('waterfall: accepted outcome has full history and resolved context', async 
   assert.equal(outcome.decision, 'accepted')
   if (outcome.decision !== 'accepted') throw new Error('unreachable')
   assert.equal(outcome.record.decision, 'accepted')
-  assert.equal(outcome.record.stages.length, 5) // budget + screen skipped; 4 ran
+  assert.equal(outcome.record.stages.length, 6) // 4 ran + budget/screen skipped (skips are recorded)
   assert.equal(outcome.resolved.sessionId, 'session-A')
   assert.equal(outcome.resolved.scopeId, scopeId)
   assert.equal(outcome.resolved.rateLimit?.limit, 100)
@@ -214,7 +214,7 @@ test('Admission Record: accepted work persists to store with stage history', asy
   const records = await store.list()
   assert.equal(records.length, 1)
   assert.equal(records[0]?.decision, 'accepted')
-  assert.equal(records[0]?.stages.length, 5)
+  assert.equal(records[0]?.stages.length, 6)
 })
 
 test('Admission Record: redaction removes bearer tokens from reasons', async () => {
@@ -269,9 +269,15 @@ test('waterfall: metrics tick on every stage decision', async () => {
   })
   await runAdmissionWaterfall({ ports, store, options: { metrics } }, makeInput())
   const snap = metrics.snapshot()
-  const identity = snap.find((s) => s.name === 'admission_decision_total' && s.labels?.stage === 'identity' && s.labels?.decision === 'allow')
-  const rateLimit = snap.find((s) => s.name === 'admission_decision_total' && s.labels?.stage === 'rate_limit' && s.labels?.decision === 'deny')
-  const record = snap.find((s) => s.name === 'admission_record_total' && s.labels?.outcome === 'rejected')
+  const identity = snap.find(
+    (s) => s.name === 'admission_decision_total' && s.byLabels.some((b) => b.labels.stage === 'identity' && b.labels.decision === 'allow'),
+  )
+  const rateLimit = snap.find(
+    (s) => s.name === 'admission_decision_total' && s.byLabels.some((b) => b.labels.stage === 'rate_limit' && b.labels.decision === 'deny'),
+  )
+  const record = snap.find(
+    (s) => s.name === 'admission_record_total' && s.byLabels.some((b) => b.labels.outcome === 'rejected'),
+  )
   assert.ok(identity)
   assert.ok(rateLimit)
   assert.ok(record)

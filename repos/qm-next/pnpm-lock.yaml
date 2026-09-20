@@ -210,6 +210,9 @@ importers:
       '@qm/im-core':
         specifier: workspace:^
         version: link:../im-core
+      '@qm/runs':
+        specifier: workspace:^
+        version: link:../runs
       '@qm/store':
         specifier: workspace:^
         version: link:../store
@@ -706,6 +709,18 @@ importers:
         specifier: ^8.13.0
         version: 8.23.0
     devDependencies:
+      '@qm/admission':
+        specifier: workspace:^
+        version: link:../admission
+      '@qm/approvals':
+        specifier: workspace:^
+        version: link:../approvals
+      '@qm/concurrency':
+        specifier: workspace:^
+        version: link:../concurrency
+      '@qm/security':
+        specifier: workspace:^
+        version: link:../security
       '@types/pg':
         specifier: ^8.11.0
         version: 8.23.1
@@ -724,6 +739,9 @@ importers:
       '@qm/admission':
         specifier: workspace:^
         version: link:../admission
+      '@qm/runs':
+        specifier: workspace:^
+        version: link:../runs
       '@qm/store':
         specifier: workspace:^
         version: link:../store
@@ -772,6 +790,9 @@ importers:
         specifier: ^8.13.0
         version: 8.23.0
     devDependencies:
+      '@qm/concurrency':
+        specifier: workspace:^
+        version: link:../concurrency
       '@types/pg':
         specifier: ^8.11.0
         version: 8.23.1

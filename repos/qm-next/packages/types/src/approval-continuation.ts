@@ -149,8 +149,15 @@ export interface ApprovalStore {
   create(input: ApprovalRequestInput): Promise<ApprovalRequest>
   /** Fetch by id; null when missing. */
   get(requestId: string): Promise<ApprovalRequest | null>
-  /** List pending requests whose `absoluteExpiry` is still in the future. */
+  /** List pending requests whose effective expiry (`createdAt + ttlMs`) is still in the future. */
   listPending(opts?: { limit?: number; now?: number }): Promise<readonly ApprovalRequest[]>
+  /**
+   * Slice 2.5 — list pending requests whose effective expiry
+   * (`createdAt + ttlMs`) has passed but whose status is still
+   * `pending`. The durable TTL sweep enumerates exactly these; lazy
+   * expiry anywhere else is forbidden (ADR-0010 §2.5).
+   */
+  listExpired?(opts?: { limit?: number; now?: number }): Promise<readonly ApprovalRequest[]>
   /**
    * Apply a decision. Only the original requester may decide.
    * Decisions are idempotent — duplicate calls return `already_decided`.

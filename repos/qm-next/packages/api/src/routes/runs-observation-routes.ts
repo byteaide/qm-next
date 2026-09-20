@@ -167,6 +167,9 @@ export function runsObservationRoutes(deps: RunsObservationRoutesDeps): Readonly
         ctx.req.raw.on('close', () => {
           clearInterval(beat)
           unsubscribe()
+          // End the hijacked response so inject-based clients (and
+          // proxies) observe the stream closing.
+          res.end()
         })
         return undefined
       },

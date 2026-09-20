@@ -98,7 +98,9 @@ export function createMemoryTargetApprovalStore(
     // Slice 2.5 — `decide` does NOT perform lazy expiry. The sweep is
     // the only authority for the `expired` status; we use this helper
     // only inside the sweep itself to detect past-due pending records.
-    return rec.request.status === 'pending' && rec.request.absoluteExpiry <= now
+    // The effective expiry is `createdAt + ttlMs`; `absoluteExpiry`
+    // (`createdAt + maxTtlMs`) only caps renewals (§2.5).
+    return rec.request.status === 'pending' && rec.request.createdAt + rec.request.ttlMs <= now
   }
 
   return {
@@ -125,7 +127,22 @@ export function createMemoryTargetApprovalStore(
       const out: ApprovalRequest[] = []
       for (const rec of records.values()) {
         if (rec.request.status !== 'pending') continue
-        if (rec.request.absoluteExpiry <= now) continue
+        // Effective expiry is `createdAt + ttlMs`; `absoluteExpiry`
+        // (`createdAt + maxTtlMs`) only caps renewals (§2.5).
+        if (rec.request.createdAt + rec.request.ttlMs <= now) continue
+        out.push(snapshot(rec))
+        if (out.length >= limit) break
+      }
+      return out
+    },
+
+    async listExpired(opts?: { limit?: number; now?: number }): Promise<readonly ApprovalRequest[]> {
+      const now = opts?.now ?? clock.now()
+      const limit = opts?.limit ?? Number.POSITIVE_INFINITY
+      const out: ApprovalRequest[] = []
+      for (const rec of records.values()) {
+        if (rec.request.status !== 'pending') continue
+        if (rec.request.createdAt + rec.request.ttlMs > now) continue
         out.push(snapshot(rec))
         if (out.length >= limit) break
       }
@@ -136,12 +153,12 @@ export function createMemoryTargetApprovalStore(
       const rec = records.get(requestId)
       if (!rec) return { outcome: 'not_found' }
       // Slice 2.5 — durable sweep is the only authority for expiry. If
-      // the record is past `absoluteExpiry` but the sweep has not yet
-      // marked it `expired`, `decide` returns `expired` defensively
-      // without mutating state; the next sweep will mark it. This
-      // keeps the lazy-expiry invariant intact while still surfacing
-      // a coherent outcome to the caller.
-      if (rec.request.status === 'pending' && rec.request.absoluteExpiry <= (decision.now ?? clock.now())) {
+      // the record is past its effective expiry (`createdAt + ttlMs`)
+      // but the sweep has not yet marked it `expired`, `decide` returns
+      // `expired` defensively without mutating state; the next sweep
+      // will mark it. This keeps the lazy-expiry invariant intact while
+      // still surfacing a coherent outcome to the caller.
+      if (rec.request.status === 'pending' && rec.request.createdAt + rec.request.ttlMs <= (decision.now ?? clock.now())) {
         return { outcome: 'expired', request: snapshot(rec) }
       }
       if (rec.request.status !== 'pending') {
@@ -252,10 +269,15 @@ export async function runApprovalTTLSweep(
 ): Promise<readonly ApprovalRequest[]> {
   const limit = opts.limit ?? Number.POSITIVE_INFINITY
   const now = opts.now ?? Date.now()
-  const pending = await store.listPending({ now, limit: Number.POSITIVE_INFINITY })
+  // Slice 2.5 — the sweep enumerates past-due pending requests through
+  // the dedicated listing; `listPending` filters them out by contract.
+  const due = store.listExpired
+    ? await store.listExpired({ now, limit: Number.POSITIVE_INFINITY })
+    : (await store.listPending({ now, limit: Number.POSITIVE_INFINITY })).filter(
+        (request) => request.createdAt + request.ttlMs <= now,
+      )
   const expired: ApprovalRequest[] = []
-  for (const request of pending) {
-    if (request.absoluteExpiry > now) continue
+  for (const request of due) {
     if (expired.length >= limit) break
     const outcome = await store.expire(request.id, now)
     if (outcome.outcome === 'decided') {

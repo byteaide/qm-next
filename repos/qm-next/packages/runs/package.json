@@ -15,6 +15,10 @@
     "pg": "^8.13.0"
   },
   "devDependencies": {
+    "@qm/admission": "workspace:^",
+    "@qm/approvals": "workspace:^",
+    "@qm/concurrency": "workspace:^",
+    "@qm/security": "workspace:^",
     "@types/pg": "^8.11.0"
   }
 }

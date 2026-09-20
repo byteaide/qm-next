@@ -93,7 +93,8 @@ export function createCommandGate(
  * Slice 2.2 — register the built-in baseline + allowlist policies in
  * one call. Production startup wires this; tests can call
  * `registerDefaultPolicies(registry, { policies: ['baseline-deny'] })`
- * to limit the surface.
+ * to limit the surface. Idempotent on policy id: an operator-registered
+ * policy with the same id wins — defaults never overwrite it.
  */
 export function registerDefaultPolicies(
   registry: CommandPolicyRegistry,
@@ -102,19 +103,16 @@ export function registerDefaultPolicies(
   const wanted = new Set(opts.policies ?? ['baseline-deny', 'default-denylist', 'allowlist'])
   const ids: CommandPolicyId[] = []
   if (wanted.has('baseline-deny')) {
-    const policy = createDefaultDenylistPolicy()
-    registry.register(policy)
-    ids.push(policy.id)
+    if (!registry.get('baseline-deny')) registry.register(createDefaultDenylistPolicy())
+    ids.push('baseline-deny')
   }
   if (wanted.has('default-denylist')) {
-    const policy = createDefaultDenylistPolicyAlias()
-    registry.register(policy)
-    ids.push(policy.id)
+    if (!registry.get('default-denylist')) registry.register(createDefaultDenylistPolicyAlias())
+    ids.push('default-denylist')
   }
   if (wanted.has('allowlist')) {
-    const policy = createAllowlistPolicy()
-    registry.register(policy)
-    ids.push(policy.id)
+    if (!registry.get('allowlist')) registry.register(createAllowlistPolicy())
+    ids.push('allowlist')
   }
   return ids
 }

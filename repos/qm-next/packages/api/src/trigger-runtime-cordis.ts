@@ -15,6 +15,16 @@ export class TriggerRuntimeCordisService extends Service {
   /** The runtime impl; constructed on `[Service.init]`. */
   runtime!: TriggerRuntimeImpl
 
+  /** Stores the runtime wraps; composition exposes them so the cron
+   * scheduler and fire engine can consume the same contracts without
+   * importing `@qm/api` (ADR-0003). */
+  runs!: import('@qm/types').RunStore
+  sessions!: import('@qm/types').SessionStore
+  resolution!: import('@qm/types').ResolutionService
+
+  /** API-internal: the runtime impl wraps ApiService surfaces. */
+  static inject = ['api'] as const
+
   constructor(ctx: Context, public opts: TriggerRuntimeImplOptions = {}) {
     super(ctx, 'trigger-runtime')
   }
@@ -28,6 +38,9 @@ export class TriggerRuntimeCordisService extends Service {
       sessions: import('@qm/types').SessionStore
       resolution: import('@qm/types').ResolutionService
     }
+    this.runs = api.runs
+    this.sessions = api.sessions
+    this.resolution = api.resolution
     this.runtime = createTriggerRuntimeFromApi(
       {
         runs: api.runs,

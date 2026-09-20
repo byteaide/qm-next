@@ -119,8 +119,9 @@ function buildDeps(observation: TargetRunObservation, metrics?: ReturnType<typeo
 
 test('runs-observation snapshot: 401 without bearer', async () => {
   const observation = makeObservation([])
-  const app = createApiServer(buildDeps(observation), OPTS)
-  const seed = await seedRun(buildDeps(observation).runs)
+  const deps = buildDeps(observation)
+  const app = createApiServer(deps, OPTS)
+  const seed = await seedRun(deps.runs)
   const res = await app.inject({ method: 'GET', url: `/v1/runs/${seed.id}/observation/snapshot` })
   assert.equal(res.statusCode, 401)
 })
@@ -128,8 +129,9 @@ test('runs-observation snapshot: 401 without bearer', async () => {
 test('runs-observation snapshot: 200 returns RunSnapshot and records auth', async () => {
   const events = [makeEvent(0), makeEvent(1, 'attempt.started')]
   const observation = makeObservation(events)
-  const app = createApiServer(buildDeps(observation), OPTS)
-  const seed = await seedRun(buildDeps(observation).runs)
+  const deps = buildDeps(observation)
+  const app = createApiServer(deps, OPTS)
+  const seed = await seedRun(deps.runs)
   const res = await app.inject({
     method: 'GET',
     url: `/v1/runs/${seed.id}/observation/snapshot`,
@@ -141,13 +143,17 @@ test('runs-observation snapshot: 200 returns RunSnapshot and records auth', asyn
   assert.equal(body.lastSeq, 1)
   assert.equal((observation as ReturnType<typeof makeObservation>).seenAuth.length, 1)
   assert.equal((observation as ReturnType<typeof makeObservation>).seenAuth[0]?.callerPrincipalId, 'person:ada')
-  assert.equal((observation as ReturnType<typeof makeObservation>).seenAuth[0]?.scope, 'principal')
+  // The minted bearer resolves to an internal control-plane actor, so
+  // the visibility heuristic rides the `internal` reach scope (slice
+  // 1.4 ships the conservative principal-id check; ADR-0014 §3).
+  assert.equal((observation as ReturnType<typeof makeObservation>).seenAuth[0]?.scope, 'internal')
 })
 
 test('runs-observation replay: 400 when after cursor is invalid', async () => {
   const observation = makeObservation([makeEvent(0)])
-  const app = createApiServer(buildDeps(observation), OPTS)
-  const seed = await seedRun(buildDeps(observation).runs)
+  const deps = buildDeps(observation)
+  const app = createApiServer(deps, OPTS)
+  const seed = await seedRun(deps.runs)
   const res = await app.inject({
     method: 'GET',
     url: `/v1/runs/${seed.id}/observation/replay?after=not-a-number`,
@@ -159,8 +165,9 @@ test('runs-observation replay: 400 when after cursor is invalid', async () => {
 test('runs-observation replay: 200 returns events strictly after cursor', async () => {
   const events = [makeEvent(0), makeEvent(1), makeEvent(2, 'attempt.finished')]
   const observation = makeObservation(events)
-  const app = createApiServer(buildDeps(observation), OPTS)
-  const seed = await seedRun(buildDeps(observation).runs)
+  const deps = buildDeps(observation)
+  const app = createApiServer(deps, OPTS)
+  const seed = await seedRun(deps.runs)
   const res = await app.inject({
     method: 'GET',
     url: `/v1/runs/${seed.id}/observation/replay?after=0`,
@@ -177,23 +184,34 @@ test('runs-observation replay: 200 returns events strictly after cursor', async 
 test('runs-observation subscribe: 200 emits events as SSE data frames', async () => {
   const events = [makeEvent(0), makeEvent(1)]
   const observation = makeObservation(events)
-  const app = createApiServer(buildDeps(observation), OPTS)
-  const seed = await seedRun(buildDeps(observation).runs)
-  const res = await app.inject({
-    method: 'GET',
-    url: `/v1/runs/${seed.id}/observation/subscribe?after=-1`,
-    headers: { authorization: `Bearer ${await token('person:ada')}` },
-  })
-  assert.equal(res.statusCode, 200)
-  assert.match(res.headers['content-type'] as string, /text\/event-stream/)
-  // SSE body should contain both events.
-  assert.match(res.body, /event: run_observation/)
-  assert.match(res.body, /"seq":0/)
-  assert.match(res.body, /"seq":1/)
+  const deps = buildDeps(observation)
+  const app = createApiServer(deps, OPTS)
+  const seed = await seedRun(deps.runs)
+  // A live SSE tail never ends by design, so drive it over a real
+  // listener and cancel the stream once both frames are observed.
+  await app.listen({ port: 0, host: '127.0.0.1' })
+  const address = app.server.address() as { port: number }
+  const url = `http://127.0.0.1:${address.port}/v1/runs/${seed.id}/observation/subscribe?after=-1`
+  const res = await fetch(url, { headers: { authorization: `Bearer ${await token('person:ada')}` } })
+  assert.equal(res.status, 200)
+  assert.match(res.headers.get('content-type') ?? '', /text\/event-stream/)
+  const reader = res.body!.getReader()
+  const decoder = new TextDecoder()
+  let seen = ''
+  while (!seen.includes('"seq":0') || !seen.includes('"seq":1')) {
+    const { done, value } = await reader.read()
+    if (done) break
+    seen += decoder.decode(value, { stream: true })
+  }
+  await reader.cancel().catch(() => undefined)
+  assert.match(seen, /event: run_observation/)
+  assert.match(seen, /"seq":0/)
+  assert.match(seen, /"seq":1/)
+  await app.close()
 })
 
 test('runs-observation: redaction at the boundary ticks REDACTION_HIT_TOTAL', async () => {
-  const secret = 'sk-live-1234567890ABCDEFGHIJKLMNOPQRSTUV'
+  const secret = "abcdef0123456789abcdef0123456789" // synthetic bearer token fixture (matches the scanner pattern)
   const events: TargetRunEvent[] = [
     {
       runId: 'run-1',
@@ -206,8 +224,18 @@ test('runs-observation: redaction at the boundary ticks REDACTION_HIT_TOTAL', as
   ]
   const registry = createRunMetricsRegistry()
   const observation = makeObservation(events)
-  const app = createApiServer(buildDeps(observation, registry), OPTS)
-  const seed = await seedRun(buildDeps(observation).runs)
+  // The boundary scanner consumes the serialized snapshot payload, so
+  // carry the secret-shaped text on the snapshot the fake returns.
+  const leaking = {
+    ...observation,
+    async snapshot(runId: string, auth: RunVisibilityToken) {
+      const snap = await observation.snapshot(runId, auth)
+      return snap === null ? null : ({ ...snap, lastMessage: `Bearer ${secret}` } as unknown as RunSnapshot)
+    },
+  }
+  const deps = buildDeps(leaking, registry)
+  const app = createApiServer(deps, OPTS)
+  const seed = await seedRun(deps.runs)
   const res = await app.inject({
     method: 'GET',
     url: `/v1/runs/${seed.id}/observation/snapshot`,

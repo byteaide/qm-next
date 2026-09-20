@@ -46,6 +46,12 @@ export interface ConfigureProductionCommandPolicyOptions {
    * dev / local-only profiles where the policy is implicit.
    */
   production?: boolean
+  /**
+   * Limit which built-in policies are registered (operator tightening:
+   * e.g. `['baseline-deny']` leaves the allowlist unregistered so a
+   * direct evaluate against it fails closed).
+   */
+  policies?: ReadonlyArray<'baseline-deny' | 'default-denylist' | 'allowlist'>
   /** Optional gate options (e.g. `requestIdAllocator`). */
   gateOptions?: CreateCommandGateOptions
 }
@@ -70,7 +76,7 @@ export function configureProductionCommandPolicy(
   opts: ConfigureProductionCommandPolicyOptions = {},
 ): CommandGate {
   const production = opts.production ?? true
-  registerDefaultPolicies(registry)
+  registerDefaultPolicies(registry, { ...(opts.policies ? { policies: opts.policies } : {}) })
   const env = opts.env ?? (typeof process !== 'undefined' && process.env ? (process.env as Record<string, string | undefined>) : {})
   const policyIdRaw = env[QM_COMMAND_POLICY_ENV]
   const policyId = policyIdRaw && policyIdRaw.length > 0 ? policyIdRaw : null

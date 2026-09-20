@@ -9,6 +9,7 @@
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { Context } from '@qm/cordis'
 import type {
   BudgetTracker,
   Conversation,
@@ -25,10 +26,8 @@ import type {
   TurnInput,
 } from '@qm/types'
 import { OrchestratorService } from '@qm/orchestrator'
-import {
-  buildStagePorts,
-  createMemoryAdmissionRecordStore,
-} from '@qm/orchestrator'
+import { buildStagePorts } from '@qm/orchestrator'
+import { createMemoryAdmissionRecordStore } from '@qm/admission'
 
 const principal: Principal = { id: 'person:ada', type: 'internal' }
 const conversation: Conversation = {
@@ -132,8 +131,10 @@ function makeDeps(overrides: Partial<OrchestratorDeps> = {}): OrchestratorDeps {
     resolution,
     sessions,
     harness,
-    ...(overrides.budget !== undefined ? { budget: overrides.budget } : {}),
-  }
+    // Apply only explicitly-provided overrides; callers pass the stage
+    // double they want to replace (identity, rateLimiter, budget, …).
+    ...Object.fromEntries(Object.entries(overrides).filter(([, v]) => v !== undefined)),
+  } as OrchestratorDeps
   return deps
 }
 
@@ -142,7 +143,7 @@ test('orchestrator: identity rejection returns refused and records Admission Rec
   const deps = makeDeps({
     identity: { isInternal: () => false, audienceIsAllInternal: () => false },
   })
-  const svc = new OrchestratorService({} as never, deps, { admissionRecordStore: store })
+  const svc = new OrchestratorService(new Context(), deps, { admissionRecordStore: store })
   const result = await svc.handleTurn(makeTurnInput())
   assert.equal(result.status, 'refused')
   const records = await store.list()
@@ -160,7 +161,7 @@ test('orchestrator: rate-limit rejection returns refused and records Admission R
       },
     },
   })
-  const svc = new OrchestratorService({} as never, deps, { admissionRecordStore: store })
+  const svc = new OrchestratorService(new Context(), deps, { admissionRecordStore: store })
   const result = await svc.handleTurn(makeTurnInput())
   assert.equal(result.status, 'refused')
   const records = await store.list()
@@ -171,7 +172,7 @@ test('orchestrator: rate-limit rejection returns refused and records Admission R
 test('orchestrator: accepted Turn reaches harness, produces ok, records accepted Admission Record', async () => {
   const store = createMemoryAdmissionRecordStore()
   const deps = makeDeps()
-  const svc = new OrchestratorService({} as never, deps, { admissionRecordStore: store })
+  const svc = new OrchestratorService(new Context(), deps, { admissionRecordStore: store })
   const result = await svc.handleTurn(makeTurnInput())
   assert.equal(result.status, 'ok')
   const records = await store.list()
