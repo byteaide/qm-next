@@ -140,6 +140,10 @@ export class OrchestratorService extends Service implements Orchestrator {
         ...(input.harness || (harness && choiceModel) ? { harness: harness.profile.id } : {}),
         ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
         ...(input.readOnly ? { readOnly: true } : {}),
+        // ADR-0010 continuation executor — a Continuation Attempt
+        // carries the approval so the harness resumes the saved
+        // command point (by commandRequestId), not a blind replay.
+        ...(input.approval ? { approval: input.approval } : {}),
         ...(tools ? { tools } : {}),
         systemPrompt,
         history,
@@ -177,7 +181,13 @@ export class OrchestratorService extends Service implements Orchestrator {
       })
       const sourceAssistantEntrySeq = [...emitted].reverse().find((e) => e.type === 'assistant')?.seq
       let finalResult: TurnResult
+      // ADR-0010 continuation executor — a paused turn is a Suspended
+      // Attempt, not a finished one: the runner publishes
+      // `attempt.suspended` when it suspends the Run, so this service
+      // must not claim the Attempt finished here.
+      let finalPendingApproval = false
       if (result.pausedOnApproval) {
+        finalPendingApproval = true
         const approvals: PendingApproval[] = (result.pendingApprovals ?? []).map((pa) => ({
           requestId: `${session.id}:${pa.command}`,
           command: pa.command,
@@ -204,7 +214,7 @@ export class OrchestratorService extends Service implements Orchestrator {
           ...(sourceAssistantEntrySeq !== undefined ? { sourceAssistantEntrySeq } : {}),
         }
       }
-      if (events) {
+      if (events && !finalPendingApproval) {
         publishes.push(
           events
             .publish({ kind: 'attempt.finished', runId: input.runId!, sessionId: session.id, attemptState: 'succeeded' })
