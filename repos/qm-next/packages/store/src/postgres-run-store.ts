@@ -17,6 +17,7 @@ import type {
   RunSource,
   RunState,
   RunStore,
+  RunSuspension,
   TurnInput,
   TurnResult,
 } from '@qm/types'
@@ -219,7 +220,127 @@ async claimById(runId, workerId, ttlMs): Promise<Run | null> {
     async fail(runId, leaseToken, error, opts): Promise<{ requeued: boolean }> {
       const run = await getRun(runId)
       if (!run || run.leaseToken !== leaseToken) return { requeued: false }
-      return { requeued: (await retire(run, error, opts?.retry !== false, { countsAsError: true })).requeued }
+      return {
+        requeued: (
+          await retire(run, error, opts?.retry !== false, {
+            countsAsError: true,
+            ...(opts?.failureReason !== undefined ? { failureReason: opts.failureReason } : {}),
+          })
+        ).requeued,
+      }
+    },
+
+    /**
+     * ADR-0010 continuation executor — suspend the Run for Approval
+     * (see the contract doc). Guarded by the live lease token and the
+     * `running` target state; the executor lease is released and the
+     * durable Approval Continuation + `pending_approval` result
+     * snapshot land atomically in the guarded UPDATE.
+     */
+    async suspendForApproval(runId, leaseToken, suspension: RunSuspension): Promise<boolean> {
+      const run = await getRun(runId)
+      if (!run) return false
+      if (isTerminal(run.status) || isTerminalTargetState(run.targetState)) return false
+      if (run.leaseToken !== leaseToken) return false
+      if (run.targetState !== 'running') return false
+      const deliveryState: RunDeliveryState = {
+        ...(run.deliveryState ?? {}),
+        pendingApproval: {
+          requestId: suspension.requestId,
+          commandRequestId: suspension.commandRequestId,
+          attemptId: suspension.attemptId,
+          suspendedAt: suspension.suspendedAt,
+        },
+      }
+      const { rowCount } = await query(
+        `UPDATE runs SET target_state='awaiting_approval', result=$3, delivery_state=$4,
+           lease_token=NULL, lease_expires_at=NULL, worker_id=NULL
+         WHERE id=$1 AND lease_token=$2 AND target_state='running'`,
+        [runId, leaseToken, JSON.stringify(suspension.result), JSON.stringify(deliveryState)],
+      )
+      return rowCount > 0
+    },
+
+    /**
+     * ADR-0010 continuation executor — claim the oldest
+     * continuation-claimable Run: flipped back to `'running'` by
+     * `beginContinuationAttempt` with no executor lease and a retained
+     * `pendingApproval`. The lease attaches atomically (FOR UPDATE
+     * SKIP LOCKED) without bumping `attempts`.
+     */
+    async claimNextContinuation(workerId, ttlMs): Promise<Run | null> {
+      const token = randomUUID()
+      const now = Date.now()
+      try {
+        const { rows } = await query(
+          `UPDATE runs SET lease_token=$1, lease_expires_at=$2, worker_id=$3
+           WHERE id = (
+             SELECT id FROM runs
+             WHERE status='running' AND target_state='running' AND lease_token IS NULL
+               AND delivery_state IS NOT NULL AND delivery_state::jsonb->'pendingApproval' IS NOT NULL
+               AND delivery_state::jsonb->'currentAttemptId' IS NOT NULL
+             ORDER BY created_at ASC, seq ASC FOR UPDATE SKIP LOCKED LIMIT 1
+           ) RETURNING *`,
+          [token, now + ttlMs, workerId],
+        )
+        return rows[0] ? rowToRun(rows[0]) : null
+      } catch (err) {
+        if (isUniqueViolation(err)) return null
+        throw err
+      }
+    },
+
+    /**
+     * Slice 2.4 — start a Continuation Attempt in the same Run
+     * (ADR-0010 continuation executor semantics; see the contract
+     * doc). Guarded to `awaiting_approval` and idempotent on the same
+     * `commandRequestId`; the executor lease is released so the
+     * continuation lane can claim the Run.
+     */
+    async beginContinuationAttempt(runId, newAttemptId, commandRequestId): Promise<boolean> {
+      const run = await getRun(runId)
+      if (!run) return false
+      if (isTerminal(run.status) || isTerminalTargetState(run.targetState)) return false
+      if (run.targetState !== 'awaiting_approval') return false
+      const lastReq = run.deliveryState?.lastCommandRequestId
+      if (lastReq === commandRequestId) return false
+      const deliveryState: RunDeliveryState = {
+        ...(run.deliveryState ?? {}),
+        lastCommandRequestId: commandRequestId,
+        currentAttemptId: newAttemptId,
+      }
+      const { rowCount } = await query(
+        `UPDATE runs SET status='running', target_state='running', lease_token=NULL, lease_expires_at=NULL, worker_id=NULL,
+           attempts=attempts+1, started_at=COALESCE(started_at,$2), delivery_state=$3
+         WHERE id=$1 AND target_state='awaiting_approval'`,
+        [runId, Date.now(), JSON.stringify(deliveryState)],
+      )
+      return rowCount > 0
+    },
+
+    /**
+     * Slice 2.4 — fail the same Run from an approval decision
+     * (`approval_denied` / `approval_expired`). ADR-0010 continuation
+     * executor guard: only an `awaiting_approval` Run may be failed,
+     * so a late TTL sweep can never kill a resumed Run. Idempotent.
+     */
+    async failFromApproval(runId, failureReason): Promise<boolean> {
+      const run = await getRun(runId)
+      if (!run) return false
+      if (isTerminal(run.status) || isTerminalTargetState(run.targetState)) return false
+      if (run.targetState !== 'awaiting_approval') return false
+      const { rowCount } = await query(
+        `UPDATE runs SET target_state='failed', failure_reason=$2,
+           status = CASE WHEN run_source='legacy' THEN 'failed' ELSE status END,
+           lease_token=NULL, lease_expires_at=NULL, worker_id=NULL, finished_at=$3
+         WHERE id=$1 AND target_state='awaiting_approval'`,
+        [runId, failureReason, Date.now()],
+      )
+      if (rowCount > 0) {
+        settle(await getRun(runId))
+        return true
+      }
+      return false
     },
 
     async setDeliveryState(runId, leaseToken, state: RunDeliveryState): Promise<boolean> {

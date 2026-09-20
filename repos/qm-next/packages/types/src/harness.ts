@@ -12,6 +12,7 @@ import type { NewEntry, Session, SessionEntry } from './session.ts'
 import type { GapPhases, GapWork, LlmCallUsage, LlmTransportMeta, NewTapeRecord, TapeRecord } from './session-store.ts'
 import type { ProviderKeys } from './model.ts'
 import type { ToolContext } from './tools.ts'
+import type { TurnApproval } from './turn.ts'
 
 export type HarnessControlTransport = 'mock' | 'in-process' | 'sdk' | 'http' | 'json-rpc' | 'api'
 
@@ -132,6 +133,13 @@ export interface HarnessTurnInput {
   onDelta?(chunk: string): void
   onTextBlockStart?(): void
   toolApprovalGate?(tool: string): boolean
+  /**
+   * ADR-0010 continuation executor — present on a Continuation Attempt
+   * that resumes a Suspended Attempt. The harness MUST replay the
+   * saved command point identified by `commandRequestId` (the paused
+   * tool call), not a blind replay of the original input text.
+   */
+  approval?: TurnApproval
 }
 
 export interface HarnessPendingApproval {

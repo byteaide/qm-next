@@ -5,7 +5,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import type { EnqueueInput, EnqueueResult, FailureReason, ReapEvent, Run, RunDeliveryState, RunStore } from '@qm/types'
+import type { EnqueueInput, EnqueueResult, FailureReason, ReapEvent, Run, RunDeliveryState, RunStore, RunSuspension } from '@qm/types'
 import { assertTargetRunInvariant, isTerminal, isTerminalTargetState, leaseLapsed } from '@qm/types'
 
 /**
@@ -185,7 +185,12 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
     async fail(runId, leaseToken, error, opts) {
       const run = runs.get(runId)
       if (!run || run.leaseToken !== leaseToken) return { requeued: false }
-      return { requeued: retire(run, error, opts?.retry !== false, { countsAsError: true }).requeued }
+      return {
+        requeued: retire(run, error, opts?.retry !== false, {
+          countsAsError: true,
+          ...(opts?.failureReason !== undefined ? { failureReason: opts.failureReason } : {}),
+        }).requeued,
+      }
     },
 
     async setDeliveryState(runId, leaseToken, state: RunDeliveryState) {
@@ -197,17 +202,78 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
     },
 
     /**
-     * Slice 2.4 — start a Continuation Attempt in the same Run. The
-     * Run transitions back to `running`; the Suspended Attempt stays
-     * in the history (the helper above already mutates `currentAttempt`
-     * by tracking `attempts`). Idempotent on the same `commandRequestId`:
-     * duplicate calls return `false` so repeated delivery cannot
-     * create a second Continuation Attempt (ADR-0010).
+     * ADR-0010 continuation executor — suspend the Run for Approval.
+     * The executor lease is released, `targetState` becomes
+     * `awaiting_approval`, and the durable Approval Continuation plus
+     * the `pending_approval` result snapshot land atomically on the
+     * row. Guarded by the live lease token: only the owning executor
+     * may suspend.
+     */
+    async suspendForApproval(runId, leaseToken, suspension: RunSuspension) {
+      const run = runs.get(runId)
+      if (!run) return false
+      if (isTerminal(run.status) || isTerminalTargetState(run.targetState)) return false
+      if (run.leaseToken !== leaseToken) return false
+      if (run.targetState !== 'running') return false
+      run.targetState = 'awaiting_approval'
+      run.leaseToken = null
+      run.leaseExpiresAt = null
+      run.workerId = null
+      run.result = suspension.result
+      run.deliveryState = {
+        ...(run.deliveryState ?? {}),
+        pendingApproval: {
+          requestId: suspension.requestId,
+          commandRequestId: suspension.commandRequestId,
+          attemptId: suspension.attemptId,
+          suspendedAt: suspension.suspendedAt,
+        },
+      }
+      assertTargetRunInvariant(run)
+      return true
+    },
+
+    /**
+     * ADR-0010 continuation executor — claim the oldest
+     * continuation-claimable Run (see the contract doc). The lease
+     * attaches without bumping `attempts`; `beginContinuationAttempt`
+     * already counted the Continuation Attempt.
+     */
+    async claimNextContinuation(workerId, ttlMs) {
+      const claimable = [...runs.values()]
+        .filter(
+          (r) =>
+            r.status === 'running' &&
+            r.targetState === 'running' &&
+            r.leaseToken === null &&
+            r.deliveryState?.pendingApproval !== undefined &&
+            r.deliveryState?.currentAttemptId !== undefined,
+        )
+        .sort((a, b) => a.createdAt - b.createdAt)
+      const run = claimable[0]
+      if (!run) return null
+      run.leaseToken = randomUUID()
+      run.leaseExpiresAt = Date.now() + ttlMs
+      run.workerId = workerId
+      return { ...run }
+    },
+
+    /**
+     * Slice 2.4 — start a Continuation Attempt in the same Run.
+     * ADR-0010 continuation executor semantics: the Run becomes
+     * continuation-claimable (`status`/`targetState` back to
+     * `'running'`, executor lease released) and the continuation lane
+     * claims it via `claimNextContinuation`. Guarded to
+     * `awaiting_approval` only — a live or queued Run is never
+     * re-driven by a stale decision — and idempotent on the same
+     * `commandRequestId` so repeated delivery cannot create a second
+     * Continuation Attempt (ADR-0010).
      */
     async beginContinuationAttempt(runId, newAttemptId, commandRequestId) {
       const run = runs.get(runId)
       if (!run) return false
-      if (isTerminal(run.status)) return false
+      if (isTerminal(run.status) || isTerminalTargetState(run.targetState)) return false
+      if (run.targetState !== 'awaiting_approval') return false
       // Idempotency guard: repeated delivery of the same approval
       // decision must not create a second Continuation Attempt.
       const lastReq = run.deliveryState?.lastCommandRequestId
@@ -227,12 +293,16 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
     /**
      * Slice 2.4 — fail the same Run because the Approval was rejected
      * or expired. The rejected/expired command never executes; the
-     * Run is terminal after this call. Idempotent.
+     * Run is terminal after this call. ADR-0010 continuation executor
+     * guard: only an `awaiting_approval` Run may be failed from a
+     * decision, so a late TTL sweep can never kill a resumed Run.
+     * Idempotent.
      */
     async failFromApproval(runId, failureReason) {
       const run = runs.get(runId)
       if (!run) return false
-      if (isTerminal(run.status)) return false
+      if (isTerminal(run.status) || isTerminalTargetState(run.targetState)) return false
+      if (run.targetState !== 'awaiting_approval') return false
       if (run.runSource === 'legacy') {
         run.status = 'failed'
       }

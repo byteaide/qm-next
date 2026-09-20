@@ -19,6 +19,13 @@ export interface TurnApproval {
   requestId: string
   approved: boolean
   scope?: 'once' | 'session' | 'always'
+  /**
+   * ADR-0010 continuation executor — stable identity of the saved
+   * command point. The resumer MUST replay by `commandRequestId`
+   * (the id recorded on the durable Approval Continuation), never by
+   * re-driving the raw input text.
+   */
+  commandRequestId?: string
 }
 
 export interface TurnInput {

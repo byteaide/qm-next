@@ -64,6 +64,23 @@ export interface ReapEvent {
   outcome: 'requeued' | 'parked' | 'skipped_newer_session'
 }
 
+/**
+ * ADR-0010 continuation executor — the durable Approval Continuation
+ * mirrored on the Run row. Written atomically by
+ * `suspendForApproval`; survives process restarts so the continuation
+ * lane can resume the saved command point exactly once.
+ */
+export interface RunPendingApproval {
+  /** Durable Approval Request id (the `ApprovalStore` registry id). */
+  requestId: string
+  /** Stable command-point identity replayed on resume. */
+  commandRequestId: string
+  /** Identifier of the Suspended Attempt being resumed. */
+  attemptId: string
+  /** Wall-clock epoch ms when the Attempt was suspended. */
+  suspendedAt: number
+}
+
 export interface RunDeliveryState {
   editRef?: string
   /**
@@ -74,6 +91,26 @@ export interface RunDeliveryState {
   lastCommandRequestId?: string
   /** Slice 2.4 — id of the active Continuation Attempt within this Run. */
   currentAttemptId?: string
+  /**
+   * ADR-0010 continuation executor — present while the Run is
+   * `awaiting_approval`. Cleared by `beginContinuationAttempt` only in
+   * the sense that the pointer moves on: the record is retained so the
+   * continuation lane can build the resume `TurnInput.approval`.
+   */
+  pendingApproval?: RunPendingApproval
+}
+
+/**
+ * Input for `RunStore.suspendForApproval` (ADR-0010 continuation
+ * executor). `result` is the `pending_approval` TurnResult snapshot
+ * that surfaces (wire/IM cards) read while the Run is suspended.
+ */
+export interface RunSuspension {
+  requestId: string
+  commandRequestId: string
+  attemptId: string
+  suspendedAt: number
+  result: TurnResult
 }
 
 export interface Run {
@@ -143,21 +180,62 @@ export interface RunStore {
 
   complete(runId: string, leaseToken: string, result: TurnResult): Promise<boolean>
 
-  fail(runId: string, leaseToken: string, error: string, opts?: { retry?: boolean }): Promise<{ requeued: boolean }>
+  fail(runId: string, leaseToken: string, error: string, opts?: { retry?: boolean; failureReason?: FailureReason }): Promise<{ requeued: boolean }>
 
   setDeliveryState(runId: string, leaseToken: string | null, state: RunDeliveryState): Promise<boolean>
 
   /**
-   * Slice 2.4 — create a Continuation Attempt in the SAME Run (no
-   * successor Run). The Run transitions back to `running`. The
-   * Suspended Attempt stays in the Run's history; this method only
-   * advances the active Attempt pointer.
+   * ADR-0010 continuation executor — suspend the Run for Approval:
+   * transitions `targetState` to `awaiting_approval`, releases the
+   * executor lease, and records the durable Approval Continuation in
+   * `deliveryState.pendingApproval` together with the
+   * `pending_approval` result snapshot the surfaces read.
    *
-   * Returns `false` when the Run does not exist, is already in a
-   * terminal state, or the new attempt id collides with an existing
-   * one. Idempotent on the same `(runId, commandRequestId)` pair —
-   * duplicate calls return `false` so repeated delivery cannot create
-   * a second Continuation Attempt (ADR-0010 §"Repeated delivery").
+   * The Run is NOT claimable while suspended (`status` stays
+   * `'running'`, lease is `null`) and is invisible to the reaper
+   * (`leaseLapsed` requires a live lease). Awaiting Approval is
+   * non-terminal — no terminal listener fires.
+   *
+   * Returns `false` when the Run does not exist, the lease token does
+   * not match, the Run is terminal, or it is already suspended.
+   */
+  suspendForApproval?(
+    runId: string,
+    leaseToken: string,
+    suspension: RunSuspension,
+  ): Promise<boolean>
+
+  /**
+   * ADR-0010 continuation executor — claim the oldest
+   * continuation-claimable Run: a Run that `beginContinuationAttempt`
+   * flipped back to `'running'` with no executor lease and a retained
+   * `deliveryState.pendingApproval`. The lease attaches WITHOUT
+   * bumping `attempts` (the Continuation Attempt was already counted
+   * at `beginContinuationAttempt` time).
+   *
+   * Returns `null` when no continuation-claimable Run exists. Durable
+   * discovery: safe across process restarts — the acceptance property
+   * "restart between approval and resume still resumes exactly once"
+   * rides on this method plus the `lastCommandRequestId` idempotency
+   * guard.
+   */
+  claimNextContinuation?(workerId: string, ttlMs: number): Promise<Run | null>
+
+  /**
+   * Slice 2.4 — create a Continuation Attempt in the SAME Run (no
+   * successor Run). ADR-0010 continuation executor: the Run becomes
+   * continuation-claimable — `status`/`targetState` return to
+   * `'running'` with the executor lease released, and the continuation
+   * lane claims it via `claimNextContinuation`. The Suspended Attempt
+   * stays in the Run's history; `deliveryState.pendingApproval` is
+   * retained so the lane can build the resume `TurnInput.approval`.
+   *
+   * Guarded: returns `false` when the Run does not exist, is already
+   * in a terminal state, is NOT `awaiting_approval` (a live or queued
+   * Run is never re-driven by a stale decision), or the same
+   * `commandRequestId` was already delivered. That idempotency is the
+   * exactly-once guarantee for repeated approval decision delivery
+   * (ADR-0010 §"Repeated delivery").
    */
   beginContinuationAttempt?(
     runId: string,
@@ -170,8 +248,14 @@ export interface RunStore {
    * `approval_expired` (ADR-0010). The rejected/expired command never
    * executes; the Run is terminal after this call.
    *
-   * Returns `false` when the Run does not exist or is already
-   * terminal. Idempotent — duplicate calls return `false`.
+   * ADR-0010 continuation executor guard: only an `awaiting_approval`
+   * Run may be failed from a decision — a Run that already resumed
+   * (continuation claimable/claimed) is left alone so a late TTL sweep
+   * or duplicate decision can never kill live work.
+   *
+   * Returns `false` when the Run does not exist, is already
+   * terminal, or is not `awaiting_approval`. Idempotent — duplicate
+   * calls return `false`.
    */
   failFromApproval?(runId: string, failureReason: 'approval_denied' | 'approval_expired'): Promise<boolean>
 
