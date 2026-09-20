@@ -286,3 +286,50 @@ flag 读取只经由 RolloutFlag port（§Phase 0 边界规则）。Phase 7 清�
 移除 flag 与 process-local registry dedup Map（KV-002 同批）。
 
 **Linked ADRs:** 0008 (IM intake is durable fan-out), 0015 (IM subscribers have independent cursors)。
+
+## 13. Phase 6 Connector OAuth 与 Token 加密（plan §6.5 + ADR-0017 runbook）
+
+Phase 6（ADR-0009, ADR-0016, ADR-0017）把 OAuth 生命周期移入 Connector
+上下文：flow state / consent link / provider exchange / token 持久化全部
+落在 durable store（`oauth_flows` / `consent_links` / `connector_tokens`），
+HTTP 路由只做适配器。Token 落库前经 AES-256-GCM 信封密封（KEK =
+`deriveConnectorKey(secrets[0], 'connector-tokens')`，用途派生、不落盘）；
+启动缺 key 物料时 fail-closed（同 §2.2 缺生产策略语义），无明文回退模式。
+
+**指标（§6.5）：**
+
+| 指标 | 类型 | Labels | 语义 |
+|---|---|---|---|
+| `oauth_flow_total` | counter | `step=start\|callback\|complete`, `outcome=ok\|fail` | 每个 OAuth 流程步骤 |
+| `oauth_token_decrypt_total` | counter | `provider`, `outcome=ok\|error` | 每次 vault 解密；`error` 表示无 KEK 可解（记录需重连） |
+| `oauth_redaction_hit_total` | counter | `boundary=log\|observation` | token 形状字符串在边界被拦（区别于通用 `redaction_hit_total`） |
+
+**告警（必须 page on-call）：**
+
+- 任何非零 `oauth_token_decrypt_total{outcome="error"}`（plan §6.5）。
+- 任何非零 `oauth_redaction_hit_total`。
+- `oauth_flow_total{step="complete",outcome="fail"}` 突增（provider
+  侧故障或配置漂移）。
+
+**Runbook 动作：**
+
+1. **在线轮换 KEK**（ADR-0017 Rotation）：
+   1. 在部署 secret store 生成新 secret，追加到 `config.secrets` 首位
+      （现有语义：首条铸造、其余验证）；
+   2. 重启——新 seal 一律落在新 KEK 下，旧记录仍可解；
+   3. 执行重加密清扫 `vault.resealAll()`（返回 `{total, resealed}`）；
+   4. 清扫后确认所有 `connector_tokens` 行的 `keyId` 等于当前 kid，
+      方可从 `config.secrets` 移除旧 secret。
+2. **启动失败：`connectors surface requires signing secret material
+   (fail-closed, ADR-0017)`**：connectors surface 开启但 `config.secrets`
+   缺失/为空。修复：从部署 secret store（gopass `qm-next/<env>/`）恢复
+   secret 后重启。没有明文回退；不得以跳过 connectors surface 的方式绕过。
+3. **解密错误（`decrypt error` 告警）**：某记录无链内 KEK 可解——通常
+   是旧 secret 被过早移除。该 token 不可恢复（设计如此）：将对应
+   `(host, principalId)` 标记 needs-reconnect、删除 sealed 行、由用户
+   重新连接账号。
+4. **`redaction_hit` 告警**：某生产路径输出了 token 形状字符串——
+   按红线事件处理：定位 producer、评估泄露面、轮换相关 token。
+
+**Linked ADRs:** 0009 (Connector context owns OAuth), 0016 (Connector
+tokens stay out of observation), 0017 (OAuth token encryption at rest)。

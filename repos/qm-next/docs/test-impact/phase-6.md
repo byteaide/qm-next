@@ -103,6 +103,7 @@ A regression beyond the SLO blocks the PR; the phase gate ratifies these numbers
 | Date | Change | Author |
 |---|---|---|
 | 2026-09-20 | Initial submission | phase-6 groundwork session |
+| 2026-09-20 | Slices 6.1–6.7 landed on `feat/connector-oauth`: token vault (KEK chain + resealAll), Connector OAuth flow service, adapter routes, §6.5 metric families, KV-003 resolved, operations.md §13 runbook. New-test inventory realized as: `token-vault.test.ts`, `token-vault-failclosed.test.ts`, `connector-oauth-flow.test.ts`, `connector-routes-adapter.test.ts`, `observability-phase-6.test.ts` (PG twin for the vault/flow pending `QM_NEXT_PG_URL` evidence at phase gate) | phase-6 implementation session |
 
 ## 12. Gate self-check
 

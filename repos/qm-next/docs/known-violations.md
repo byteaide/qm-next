@@ -73,15 +73,6 @@ They are still present; the architecture gate acknowledges them.
     compatibility fields"), at which point this entry is deleted and the
     gate asserts zero hits.
 
-- id: KV-003
-  rule: route-local OAuth pending Maps
-  phase: 6
-  location: packages/connectors/src/oauth-flow-store.ts (durable store) and
-    any HTTP route that owns a `Map<string, OAuthFlow>` in production code
-  notes: Phase 6 moves OAuth lifecycle into Connector context. The
-    `oauth-flow-store.ts` is the durable backing and is allowed; route-local
-    Maps in production code are not.
-
 - id: KV-004
   rule: IM platform symbols in im-core
   phase: 0  # enforced by the gate already; this entry exists so the
@@ -131,3 +122,16 @@ hits remain in the tree.
     `TriggerRuntime` contract from `@qm/types`; the composition seam is
     `TriggerRuntimeCordisService` in `@qm/api`. The TriggersService
     architecture test asserts no `@qm/api` dependency or import.
+
+- id: KV-003
+  rule: route-local OAuth pending Maps
+  phase: 6 (resolved — feat/connector-oauth)
+  resolution: the route-local `pendingLinks` Map and the route-owned
+    callback state machine in `packages/api/src/routes/connector-routes.ts`
+    are deleted. OAuth flow state, consent links, provider exchange, and
+    token persistence live in the Connector context (`@qm/connectors`)
+    behind the durable `oauth_flows` / `consent_links` stores (ADR-0009),
+    and tokens are sealed by the vault (ADR-0017) before any durable
+    write. Routes are HTTP adapters: validate, normalize, invoke,
+    redact. The architecture gate's `new Map<string, OAuthFlow>` grep
+    asserts zero hits in production runtime code.
