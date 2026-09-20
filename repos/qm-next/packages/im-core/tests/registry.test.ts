@@ -1,5 +1,10 @@
 /**
- * ImRegistry: start/stop lifecycle, dedup, drain-on-dispose, service wiring.
+ * ImRegistry: start/stop lifecycle, pass-through dispatch, drain-on-dispose,
+ * service wiring.
+ *
+ * Phase 7 (KV-007): the registry has NO process-local dedup — every emitted
+ * event reaches `onEvent`, and duplicate recognition is the durable Intake
+ * Inbox accept's job (provider + eventId, ADR-0008).
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -52,15 +57,19 @@ test('register resolves with intake live and dispose parks it stopped', async ()
   assert.equal(received.length, 0)
 })
 
-test('emit flows to onEvent with eventId dedup', async () => {
+test('emit flows to onEvent without process-local dedup (durable intake is the authority)', async () => {
   const received: string[] = []
   const registry = createImRegistry({ onEvent: async (events) => { for (const e of events) received.push(e.eventId) } })
   let startCtx: ImProviderStartContext | undefined
   const disposer = await registry.register(fakeProvider({ start: async (c) => { startCtx = c } }))
   await startCtx!.emit({ kind: 'message', provider: 'fake', instanceId: 'test', eventId: 'm1', occurredAt: 1, receivedAt: 2, destination: { type: 'fake', target: 'c1' }, actor: { providerUserId: 'u1' }, text: 'hi' })
+  // A repeat delivery must NOT be silently dropped here: the KV-007
+  // process-local Map is removed. The durable Intake Inbox accept
+  // (provider + eventId, ADR-0008) recognizes duplicates downstream, so
+  // dedup survives restarts and multiple instances.
   await startCtx!.emit({ kind: 'message', provider: 'fake', instanceId: 'test', eventId: 'm1', occurredAt: 1, receivedAt: 3, destination: { type: 'fake', target: 'c1' }, actor: { providerUserId: 'u1' }, text: 'hi' })
   await startCtx!.emit({ kind: 'message', provider: 'fake', instanceId: 'test', eventId: 'm2', occurredAt: 4, receivedAt: 5, destination: { type: 'fake', target: 'c1' }, actor: { providerUserId: 'u1' }, text: 'again' })
-  assert.deepEqual(received, ['m1', 'm2'])
+  assert.deepEqual(received, ['m1', 'm1', 'm2'])
   await disposer()
 })
 

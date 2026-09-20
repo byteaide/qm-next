@@ -21,9 +21,8 @@ import {
   createModelAmbientJudge,
   type ChannelPolicyStore,
 } from '@qm/approvals'
-import { createRolloutFlagRegistry, registerTargetImIntakeFlag, resolveTargetImIntake } from '@qm/concurrency'
 import { resolveProviderDm } from '@qm/directory'
-import type { ImDeliveryQueue, ImIntakeCursorStore, ImIntakeDeadLetterStore, ImIntakeInbox, IntakeSubscriber } from '@qm/im-core'
+import type { ImDeliveryQueue, IntakeSubscriber } from '@qm/im-core'
 import {
   createAuditSubscriber,
   createMemoryDeliveryQueue,
@@ -114,10 +113,10 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
   private bridge: ImTurnBridge | undefined
 
   /**
-   * Phase 5 durable intake fan-out, present only when the
-   * `target.im-intake` rollout flag is on. Composition code may inspect
-   * it (dead-letter admin surface) or attach further subscribers before
-   * start via `createMirrorSubscriber`.
+   * Phase 5 durable intake fan-out — unconditional since the Phase 7
+   * cutover (the `target.im-intake` rollout flag is removed). Composition
+   * code may inspect it (dead-letter admin surface) or attach further
+   * subscribers before start via `createMirrorSubscriber`.
    */
   intake: IntakeFanout | undefined
 
@@ -181,33 +180,23 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
     } else if (containers.length > 0) {
       this.ctx.logger.warn('im-bridge: ambientContainers set without a judge — ambient stays inert')
     }
-    // Phase 5 (ADR-0008/0015): the `target.im-intake` rollout flag — read
-    // through the RolloutFlag port only — decides whether inbound events
-    // flow through the durable Intake Inbox + fan-out or the legacy
-    // direct bridge sink. Default off keeps legacy authoritative.
-    const flags = createRolloutFlagRegistry({ env: process.env })
-    registerTargetImIntakeFlag(flags)
-    const intakeEnabled = resolveTargetImIntake(flags)
+    // Phase 5 (ADR-0008/0015), Phase 7 cutover: inbound events ALWAYS flow
+    // through the durable Intake Inbox + fan-out. The `target.im-intake`
+    // rollout flag is removed and the KV-007 process-local dedup Map is
+    // gone — the durable accept (provider + eventId) is the dedup authority.
     const databaseUrl = api.config.databaseUrl
 
-    // Durable intake stores (target path): Postgres when the composition
-    // root runs with databaseUrl, memory otherwise — mirroring the
-    // delivery-queue selection.
-    let inbox: ImIntakeInbox | undefined
-    let cursors: ImIntakeCursorStore | undefined
-    let deadLetters: ImIntakeDeadLetterStore | undefined
-    if (intakeEnabled) {
-      inbox = databaseUrl ? createPostgresIntakeInbox(databaseUrl) : createMemoryIntakeInbox()
-      cursors = databaseUrl ? createPostgresIntakeCursorStore(databaseUrl) : createMemoryIntakeCursorStore()
-      deadLetters = databaseUrl ? createPostgresIntakeDeadLetterStore(databaseUrl) : createMemoryIntakeDeadLetterStore()
-      this.tracker = createBridgeTurnTracker(inbox)
-    }
-    const intakeActive = Boolean(inbox && cursors && deadLetters && this.tracker)
+    // Durable intake stores: Postgres when the composition root runs with
+    // databaseUrl, memory otherwise — mirroring the delivery-queue selection.
+    const inbox = databaseUrl ? createPostgresIntakeInbox(databaseUrl) : createMemoryIntakeInbox()
+    const cursors = databaseUrl ? createPostgresIntakeCursorStore(databaseUrl) : createMemoryIntakeCursorStore()
+    const deadLetters = databaseUrl ? createPostgresIntakeDeadLetterStore(databaseUrl) : createMemoryIntakeDeadLetterStore()
+    this.tracker = createBridgeTurnTracker(inbox)
 
     const registry = new ImRegistryService(this.ctx, {
       onEvent: (events) => {
-        if (intakeActive && this.intake) return this.intake.ingestAll(events).then(() => undefined)
-        return this.bridge ? this.bridge.sink(events) : Promise.resolve()
+        if (!this.intake) throw new Error('im-bridge: inbound event before the intake fan-out started')
+        return this.intake.ingestAll(events).then(() => undefined)
       },
     })
     // Delivery queue (20.0 twin lane): durable Postgres queue as soon as
@@ -294,8 +283,8 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
     )
     this.queue = this.bridge.queue
     await this.bridge.start()
-    if (inbox && cursors && deadLetters && this.tracker) {
-      const subscribers: IntakeSubscriber[] = [createBridgeIntakeSubscriber(this.bridge, this.tracker)]
+    {
+      const subscribers: IntakeSubscriber[] = [createBridgeIntakeSubscriber(this.bridge, this.tracker!)]
       if (this.config.intakeAudit) {
         subscribers.push(
           createAuditSubscriber(async (record) => {

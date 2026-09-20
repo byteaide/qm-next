@@ -531,16 +531,19 @@ test('a click on an unknown approval is answered with an expired notice', async 
   }
 })
 
-test('registry dedup keeps a duplicate eventId from double-submitting', async () => {
+test('registry passes repeat deliveries through; dedup is the durable intake accept (KV-007 removed)', async () => {
+  // This harness wires the registry directly to `bridge.sink` (the
+  // production path routes through the durable Intake Inbox instead).
+  // The registry must NOT drop repeat deliveries itself — duplicate
+  // recognition lives in the durable accept (provider + eventId,
+  // ADR-0008), covered by im-intake-wiring.test.ts (redelivery creates
+  // no second Turn; restart maps redelivery to the same Turn).
   const t = await setup()
   try {
     const event = messageEvent()
     await t.cells.ctx!.emit(event)
     await t.cells.ctx!.emit(event)
-    assert.ok(await waitFor(async () => (await t.runs.list()).length === 1))
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    assert.equal((await t.runs.list()).length, 1)
-    assert.equal(t.sent.length, 1)
+    assert.ok(await waitFor(async () => (await t.runs.list()).length === 2), 'repeat deliveries reach the sink unfiltered')
   } finally {
     await t.dispose()
   }

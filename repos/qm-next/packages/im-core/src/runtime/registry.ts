@@ -1,8 +1,13 @@
 /**
  * ImRegistry implementation: validate → register → start (intake live) with
- * abortable signal, eventId dedup in front of the core sink, and dispose
- * semantics that stop the provider and drain in-flight dispatches
- * (webhook-runtime shape, generalized to IM providers).
+ * dispatch into the core sink, and dispose semantics that stop the provider
+ * and drain in-flight dispatches (webhook-runtime shape, generalized to IM
+ * providers).
+ *
+ * Phase 7 cutover (KV-007): the registry carries NO process-local dedup.
+ * Duplicate recognition is the durable Intake Inbox accept's job
+ * (provider + eventId, ADR-0008) — restart- and multi-instance-safe by
+ * construction, unlike an in-memory Map.
  */
 import {
   type ImLogger,
@@ -22,33 +27,17 @@ interface Registration {
   disposal?: Promise<void>
 }
 
-const DEDUP_MAX_ENTRIES = 10_000
-
 export type ImRegistryHandle = ImRegistry & { dispose(): Promise<void> }
 
 export function createImRegistry(options: ImRegistryOptions): ImRegistryHandle {
   const logger: ImLogger = options.logger ?? console
   const registrations = new Map<string, Registration>()
-  const seenEvents = new Map<string, number>()
   let closing = false
-
-  function dedupe(event: InboundEvent): boolean {
-    if (seenEvents.has(event.eventId)) return false
-    if (seenEvents.size >= DEDUP_MAX_ENTRIES) {
-      const oldest = [...seenEvents.entries()].sort((a, b) => a[1] - b[1]).slice(0, DEDUP_MAX_ENTRIES / 2)
-      for (const [key] of oldest) seenEvents.delete(key)
-    }
-    seenEvents.set(event.eventId, Date.now())
-    return true
-  }
 
   async function dispatch(registration: Registration, events: readonly InboundEvent[]): Promise<void> {
     const tracked = Promise.resolve()
       .then(async () => {
-        for (const event of events) {
-          if (!dedupe(event)) continue
-          await options.onEvent([event])
-        }
+        await options.onEvent(events)
       })
       .catch((error: unknown) => {
         logger.error(`im: inbound dispatch failed for provider "${registration.provider.provider}":`, error)
