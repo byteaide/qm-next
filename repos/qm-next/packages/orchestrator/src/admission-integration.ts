@@ -107,9 +107,10 @@ export function buildStagePorts(opts: BuildStagePortsOptions): StagePorts {
           decision: 'allow',
           sessionId: session.id,
           scopeId,
-          leaseToken: leaseAttempt.lease,
+          leaseToken: leaseAttempt.lease!,
           systemPrompt: resolution.systemPrompt,
           orgScopeId: resolution.orgScopeId,
+          resolution,
           latencyMs: Date.now() - start,
         }
       },

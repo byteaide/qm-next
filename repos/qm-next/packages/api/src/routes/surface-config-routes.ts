@@ -23,7 +23,7 @@ export interface SurfaceConfigValue {
   baseModel?: string
   harnessId?: string
   externalSlackParticipants?: string[]
-  branding?: { accent?: string; mark?: string; selfLabel?: string }
+  branding?: { accent?: string; mark?: string; selfLabel?: string; orgName?: string }
 }
 
 export interface ConfigDeps {
@@ -56,6 +56,7 @@ async function getSurfaceConfig(ctx: ApiRouteContext, deps: ConfigDeps): Promise
     ...(branding.accent ? { accent: branding.accent } : {}),
     ...(branding.mark ? { mark: branding.mark } : {}),
     ...(branding.selfLabel ? { selfLabel: branding.selfLabel } : {}),
+    ...(branding.orgName ? { orgName: branding.orgName } : {}),
   }
   return {
     webuiModels: configuredPicker.length ? configuredPicker : allowed,

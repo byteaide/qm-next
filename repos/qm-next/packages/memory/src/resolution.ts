@@ -1,7 +1,8 @@
 /**
  * Resolution seam for memory (14.0): wraps a ResolutionService so recalled
- * scope memory is appended to the system prompt — the hook point named in
- * m3-scope 14.0. Selection is static (caller-provided scope chain); recall
+ * scope memory rides the TurnResolution as the memory block — segment ⑭ in
+ * the ADR-0018 frame order, appended by the orchestrator AFTER the prompt-
+ * cache boundary. Selection is static (caller-provided scope chain); recall
  * failures are fail-open so a broken store never blocks a turn.
  */
 import type { Conversation, Principal, ResolutionService } from '@qm/types'
@@ -40,7 +41,7 @@ export function wrapResolutionWithMemory(
         }
       }
       if (!recalls.length) return base
-      return { ...base, systemPrompt: `${base.systemPrompt}${memoryRecallBlock(recalls.join('\n\n'), selection.context)}` }
+      return { ...base, memoryBlock: memoryRecallBlock(recalls.join('\n\n'), selection.context) }
     },
   }
 }

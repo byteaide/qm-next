@@ -61,7 +61,7 @@ import {
   type ModelCredentialStore,
 } from '@qm/model'
 import { createMemoryScopeMemory, type ScopeMemory } from '@qm/memory'
-import type { SecurityScreener } from '@qm/security'
+import { renderSecurityPolicyPrompt, resolveSecurityPolicy, type SecurityScreener } from '@qm/security'
 import { createMcpServerStore, createMcpToolService, type McpServerStore, type McpToolService } from '@qm/mcp'
 import {
   createBrowserSessionStore,
@@ -121,12 +121,14 @@ import {
   createMemoryWebhookStore,
   createPostgresChannelPolicyStore,
   createPostgresFileStore,
+  createPostgresSoulStore,
   createPostgresSlackMap,
   createSurfaceContextQueue,
   createWebhookStore,
 } from './services/index.ts'
 import { createAmbientCursorStore, createPostgresAckEmojiPickStore, createPostgresAgentRequestStore, createPostgresAmbientJudgmentStore } from './services/ambient-stores.ts'
 import type { ChannelPolicyStore as ApiChannelPolicyStore } from './services/channel-policy-store.ts'
+import type { SoulStore } from './services/soul-store.ts'
 import { createFireEngine, type CronScheduler, type CronStore } from '@qm/triggers'
 import { createMemoryMonitorStore, createMonitorPoller, createPostgresMonitorStore, type MonitorPoller } from '@qm/monitors'
 import { createMemoryProcessRegistry, createPostgresProcessRegistry, type ProcessRegistry } from '@qm/processes'
@@ -233,8 +235,10 @@ export interface ApiConfig {
     /** Hard ceiling for per-command exec timeouts in seconds. */
     defaultTimeoutCeilingSec?: number
   }
-  /** Dev default system prompt. */
+  /** Dev default system prompt (explicit operator override; empty soul default). */
   systemPrompt?: string
+  /** Security posture the rendered policy prompt resolves from (default auto). */
+  securityPosture?: (typeof SECURITY_POSTURES)[number]
   /** Dev default scope for API turns. */
   scopeId?: ScopeId
   /** Directory sync surface (11.0): in-memory store behind the directory + reach routes. */
@@ -421,7 +425,8 @@ export const Config = Schema.object({
   anthropicApiKey: Schema.string().description('Anthropic key for the pi harness'),
   openaiApiKey: Schema.string().description('OpenAI key for the pi harness'),
   openrouterApiKey: Schema.string().description('OpenRouter key for the pi harness'),
-  systemPrompt: Schema.string().default('You are qm-next.').description('Dev default system prompt'),
+  systemPrompt: Schema.string().description('Explicit system-prompt override used when no soul is configured'),
+  securityPosture: Schema.string().description('Security posture for the rendered policy prompt: dangerous | auto | strict (default auto)'),
   scopeId: Schema.string().default('org:default').description('Dev default scope for API turns'),
   directory: Schema.boolean().description('Directory sync surface (11.0): in-memory store behind the directory + reach routes'),
   keychain: Schema.boolean().description('Keychain surface (11.0): agent keychain behind the /v1/keychain routes'),
@@ -493,11 +498,40 @@ function devIdentity(): IdentityService {
   }
 }
 
-function devResolution(config: ApiConfig): ResolutionService {
-  const systemPrompt = config.systemPrompt ?? 'You are qm-next.'
+const SECURITY_POSTURES = ['dangerous', 'auto', 'strict'] as const
+
+/**
+ * ADR-0018 resolution: the TurnResolution carries the scope's effective soul
+ * (segment ②) plus the rendered security policy (④) and stored branding for
+ * the shared-core variables. Without a soul store (or with no soul set) the
+ * prompt falls back to an explicit `systemPrompt` config override — the
+ * composer still frames every turn, so the soul-less default is empty.
+ */
+function createSoulResolution(
+  config: ApiConfig,
+  soulStore: SoulStore | undefined,
+  branding: { selfLabel?: string; orgName?: string } | undefined,
+): ResolutionService {
   const scope = config.scopeId ?? 'org:default'
+  const posture = SECURITY_POSTURES.includes((config.securityPosture ?? 'auto') as (typeof SECURITY_POSTURES)[number])
+    ? ((config.securityPosture ?? 'auto') as (typeof SECURITY_POSTURES)[number])
+    : 'auto'
+  const securityPrompt = renderSecurityPolicyPrompt(resolveSecurityPolicy(posture))
+  const resolvedBranding = {
+    ...(branding?.selfLabel ? { botName: branding.selfLabel } : {}),
+    ...(branding?.orgName ? { orgName: branding.orgName } : {}),
+  }
   return {
-    resolve: async () => ({ systemPrompt, orgScopeId: scope }),
+    resolve: async () => {
+      const view = soulStore?.getSoul(scope)
+      const soul = view?.effectiveSoul.trim() ? view.effectiveSoul : (config.systemPrompt ?? '')
+      return {
+        systemPrompt: soul,
+        orgScopeId: scope,
+        securityPrompt,
+        ...(Object.keys(resolvedBranding).length ? { branding: resolvedBranding } : {}),
+      }
+    },
     scopeFor: () => scope,
   }
 }
@@ -761,7 +795,18 @@ export class ApiService extends Service<ApiConfig> {
     if (defaultJudge) this.ambientJudge = { judge: defaultJudge }
     const defaultPick = registry.get(harnessId)?.models.pickAckEmoji
     if (defaultPick) this.ackEmoji = { pick: defaultPick }
-    const resolution = devResolution(this.config)
+    // ADR-0018 — the soul store backs the real ResolutionService; durable
+    // deployments hydrate the qm `soul_configs`/`soul_history` DurableMaps
+    // before the first turn resolves.
+    const orgId = (this.config.scopeId ?? 'org:default').replace(/^org:/, '')
+    const soulStore = this.config.soul
+      ? pg
+        ? createPostgresSoulStore(pg, orgId)
+        : createMemorySoulStore(orgId)
+      : undefined
+    if (soulStore && 'ready' in soulStore) await (soulStore as { ready(): Promise<void> }).ready()
+    const surfaceBranding = this.config.surfaceConfig?.branding
+    const resolution = createSoulResolution(this.config, soulStore, surfaceBranding)
     let toolFactory: OrchestratorDeps['tools'] | undefined
     const sandboxHandles = new Map<ScopeId, SandboxHandle>()
     const sandboxConfig = this.config.sandbox
@@ -796,6 +841,20 @@ export class ApiService extends Service<ApiConfig> {
             : {}),
           ...(runId ? { runId, attempt: attempt ?? 1 } : {}),
           ...(runs.ledger ? { ledger: runs.ledger } : {}),
+          ...(soulStore
+            ? {
+                soul: {
+                  read: () => {
+                    const view = soulStore.getSoul(scopeId)
+                    return { effectiveSoul: view.effectiveSoul, soul: view.soul, soulVersion: view.soulVersion }
+                  },
+                  write: async (content: string) => ({
+                    ok: true as const,
+                    version: await soulStore.setSoul(scopeId, content),
+                  }),
+                },
+              }
+            : {}),
         })
       }
     }
@@ -898,7 +957,6 @@ export class ApiService extends Service<ApiConfig> {
     // Parity surface (11.0): directory + reach behind an opt-in store; cron
     // routes always register and 404 per request until the triggers plugin
     // provides its runtime behind the Trigger boundary.
-    const orgId = (this.config.scopeId ?? 'org:default').replace(/^org:/, '')
     const directoryStore = this.config.directory
       ? databaseUrl
         ? createPostgresDirectoryStore(databaseUrl)
@@ -961,7 +1019,6 @@ export class ApiService extends Service<ApiConfig> {
         ? createPostgresFileStore({ databaseUrl, byteStore, grants: grantLedger! })
         : createMemoryFileStore({ blobTransfer: blobTransfer!, grants: grantLedger! })
       : undefined
-    const soulStore = this.config.soul ? createMemorySoulStore(orgId) : undefined
     const runtimeConfigStore = this.config.config ? createMemoryRuntimeConfigStore() : undefined
     // Cluster 1 MVP (parity #45b): when `deployRuntime` is on, wire a
     // Docker-backed `DeployProvider` + a `DeployMaterializer` over the

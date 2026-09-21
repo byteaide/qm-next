@@ -65,6 +65,12 @@ export interface SessionStagePort {
         leaseToken: unknown
         systemPrompt: string
         orgScopeId: ScopeId
+        /**
+         * ADR-0018: the full TurnResolution (security prompt, branding,
+         * decorator blocks) when the deployment resolves one; the flattened
+         * systemPrompt/orgScopeId stay for the minimal contract.
+         */
+        resolution?: import('@qm/types').TurnResolution
         latencyMs: number
       }
     | { decision: 'deny'; reason: string; latencyMs: number }
@@ -105,6 +111,8 @@ export interface ResolvedContext {
   leaseToken: unknown
   systemPrompt: string
   orgScopeId: ScopeId
+  /** ADR-0018: full TurnResolution passthrough (security prompt, branding, decorator blocks). */
+  resolution?: import('@qm/types').TurnResolution
   /** Present only when the admitted work carried a structured command; pure reads omit it (ADR-0002). */
   commandRequest?: CommandRequest
   rateLimit?: { limit: number; remaining: number; resetMs: number }

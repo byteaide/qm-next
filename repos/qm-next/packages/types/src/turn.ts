@@ -28,6 +28,17 @@ export interface TurnApproval {
   commandRequestId?: string
 }
 
+/**
+ * IM-envelope facts carried into the gateway block (segment ⑨). The bridge
+ * derives them from the provider; core never names the platform.
+ */
+export interface GatewayContext {
+  location?: string
+  botHandle?: string
+  details?: Record<string, string>
+  instructions?: string
+}
+
 export interface TurnInput {
   surface: string
   actor: Principal
@@ -49,6 +60,17 @@ export interface TurnInput {
   background?: boolean
   cancel?: AbortSignal
   queueMs?: number
+  /**
+   * Caller-asserted availability of the surface tool set (post/reach/stay_silent).
+   * When absent, the orchestrator derives it from the turn origin (ADR-0018
+   * mode selection): ambient turns and automation with a destination carry
+   * surface tools; other turns do not unless the resolution asserts them.
+   */
+  surfaceTools?: boolean
+  /** Empty-conversation opener: the composer appends qm's proactive-open line. */
+  proactiveOpener?: boolean
+  /** IM envelope facts for the gateway block (segment ⑨). */
+  gatewayContext?: GatewayContext
 }
 
 export type TurnStatus = 'ok' | 'refused' | 'failed' | 'pending_approval' | 'queued' | 'silent'

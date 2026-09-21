@@ -22,12 +22,14 @@ import type {
   Session,
   SessionEntry,
   TurnInput,
+  TurnResolution,
   TurnResult,
 } from '@qm/types'
 import { redactSecrets } from '@qm/runs'
 import { createMemoryAdmissionRecordStore, runAdmissionWaterfall } from '@qm/admission'
 import type { AdmissionRecordStore } from '@qm/admission'
 import { buildStagePorts } from './admission-integration.ts'
+import { composeFrame } from './frame-composer.ts'
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -74,7 +76,8 @@ export class OrchestratorService extends Service implements Orchestrator {
         reason: outcome.record.reason ?? `${outcome.record.closingStage ?? 'unknown'} rejected`,
       }
     }
-    const { sessionId, scopeId, leaseToken, systemPrompt, orgScopeId } = outcome.resolved
+    const { sessionId, scopeId, leaseToken, systemPrompt, orgScopeId, resolution: resolvedResolution } = outcome.resolved
+    const resolution: TurnResolution = resolvedResolution ?? { systemPrompt, orgScopeId }
     const conversation = input.conversation
     // Session aggregate for the harness. `ConversationKind` and
     // `SessionType` share the `'dm' | 'channel' | 'group'` domain; the
@@ -136,6 +139,26 @@ export class OrchestratorService extends Service implements Orchestrator {
             ...(input.runId ? { attempt: input.attempt ?? 1 } : {}),
           })
         : undefined
+      // ADR-0018 — compose the protocol frame for this turn: mode selected
+      // from turn origin, soul from the resolution, shared core, security
+      // policy, and decorator blocks in qm segment order. The memory block
+      // (⑭) appends AFTER the recorded cache boundary, never inside the
+      // stable prefix.
+      const composedSurfaceTools = input.surfaceTools ?? resolution.surfaceTools
+      const composed = composeFrame({
+        origin: input.origin,
+        surface: input.surface,
+        conversation,
+        actor: input.actor,
+        ...(composedSurfaceTools !== undefined ? { surfaceTools: composedSurfaceTools } : {}),
+        ...(input.proactiveOpener ? { proactiveOpener: true } : {}),
+        soul: systemPrompt,
+        resolution,
+        ...(input.gatewayContext ? { gatewayContext: input.gatewayContext } : {}),
+      })
+      const turnSystemPrompt = resolution.memoryBlock
+        ? `${composed.systemPrompt}${resolution.memoryBlock}`
+        : composed.systemPrompt
       const result = await harness.turns.runTurn({
         session,
         ...(input.runId ? { runId: input.runId } : {}),
@@ -152,7 +175,9 @@ export class OrchestratorService extends Service implements Orchestrator {
         // command point (by commandRequestId), not a blind replay.
         ...(input.approval ? { approval: input.approval } : {}),
         ...(tools ? { tools } : {}),
-        systemPrompt,
+        systemPrompt: turnSystemPrompt,
+        systemCacheBoundary: composed.stableSystemBytes,
+        surfaceTools: composed.mode === 'autonomous',
         history,
         emit: async (entry) => {
           const full = await deps.sessions.append(lease, entry)

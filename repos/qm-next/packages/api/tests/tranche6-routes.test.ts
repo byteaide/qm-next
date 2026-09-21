@@ -190,7 +190,7 @@ test('grants: apply/revoke ladder, invalid bodies, share capability 403', async 
 
 test('soul: org composition, personal write versions, foreign scope 403', async () => {
   const soul = createMemorySoulStore('default')
-  soul.setSoul('org:default', 'Be concise.')
+  await soul.setSoul('org:default', 'Be concise.')
   const app = createApiServer({ ...baseDeps(), soul: { soul } }, OPTS)
   const ada = auth(await token('person:ada'))
 

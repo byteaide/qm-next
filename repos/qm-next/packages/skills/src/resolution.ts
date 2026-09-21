@@ -1,7 +1,7 @@
 /**
- * Resolution seam for skills (14.0): appends the visible-skill index to
- * the system prompt so a registered skill appears in the harness input
- * context (m3-scope acceptance). Name → body lookup goes through
+ * Resolution seam for skills (14.0): exposes the visible-skill index as the
+ * TurnResolution skills block so the frame composer places it inside the
+ * stable prefix (segment ⑧, ADR-0018). Name → body lookup goes through
  * `SkillStore.resolve` at execution time; store failures are fail-open.
  */
 import type { Conversation, Principal, ResolutionService, ScopeId } from '@qm/types'
@@ -44,7 +44,7 @@ export function wrapResolutionWithSkills(
       }
       const index = skillsIndex(resolved)
       if (!index) return base
-      return { ...base, systemPrompt: `${base.systemPrompt}\n\n${index}` }
+      return { ...base, skillsBlock: index }
     },
   }
 }

@@ -44,7 +44,14 @@ export {
   type FileStoreService,
   type StoredFile,
 } from './file-store.ts'
-export { createMemorySoulStore, type SoulStore, type SoulView } from './soul-store.ts'
+export {
+  createMemorySoulStore,
+  createPostgresSoulStore,
+  type SoulStore,
+  type SoulView,
+  type SoulConfigRecord,
+  type SoulHistoryEntry,
+} from './soul-store.ts'
 export {
   createMemoryRuntimeConfigStore,
   type RuntimeConfigStore,

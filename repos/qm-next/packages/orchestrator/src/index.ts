@@ -2,6 +2,17 @@ export { OrchestratorService, default } from './orchestrator.ts'
 export { createHarnessRouter, type ConfiguredHarnessRegistry, type HarnessRouterOptions } from './router.ts'
 export { applyPromptVars, loadProtocolFile, type PromptVars } from './protocols/prompt-vars.ts'
 export {
+  cleanLabel,
+  composeFrame,
+  deriveSurfaceTools,
+  renderGatewayBlock,
+  selectFrameMode,
+  type ComposeFrameOptions,
+  type ComposedFrame,
+  type FrameMode,
+  type TurnFrameContext,
+} from './frame-composer.ts'
+export {
   resolveRuntimeChoice,
   type ResolveRuntimeChoiceOptions,
   type RuntimeChoice,

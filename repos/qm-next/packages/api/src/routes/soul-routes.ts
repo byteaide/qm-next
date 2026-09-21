@@ -32,7 +32,7 @@ async function postSoul(ctx: ApiRouteContext, deps: SoulDeps): Promise<unknown> 
     return sendJson(ctx, 403, { error: 'soul_update_denied', message: 'not authorized to update SOUL for this scope' })
   }
   try {
-    const version = deps.soul.setSoul(scopeIdVal, content)
+    const version = await deps.soul.setSoul(scopeIdVal, content)
     return { ok: true, version }
   } catch (error) {
     return sendJson(ctx, 500, {

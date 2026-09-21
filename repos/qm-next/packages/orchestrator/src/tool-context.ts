@@ -39,6 +39,18 @@ export interface SandboxToolContextDeps {
   runId?: string
   attempt?: number
   ledger?: ToolLedger
+  /**
+   * ADR-0018 guidance seam (M-Soul-2.4): conversation-scope standing
+   * instructions. Read returns the effective soul (org federation composed);
+   * writes are rejected for org scopes (the admin surface owns org policy),
+   * matching qm's `soul_update_denied` ladder.
+   */
+  soul?: {
+    read(): { effectiveSoul: string; soul: string | null; soulVersion: number }
+    write(
+      content: string,
+    ): Promise<{ ok: true; version: number } | { ok: false; code: 'soul_update_denied'; message: string }>
+  }
 }
 
 /**
@@ -245,8 +257,14 @@ export function createSandboxToolContext(deps: SandboxToolContextDeps): ToolCont
     webhookCreate: async () => CONTROL_UNAVAILABLE,
     webhookList: async () => CONTROL_UNAVAILABLE,
     webhookDisable: async () => CONTROL_UNAVAILABLE,
-    soulRead: () => CONTROL_UNAVAILABLE,
-    soulWrite: async () => CONTROL_UNAVAILABLE,
+    soulRead: () => deps.soul?.read() ?? CONTROL_UNAVAILABLE,
+    soulWrite: async (content) => {
+      if (!deps.soul) return CONTROL_UNAVAILABLE
+      if (scopeId.startsWith('org:')) {
+        return { ok: false, code: 'soul_update_denied', message: 'org soul is managed on the admin surface' }
+      }
+      return deps.soul.write(content)
+    },
     shareArtifact: async (_req: ShareArtifactRequest): Promise<ShareArtifactResult> => unavailable('artifact sharing'),
   }
 }

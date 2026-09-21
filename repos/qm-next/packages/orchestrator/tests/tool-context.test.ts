@@ -263,3 +263,63 @@ test('replay: a context without runId executes live every call (#28)', async () 
   assert.equal(sandbox.runs.length, 2, 'no runId means no caching')
   assert.equal(ledger.rows.size, 0)
 })
+
+test('guidance: soulRead answers unavailable without the seam, composed with it', () => {
+  const sandbox = fakeSandbox()
+  const bare = createSandboxToolContext({ sandbox, handle: fakeHandle(), scopeId: 'org:test' })
+  const bareView = bare.soulRead()
+  assert.equal('effectiveSoul' in bareView, false)
+  if ('effectiveSoul' in bareView) return
+  assert.equal(bareView.code, 'control_unavailable')
+  const ctx = createSandboxToolContext({
+    sandbox,
+    handle: fakeHandle(),
+    scopeId: 'personal:u1',
+    soul: {
+      read: () => ({ effectiveSoul: 'org policy\n\npersonal voice', soul: 'personal voice', soulVersion: 3 }),
+      write: async () => ({ ok: true, version: 4 }),
+    },
+  })
+  const view = ctx.soulRead()
+  assert.equal('effectiveSoul' in view, true)
+  if (!('effectiveSoul' in view)) return
+  assert.equal(view.effectiveSoul, 'org policy\n\npersonal voice')
+  assert.equal(view.soulVersion, 3)
+})
+
+test('guidance: soulWrite denies org scopes (admin surface owns org policy) and writes elsewhere', async () => {
+  const writes: string[] = []
+  const sandbox = fakeSandbox()
+  const orgCtx = createSandboxToolContext({
+    sandbox,
+    handle: fakeHandle(),
+    scopeId: 'org:acme',
+    soul: {
+      read: () => ({ effectiveSoul: '', soul: null, soulVersion: 0 }),
+      write: async (content) => {
+        writes.push(content)
+        return { ok: true, version: writes.length }
+      },
+    },
+  })
+  const denied = await orgCtx.soulWrite('try')
+  assert.equal(denied.ok, false)
+  if (!denied.ok) assert.equal(denied.code, 'soul_update_denied')
+  assert.equal(writes.length, 0, 'org denial happens before the store is touched')
+
+  const personalCtx = createSandboxToolContext({
+    sandbox,
+    handle: fakeHandle(),
+    scopeId: 'personal:u1',
+    soul: {
+      read: () => ({ effectiveSoul: '', soul: null, soulVersion: 0 }),
+      write: async (content) => {
+        writes.push(content)
+        return { ok: true, version: writes.length }
+      },
+    },
+  })
+  const allowed = await personalCtx.soulWrite('my voice')
+  assert.deepEqual(allowed, { ok: true, version: 1 })
+  assert.deepEqual(writes, ['my voice'])
+})

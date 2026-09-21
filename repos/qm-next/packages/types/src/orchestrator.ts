@@ -22,9 +22,39 @@ export interface IdentityService {
   audienceIsAllInternal(audience: readonly Principal[]): boolean
 }
 
+/** Frame variables sourced from stored branding (ADR-0018 shared-core segment). */
+export interface ResolutionBranding {
+  botName?: string
+  orgName?: string
+}
+
 export interface TurnResolution {
   systemPrompt: string
   orgScopeId: ScopeId
+  /**
+   * ADR-0018 segment ④ — the rendered security policy prompt. Absent means
+   * the deployment resolves no posture; the frame composer omits the segment.
+   */
+  securityPrompt?: string
+  /** Shared-core frame variables (botName/orgName) resolved from branding. */
+  branding?: ResolutionBranding
+  /**
+   * Segment ⑧ — the visible-skills index block. The skills resolution
+   * decorator owns the content; the frame composer only fixes its position
+   * inside the stable prefix (ADR-0018).
+   */
+  skillsBlock?: string
+  /**
+   * Segment ⑭ — the memory recall block. Appended AFTER the prompt-cache
+   * boundary, never inside the stable prefix (qm parity).
+   */
+  memoryBlock?: string
+  /**
+   * Resolution-side assertion that the turn carries the surface tool set;
+   * the orchestrator merges it with the caller-supplied TurnInput flag and
+   * the turn-origin derivation to select mode-autonomous.
+   */
+  surfaceTools?: boolean
 }
 
 export interface ResolutionService {

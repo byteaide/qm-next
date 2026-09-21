@@ -274,13 +274,14 @@ test('resolution seam appends the recall block and fails open', async (t) => {
   const conversation = { kind: 'channel' as const, threadRef: 't', audience: [] }
   const actor = { id: 'u1', type: 'internal' as const }
 
-  await t.test('recalled memory lands in the system prompt with the context label', async () => {
+  await t.test('recalled memory rides the memoryBlock with the context label', async () => {
     const memory = createMemoryScopeMemory()
     await memory.append(SCOPE, ['remember the biweekly demo'], T0)
     const wrapped = wrapResolutionWithMemory(inner, memory, () => ({ read: [SCOPE], context: '#eng' }))
     const result = await wrapped.resolve(conversation, actor)
-    assert.match(result.systemPrompt, /^base prompt\n\n## What you remember\nYou're in #eng\./)
-    assert.match(result.systemPrompt, /remember the biweekly demo/)
+    assert.match(result.memoryBlock ?? '', /^\n\n## What you remember\nYou're in #eng\./)
+    assert.match(result.memoryBlock ?? '', /remember the biweekly demo/)
+    assert.equal(result.systemPrompt, 'base prompt')
     assert.equal(result.orgScopeId, SCOPE)
   })
 
@@ -288,8 +289,9 @@ test('resolution seam appends the recall block and fails open', async (t) => {
     const memory = createMemoryScopeMemory()
     const wrapped = wrapResolutionWithMemory(inner, memory, () => ({ read: [SCOPE] }))
     assert.equal((await wrapped.resolve(conversation, actor)).systemPrompt, 'base prompt')
+    assert.equal((await wrapped.resolve(conversation, actor)).memoryBlock, undefined)
     const off = wrapResolutionWithMemory(inner, memory, () => undefined)
-    assert.equal((await off.resolve(conversation, actor)).systemPrompt, 'base prompt')
+    assert.equal((await off.resolve(conversation, actor)).memoryBlock, undefined)
   })
 
   await t.test('a broken store skips the block instead of failing the turn', async () => {

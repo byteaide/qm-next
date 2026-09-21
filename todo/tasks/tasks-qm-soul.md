@@ -4,7 +4,7 @@ Based on [ai-dev-tasks](https://github.com/snarktank/ai-dev-tasks) task format, 
 
 **PRD:** 本文件 §背景与证据（PRD-lite，自包含）；上游分析：2026-09-21 qm vs qm-next 架构审查（cbm 图谱 + 源码直读）
 **Created:** 2026-09-21
-**Status:** Planned
+**Status:** In Progress（feature/qm-soul worktree）
 **Estimate:** ~7d ai 总工作量；串行为主（契约→纯函数→组装→行为），M-Soul-4 可分叉并行
 
 <!--TOON:tasks_meta{id,feature,prd,status,est,est_ai,logged}:
@@ -74,23 +74,23 @@ qm 的产品灵魂层不是一段提示词，而是**16 段顺序组装管线 + 
 
 ### M-Soul-0 契约决策（1 串行门，~0.5d）
 
-- [ ] 0.1 【串行门】ADR-0018 落 qm-next `docs/adr/`（草稿=附录 A，status 转 accepted） ~2h
-- [ ] 0.2 【串行门】平台词汇决策定稿：`imChannel`/`imLabel` 变量方案 + `check:im` 扫描范围扩到 `protocols/`；偏差 #55 预登记 parity-deviations ~1h
-- [ ] 0.3 【串行门】golden fixture 采集：从 qm 渲染三模式 × (soul 有/无) × (web/IM) 共 12 组产物入 `packages/orchestrator/tests/golden/`（平台词替换点逐一标注） ~2h
+- [x] 0.1 【串行门】ADR-0018 落 qm-next `docs/adr/`（草稿=附录 A，status 转 accepted） ~2h
+- [x] 0.2 【串行门】平台词汇决策定稿：`imChannel`/`imLabel` 变量方案 + `check:im` 扫描范围扩到 `protocols/`；偏差 #55 预登记 parity-deviations ~1h（protocols/ 位于 orchestrator/src 内，既有 CORE_SOURCES 扫描已覆盖，脚本零改动）
+- [x] 0.3 【串行门】golden fixture 采集：从 qm 渲染三模式 × (soul 有/无) × (web/IM) 共 12 组产物入 `packages/orchestrator/tests/golden/`（平台词替换点逐一标注） ~2h（生成器 scripts/generate-soul-golden.ts，qm 渲染器直跑）
 
 ### M-Soul-1 协议模板栈（A 车道，纯函数最低风险，~1.5d）
 
-- [ ] 1.1 `packages/orchestrator/src/protocols/prompt-vars.ts` 原样移植 + 未解析 token throw / 条件分支 / 变量替换单测 ~2h
-- [ ] 1.2 四模板 neutralized 移植（`{{slack}}`→`{{imChannel}}`/`{{imLabel}}`，其余 byte-identical）+ 每模板快照测试 ~4h
-- [ ] 1.3 `check:im` 脚本扩展扫描 `protocols/` 目录；typecheck/test 全绿 ~1h
+- [x] 1.1 `packages/orchestrator/src/protocols/prompt-vars.ts` 原样移植 + 未解析 token throw / 条件分支 / 变量替换单测 ~2h
+- [x] 1.2 四模板 neutralized 移植（`{{slack}}`→`{{imChannel}}`/`{{imLabel}}`，其余 byte-identical）+ 每模板快照测试 ~4h（12/12 golden 字节对拍绿；shared-core 还有 2 处平台词：botHandle 行 + 文件段落，已列入 #55 清单）
+- [x] 1.3 `check:im` 脚本扩展扫描 `protocols/` 目录；typecheck/test 全绿 ~1h
 
 ### M-Soul-2 组装器 + Soul 接线（串行，核心 PR，~2d）
 
-- [ ] 2.1 `TurnResolution` 增量扩展（`surfaceTools?`/`systemCacheBoundary?`/`memoryBlock?` 全可选，不破坏 M1 冻结）+ frame composer 实现 qm 段序 ①-⑤+⑧（安全 prompt 注入、skills 块落位） ~4h
-- [ ] 2.2 `api/src/service.ts`：`devResolution` → 真 ResolutionService：SoulStore.effectiveSoul（段②）+ branding 解析（botName/orgName 从 admin branding store 或 config；botHandle 从 IM envelope→gatewayBlock 段⑨）；无 soul/branding 配置时回退现行为（向后兼容 profile） ~4h
-- [ ] 2.3 SoulStore PG twin（DurableMap `soul_configs`+`soul_history`，暖建表 + withSchemaLock；迁移器 ENTITY_COPIES 评估直拷 vs export-seed） ~3h
-- [ ] 2.4 guidance 工具激活：`tool-context.ts:248` soulRead/soulWrite 接 SoulStore（个人写/org 读/qm 错误阶梯）；harness-pi guidance 路径对拍测试 ~2h
-- [ ] 2.5 golden 对拍测试：composer 渲染产物 vs 0.3 fixtures（结构 diff 记偏差表） ~2h
+- [x] 2.1 `TurnResolution` 增量扩展（`surfaceTools?`/`systemCacheBoundary?`/`memoryBlock?` 全可选，不破坏 M1 冻结）+ frame composer 实现 qm 段序 ①-⑤+⑧（安全 prompt 注入、skills 块落位） ~4h（composer=packages/orchestrator/src/frame-composer.ts；boundary 由 composer 产出经 orchestrator 传 HarnessTurnInput.systemCacheBoundary，不落在 TurnResolution 上；memory/skills 装饰器改为产出独立区块字段，orchestrator 按段位拼装——⑧入边界前、⑭入边界后）
+- [x] 2.2 `api/src/service.ts`：`devResolution` → 真 ResolutionService：SoulStore.effectiveSoul（段②）+ branding 解析（botName/orgName 从 admin branding store 或 config；botHandle 从 IM envelope→gatewayBlock 段⑨）；无 soul/branding 配置时回退现行为（向后兼容 profile） ~4h（botName/orgName=surfaceConfig.branding{selfLabel,orgName}；securityPosture 配置新增，默认 auto；占位默认串 'You are qm-next.' 已从 Config schema 移除——5.1 门禁要求全仓为零；无 soul 时 soul 段为空、composer 仍出完整协议帧）
+- [x] 2.3 SoulStore PG twin（DurableMap `soul_configs`+`soul_history`，暖建表 + withSchemaLock；迁移器 ENTITY_COPIES 评估直拷 vs export-seed） ~3h（createPostgresSoulStore：createPostgresMap 双表 + withSchemaLock 经 pg-pool；ready() 按 version 重放 history 水合缓存；直拷兼容性已记录在 store 头注，迁入器配置归并迁移 runbook 车道）
+- [x] 2.4 guidance 工具激活：`tool-context.ts:248` soulRead/soulWrite 接 SoulStore（个人写/org 读/qm 错误阶梯）；harness-pi guidance 路径对拍测试 ~2h（org 写拒绝在 tool-context 层统一执行；api facade 供 read/write）
+- [x] 2.5 golden 对拍测试：composer 渲染产物 vs 0.3 fixtures（结构 diff 记偏差表） ~2h（frame-composer.test.ts 12/12 字节对拍；渲染期 imLabel='Slack' 时与 qm 完全一致，偏差 #55 仅存在于源码词汇层）
 
 ### M-Soul-3 模式选择激活（串行，行为质变点，~1d）
 

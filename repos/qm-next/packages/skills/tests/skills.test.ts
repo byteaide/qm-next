@@ -301,21 +301,22 @@ test('resolution seam lists registered skills in the harness input context and f
   const conversation = { kind: 'dm' as const, threadRef: 't', audience: [] }
   const actor = { id: 'u1', type: 'internal' as const }
 
-  await t.test('a registered skill appears in the system prompt', async () => {
+  await t.test('a registered skill rides the skillsBlock', async () => {
     const store = createMemorySkillStore()
     await store.register(registerInput({ scopeId: ORG, name: 'onboarding' }))
     const wrapped = wrapResolutionWithSkills(inner, store, () => [PERSONAL, ORG])
     const result = await wrapped.resolve(conversation, actor)
-    assert.match(result.systemPrompt, /^base prompt\n\n## Skills\n/)
-    assert.match(result.systemPrompt, /- \*\*onboarding\*\* — a demo skill/)
+    assert.match(result.skillsBlock ?? '', /^## Skills\n/)
+    assert.match(result.skillsBlock ?? '', /- \*\*onboarding\*\* — a demo skill/)
+    assert.equal(result.systemPrompt, 'base prompt')
   })
 
-  await t.test('empty registry and absent selection leave the prompt untouched', async () => {
+  await t.test('empty registry and absent selection leave the block unset', async () => {
     const store = createMemorySkillStore()
     const wrapped = wrapResolutionWithSkills(inner, store, () => [ORG])
-    assert.equal((await wrapped.resolve(conversation, actor)).systemPrompt, 'base prompt')
+    assert.equal((await wrapped.resolve(conversation, actor)).skillsBlock, undefined)
     const off = wrapResolutionWithSkills(inner, store, () => undefined)
-    assert.equal((await off.resolve(conversation, actor)).systemPrompt, 'base prompt')
+    assert.equal((await off.resolve(conversation, actor)).skillsBlock, undefined)
   })
 
   await t.test('a broken store skips the index instead of failing the turn', async () => {

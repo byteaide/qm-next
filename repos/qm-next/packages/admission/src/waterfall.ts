@@ -240,6 +240,7 @@ export async function runAdmissionWaterfall(
       leaseToken: sessionDecision.leaseToken,
       systemPrompt: sessionDecision.systemPrompt,
       orgScopeId: sessionDecision.orgScopeId,
+      ...(sessionDecision.resolution !== undefined ? { resolution: sessionDecision.resolution } : {}),
       ...(input.commandRequest !== undefined ? { commandRequest: input.commandRequest } : {}),
       ...(history.context.rateLimit !== undefined ? { rateLimit: history.context.rateLimit } : {}),
       ...(history.context.budget !== undefined ? { budget: history.context.budget } : {}),
