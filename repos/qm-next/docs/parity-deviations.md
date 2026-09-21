@@ -183,7 +183,14 @@ Each entry names the qm source shape, the qm-next shape, and why.
     uses unpinned base tags (digest pins return with the image-supply lane),
     and defaults `LOCAL_SANDBOX_PLATFORM` to the host arch (qm pins
     linux/amd64 for Fly). `scripts/local-sandbox-build.sh` keeps the
-    fingerprint label so staleness warnings work.
+    fingerprint label so staleness warnings work. ✅ 2026-09-21 (cluster 3
+    brief `qm-next-c3-sandbox-digest-pin`) — `fly/Dockerfile` now pins
+    `node:24-slim` and `debian:12-slim` to digest sha256
+    (2026-09-21 captures); `local/Dockerfile` exposes `BASE_DIGEST` ARG
+    with a pinned default and an `UNPINNED=1` build marker for dev
+    iteration; `scripts/local-sandbox-build.sh` resolves the freshly-built
+    `qm-sandbox-base:dev` digest and forwards it so the pin stays
+    consistent across both stages.
 
 28. **No per-turn tool ledger** — qm caches tool results per (run, attempt,
     call index) through a ledger store; P1 executes every call live (no

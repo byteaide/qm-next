@@ -1,6 +1,11 @@
-FROM node:24-slim AS node-runtime
+# Pinned 2026-09-21 (cluster 3 brief `qm-next-c3-sandbox-digest-pin`).
+# Re-pin with: `docker pull <image>` then replace the digest below.
+# Cross-arch: linux/amd64 (qm-next ships host arch per parity #27).
+# node:24-slim current digest
+FROM node:24-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS node-runtime
 
-FROM debian:12-slim
+# debian:12-slim current digest
+FROM debian:12-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
 
 ARG DEBIAN_FRONTEND=noninteractive
 

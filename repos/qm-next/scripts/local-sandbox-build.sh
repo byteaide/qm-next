@@ -41,10 +41,27 @@ if [[ -n "$PLATFORM" ]]; then
   PLATFORM_ARGS=(--platform "$PLATFORM")
 fi
 
-echo "==> building ${BASE_TAG} from fly/Dockerfile"
+echo "==> building ${BASE_TAG} from fly/Dockerfile (digest-pinned base)"
 docker build ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} -f fly/Dockerfile -t "${BASE_TAG}" .
 
+# Resolve the freshly-built image's digest so the local/Dockerfile ARG
+# pin stays consistent with the fly image build (parity #27: single
+# source of truth for the pinned sha256).
+BASE_DIGEST="$(docker inspect --format='{{index .RepoDigests 0}}' "${BASE_TAG}" 2>/dev/null || true)"
+if [[ -n "${BASE_DIGEST}" ]]; then
+  echo "==> resolved ${BASE_TAG} digest: ${BASE_DIGEST}"
+else
+  # Fallback for local builds where RepoDigests is empty (no registry):
+  # derive from the image id.
+  BASE_DIGEST="${BASE_TAG}@sha256:$(docker inspect --format='{{.Id}}' "${BASE_TAG}" | sed -E 's/^sha256://')"
+  echo "==> resolved ${BASE_TAG} digest (image-id fallback): ${BASE_DIGEST}"
+fi
+
 echo "==> building ${LOCAL_TAG} from local/Dockerfile (fingerprint ${FINGERPRINT:-none})"
-docker build ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} -f local/Dockerfile --build-arg "BASE=${BASE_TAG}" --label "qm.sandbox-fingerprint=${FINGERPRINT}" -t "${LOCAL_TAG}" .
+docker build ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} \
+  -f local/Dockerfile \
+  --build-arg "BASE_DIGEST=${BASE_DIGEST}" \
+  --label "qm.sandbox-fingerprint=${FINGERPRINT}" \
+  -t "${LOCAL_TAG}" .
 
 echo "==> done: ${LOCAL_TAG}"
