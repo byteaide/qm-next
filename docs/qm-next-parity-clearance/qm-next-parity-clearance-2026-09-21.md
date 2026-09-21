@@ -131,11 +131,11 @@
 
 Since 2026-09-15 the deviations ledger has closed substantially (12.0 control plane, 16.0 long-tail, 18.2 portal SSO, 19.0 migration, 20.0 durable-by-default). Three real gap clusters remain:
 
-1. **Deploy runtime** — biggest: DeployProvider, `/d/<slug>` serving, git http-backend, AWS/Fly/Docker providers. Marked 13.0 but not started.
-2. **Productionization follow-ups** — S3 / pg-boss / MonitorPoller / codex-device-login / emoji-upload. All explicitly tagged as 16.0 follow-ups and not started.
-3. **Small tails** — secret-drop `requiresToken` binding, Ambient judge model default-on. Each is a single targeted ticket. (Closed 2026-09-21: runs aggregate #47e, per-turn tool ledger #28, portal identity enforcement #47b, revoked-scope 403 #47d, digest-pinned sandbox base #27, Reach warn+mark #53/54 — verified implemented, PG twins — verified wired per migration.md 20.0.)
+1. **Deploy runtime** — mostly closed 2026-09-21: Docker provider + `/d/<slug>` proxy (`ea6303f`) and git http-backend with use-time capability binding (`deployment-git-routes.ts`, `8fd6141`) are live. Remaining: AWS/Fly providers (future PRD).
+2. **Productionization follow-ups** — 4/5 closed 2026-09-21: S3 byte store, pg-boss queue, MonitorPoller (`packages/monitors/src/monitor-poller.ts`), emoji-upload all landed. Remaining: codex-device-login (blocked on ChatGPT creds).
+3. **Small tails** — secret-drop `requiresToken` binding (blocked on 13.0 web runtime), Ambient judge default-mode decision. (Closed 2026-09-21: runs aggregate #47e, per-turn tool ledger #28, portal identity enforcement #47b, revoked-scope 403 #47d, digest-pinned sandbox base #27, Reach warn+mark #53/54 — verified implemented, PG twins — verified wired per migration.md 20.0.)
 
-The 16.0 follow-up cluster has the longest "documented but not started" runway and the least external coordination cost — good candidate for the next planning round.
+The 16.0 follow-up cluster that opened this report is now closed except codex-device-login. What remains across all clusters is dependency-bound: 13.0 web runtime (#47a), ChatGPT creds (codex-device-login), AWS/Fly provider PRD, and the Ambient judge default-mode call.
 
 ---
 
@@ -145,9 +145,9 @@ Three gap clusters mapped to plan artifacts in this directory:
 
 | Cluster | Plan artifact | Scope | Status (2026-09-21) |
 |---|---|---|---|
-| 1 — Deploy runtime | `qm-next-deploy-runtime-mvp.md` | Docker provider + `/d/<slug>` proxy; git HTTP deferred to follow-up PRD | ✅ merged `ea6303f` on main (proxy slice; git HTTP + Fly/AWS providers still future PRD) |
-| 2 — Productionization | `briefs/qm-next-c2-s3-byte-store.md`, `...-c2-pgboss-queue.md`, `...-c2-emoji-upload.md` (active); `...-c2-codex-device-login.md`, `...-c2-monitor-poller.md` (blocked) | 5 worker-ready briefs | 3/5 merged (cluster-2 worktree), 2/2 still blocked |
-| 3 — Small tails | `briefs/qm-next-c3-secret-drop-requires-token.md`, `...-c3-portal-identity-enforce.md`, `...-c3-sandbox-digest-pin.md`, `...-c3-pg-twins-migration.md` (active); `...-c3-runs-aggregate.md`, `...-c3-tool-ledger.md` (blocked) | 6 worker-ready briefs | 4/6 merged (cluster-3 worktree), 2/2 still blocked |
+| 1 — Deploy runtime | `qm-next-deploy-runtime-mvp.md` | Docker provider + `/d/<slug>` proxy; git HTTP deferred to follow-up PRD | ✅ merged on main: proxy `ea6303f` + git HTTP (capability-bound, `8fd6141`); Fly/AWS providers future PRD |
+| 2 — Productionization | `briefs/qm-next-c2-s3-byte-store.md`, `...-c2-pgboss-queue.md`, `...-c2-emoji-upload.md`, `...-c2-monitor-poller.md` (active) | 5 worker-ready briefs | 4/5 merged (S3 + pg-boss + emoji-upload + monitor-poller); codex-device-login still blocked (ChatGPT creds) |
+| 3 — Small tails | `briefs/qm-next-c3-secret-drop-requires-token.md`, `...-c3-portal-identity-enforce.md`, `...-c3-sandbox-digest-pin.md`, `...-c3-pg-twins-migration.md` (active); `...-c3-runs-aggregate.md`, `...-c3-tool-ledger.md` (blocked) | 6 worker-ready briefs | 6/6 closed 2026-09-21 (4 merged + runs-aggregate/tool-ledger via design PRD + Slices A/B); #47a `requiresToken` waits on 13.0 web runtime |
 
 **Execution plan (recommended)**:
 
@@ -157,7 +157,7 @@ Three gap clusters mapped to plan artifacts in this directory:
   - Worker B: cluster 3 active briefs (secret-drop + portal identity + digest pin + PG twins) — ✅ done
 - **Batch 2** (after Batch 1, blocked on observability/replay/credentials):
   - Cluster 3 blocked: runs aggregate + per-turn tool ledger — ✅ both closed 2026-09-21 (design PRD + Slices A/B)
-  - Cluster 2 blocked: codex-device-login (needs ChatGPT creds) + MonitorPoller (needs surface exposure)
+  - Cluster 2 blocked: codex-device-login (needs ChatGPT creds) — MonitorPoller ✅ merged 2026-09-21 (`packages/monitors/src/monitor-poller.ts`, wired in `service.ts`)
 
 Total: 11 worker briefs + 1 PRD. Each brief is `tier:simple` or `tier:standard` except the four blocked briefs (marked `tier:thinking` until dependencies resolve).
 
