@@ -5,6 +5,40 @@ qm-next 的全部显著变更记录在此文件。
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - qm-soul 产品灵魂层（ADR-0018，2026-09-21）
+
+qm 的灵魂层平移：16 段顺序组装管线 + 三模式协议帧 + soul 联邦。
+`pnpm check:soul` 新门禁（dev 占位 prompt 恒零）。
+
+- **协议模板栈**（`packages/orchestrator/src/protocols/`）：qm
+  `prompt-vars.ts` 原样移植（fail-loud：未解析 token 直接 throw）；
+  `shared-core`/`mode-autonomous`/`mode-conversation`/`mode-fallback`
+  四模板 neutralized 移植——`{{#if slack}}`→`{{#if imChannel}}`、平台
+  名字面量→`{{imLabel}}`（偏差 #55，其余 byte-identical）。golden
+  fixtures 12 组（qm 渲染器直跑，`scripts/generate-soul-golden.ts`）
+  模板级 + composer 级双重字节对拍。
+- **frame composer**（`frame-composer.ts`）：qm 段序 ①-⑥+⑧+⑨ 组装、
+  `selectFrameMode`/`deriveSurfaceTools`（qm orchestrator:857-862 语义）、
+  `renderGatewayBlock`（neutralized）、`currentTimeBlock`（段⑬）、
+  `renderComputerBlock`（段⑥）。`stableSystemBytes` 划界：⑬⑭只落边界后。
+- **真 ResolutionService**（`packages/api`）：`devResolution` 占位退役；
+  SoulStore.effectiveSoul（段②，org 权威 + 下级守卫文案与 qm 逐字）+
+  `renderSecurityPolicyPrompt`（段④，`securityPosture` 配置默认 auto）+
+  surfaceConfig branding（botName/orgName）+ 沙箱 spec 的 computerBlock。
+- **SoulStore PG twin**：qm 表名 `soul_configs`/`soul_history`
+  （DurableMap 族，`withSchemaLock` 暖建；`ready()` 按 version 重放
+  history 水合缓存；qm 迁移直拷兼容）。
+- **guidance 工具激活**：`tool-context` soulRead/soulWrite 接
+  SoulStore——读回 effectiveSoul+soulVersion，写限非 org scope（org 写
+  走 admin 面，`soul_update_denied` 阶梯对齐 qm）。
+- **模式选择激活**：`TurnInput` 增 `surfaceTools?`/`proactiveOpener?`/
+  `gatewayContext?`；im-bridge 补传 `botHandle`/`surfaceLabels`（部署
+  配置供值，core 源码零平台词——`check:im` 继续覆盖 protocols/）。
+- **区块依赖矩阵裁决（4.3）**：⑩ homeChannel/⑪ cronBlock/⑫ 共享文件/
+  ⑮ onboarding 依赖 qm 的 delivery-candidates、ACL grantedHandles、
+  onboarding-skill 检测——本轮不收编，显式挂二期（见
+  `docs/parity-deviations.md` qm-soul 节）。
+
 ## [0.1.0] - 2026-09-13
 
 首个里程碑版本：M0-M4 交付。Cordis 全插件重写 qm，IM 一等插件化，

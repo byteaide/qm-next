@@ -29,7 +29,7 @@ import { redactSecrets } from '@qm/runs'
 import { createMemoryAdmissionRecordStore, runAdmissionWaterfall } from '@qm/admission'
 import type { AdmissionRecordStore } from '@qm/admission'
 import { buildStagePorts } from './admission-integration.ts'
-import { composeFrame } from './frame-composer.ts'
+import { composeFrame, currentTimeBlock } from './frame-composer.ts'
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -156,9 +156,12 @@ export class OrchestratorService extends Service implements Orchestrator {
         resolution,
         ...(input.gatewayContext ? { gatewayContext: input.gatewayContext } : {}),
       })
-      const turnSystemPrompt = resolution.memoryBlock
-        ? `${composed.systemPrompt}${resolution.memoryBlock}`
-        : composed.systemPrompt
+      // Post-boundary blocks (⑬⑭): the timezone block rides the user's IANA
+      // zone; the memory block comes from the resolution decorator. Neither
+      // enters the recorded cache boundary.
+      const timeBlock = input.timezone ? currentTimeBlock(input.timezone, Date.now()) : ''
+      const postBoundary = `${timeBlock ? `\n\n${timeBlock}` : ''}${resolution.memoryBlock ?? ''}`
+      const turnSystemPrompt = `${composed.systemPrompt}${postBoundary}`
       const result = await harness.turns.runTurn({
         session,
         ...(input.runId ? { runId: input.runId } : {}),

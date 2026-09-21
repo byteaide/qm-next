@@ -62,7 +62,7 @@ async function buildRig(overrides: Partial<WebUiDeps> = {}): Promise<RelayRig> {
   const registry = createHarnessRouter({ defaultId: 'mock' })
   registry.register(mock)
   const resolution: ResolutionService = {
-    resolve: async () => ({ systemPrompt: 'You are qm-next.', orgScopeId: SCOPE }),
+    resolve: async () => ({ systemPrompt: 'test soul prompt', orgScopeId: SCOPE }),
     scopeFor: () => SCOPE,
   }
   const orchestrator = new OrchestratorService(new Context(), {

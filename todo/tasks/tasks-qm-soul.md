@@ -4,7 +4,7 @@ Based on [ai-dev-tasks](https://github.com/snarktank/ai-dev-tasks) task format, 
 
 **PRD:** 本文件 §背景与证据（PRD-lite，自包含）；上游分析：2026-09-21 qm vs qm-next 架构审查（cbm 图谱 + 源码直读）
 **Created:** 2026-09-21
-**Status:** In Progress（feature/qm-soul worktree）
+**Status:** Done（tag `soul`；5.2 飞书真机静默腿待人工环境）
 **Estimate:** ~7d ai 总工作量；串行为主（契约→纯函数→组装→行为），M-Soul-4 可分叉并行
 
 <!--TOON:tasks_meta{id,feature,prd,status,est,est_ai,logged}:
@@ -100,15 +100,15 @@ qm 的产品灵魂层不是一段提示词，而是**16 段顺序组装管线 + 
 
 ### M-Soul-4 环境事实与动态区块（B 车道可与 M-Soul-3 并行，~1.5d）
 
-- [ ] 4.1 computerBlock：qm `environment-facts.ts` 渲染逻辑平移，接 `@qm/sandbox` local profile（机器规格 + 登录态） ~3h
-- [ ] 4.2 timeBlock（IANA 时区）+ `stableSystemBytes` 划界验证（pi-harness cache 边界语义测试） ~2h
-- [ ] 4.3 交付菜单（⑪ cronBlock 多目的地）/共享文件（⑫ ACL grantedHandles）/onboarding（⑮）依赖矩阵评估 → 本轮收编或二期 backlog 显式记录 ~2h
+- [x] 4.1 computerBlock：qm `environment-facts.ts` 渲染逻辑平移，接 `@qm/sandbox` local profile（机器规格 + 登录态） ~3h（renderComputerBlock 入 frame-composer；api resolution 经 sandbox.profile.spec 懒渲染；登录态/Connected apps 块依赖凭据子系统，挂二期与⑫同行）
+- [x] 4.2 timeBlock（IANA 时区）+ `stableSystemBytes` 划界验证（pi-harness cache 边界语义测试） ~2h（currentTimeBlock 平移；orchestrator 按 qm 段序边界后追加⑬⑭；frame-composer.test 断言 memory/time 块在边界外）
+- [x] 4.3 交付菜单（⑪ cronBlock 多目的地）/共享文件（⑫ ACL grantedHandles）/onboarding（⑮）依赖矩阵评估 → 本轮收编或二期 backlog 显式记录 ~2h（裁决：⑩⑪⑫⑮ 挂二期——依赖 delivery-candidates/signing/apiBaseUrl、ACL grant ledger、onboarding-skill 检测，均未移植；详见 parity-deviations qm-soul 节）
 
 ### M-Soul-5 对拍门禁（汇合，~0.5d）
 
-- [ ] 5.1 新门禁 `pnpm check:soul`：全仓 grep `'You are qm-next.'` 占位恒零（防占位回流） ~1h
-- [ ] 5.2 飞书 e2e 第四腿：ambient 群聊静默腿（未寻址消息 → 断言零投递），log 落 `docs/e2e-feishu-soul.log` ~2h
-- [ ] 5.3 parity-deviations 收口（#55 + 实施中发现项）+ CHANGELOG + `pnpm test:pg` 全绿；打 tag `soul` ~2h
+- [x] 5.1 新门禁 `pnpm check:soul`：全仓 grep `'You are qm-next.'` 占位恒零（防占位回流） ~1h（scripts/check-soul-placeholder.sh；4 个测试桩同步换词）
+- [ ] 5.2 飞书 e2e 第四腿：ambient 群聊静默腿（未寻址消息 → 断言零投递），log 落 `docs/e2e-feishu-soul.log` ~2h（**待真机**：需 FEISHU_APP_ID/SECRET + 测试群人工发一条未寻址消息；沿 docs/e2e-feishu.md 惯例 `aidevops secret run pnpm exec tsx scripts/boot-im-e2e.ts`）
+- [x] 5.3 parity-deviations 收口（#55 + 实施中发现项）+ CHANGELOG + `pnpm test:pg` 全绿；打 tag `soul` ~2h（#55/#55b/4.3 裁决/装饰器字段化已录；PG 全绿 2026-09-21）
 
 ## 附录 A · ADR-0018 草稿（M-Soul-0 落盘时复制到 qm-next `docs/adr/0018-soul-layer-is-composed-protocol-frames.md`）
 

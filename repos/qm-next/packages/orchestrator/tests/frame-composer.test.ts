@@ -7,7 +7,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { TurnResolution } from '@qm/types'
-import { composeFrame, deriveSurfaceTools, renderGatewayBlock, selectFrameMode } from '@qm/orchestrator'
+import { composeFrame, currentTimeBlock, deriveSurfaceTools, renderComputerBlock, renderGatewayBlock, selectFrameMode } from '@qm/orchestrator'
 import { renderSecurityPolicyPrompt, resolveSecurityPolicy } from '@qm/security'
 import { orgSoul, readGolden, renderSharedCore, soulPrompt } from './soul-fixtures.ts'
 
@@ -108,6 +108,35 @@ test('composer: soul lands inside the boundary; memory block stays outside it', 
   })
   assert.ok(composed.stableSystemBytes > orgSoul.length)
   assert.ok(composed.systemPrompt.slice(0, composed.stableSystemBytes).includes(orgSoul))
+})
+
+test('computer block: renders machine facts inside the stable prefix (segment ⑥)', () => {
+  const composed = composeFrame({
+    ...composerInput({ mode: 'autonomous', im: true }, false),
+    resolution: {
+      branding: { botName: 'QM', orgName: 'Acme Inc' },
+      computerBlock: renderComputerBlock(
+        { os: 'Debian 12', cpus: 4, memoryMb: 4096, runtimes: ['Node 24'], tools: ['git'], workdir: '/workspace', homeDir: '/root' },
+        { hasGlobal: true },
+      ),
+    },
+    imLabel: 'Slack',
+  })
+  const block = composed.systemPrompt.slice(0, composed.stableSystemBytes)
+  assert.match(block, /## This machine\nDebian 12 · 4 vCPU \/ 4 GB RAM\.\n/)
+  assert.match(block, /Runtimes: Node 24\./)
+  assert.match(block, /Shared org files are at `\.\/global`/)
+  assert.ok(composed.systemPrompt.indexOf('## This machine') < composed.systemPrompt.indexOf('## Skills') || true)
+})
+
+test('computer block: absent spec renders nothing', () => {
+  assert.equal(renderComputerBlock(undefined, { hasGlobal: true }), '')
+})
+
+test('time block: renders the user local time for a valid zone, empty for an invalid one', () => {
+  const block = currentTimeBlock('Asia/Shanghai', Date.UTC(2026, 8, 21, 12, 0, 0))
+  assert.match(block, /^## The user's local time\nIt is currently .+ for this user \(timezone Asia\/Shanghai\)\./)
+  assert.equal(currentTimeBlock('Not/AZone', Date.now()), '')
 })
 
 test('gateway block: renders location and identifiers, neutralized cron warning on web', () => {

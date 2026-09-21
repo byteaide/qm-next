@@ -39,6 +39,11 @@ export interface TurnResolution {
   /** Shared-core frame variables (botName/orgName) resolved from branding. */
   branding?: ResolutionBranding
   /**
+   * Segment ⑥ — the machine-facts block rendered from the sandbox computer
+   * spec (qm renderComputerBlock). Inside the stable prefix.
+   */
+  computerBlock?: string
+  /**
    * Segment ⑧ — the visible-skills index block. The skills resolution
    * decorator owns the content; the frame composer only fixes its position
    * inside the stable prefix (ADR-0018).

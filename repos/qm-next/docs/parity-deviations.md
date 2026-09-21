@@ -1132,4 +1132,24 @@ frames + soul federation) into the orchestrator; ADR
   `scripts/check-im-isolation.sh`, so the neutralized templates are scanned
   by the gate with no script change; golden fixtures annotate every
   replacement point so the composer's structural diff against the qm baseline
-  can only diverge there.
+  can only diverge there. Implementation note: the rendered OUTPUT keeps
+  byte parity with qm when the provider label equals the qm literal
+  (imLabel = "Slack") — the deviation lives in source vocabulary only.
+- **#55b gateway block envelope-gated**: qm appends
+  `renderGatewayContext(surface, …)` whenever a surface name exists, so a
+  surface-only "You are talking with the user over …" line always renders.
+  The qm-next composer renders segment ⑨ only when the IM envelope actually
+  supplied facts (`TurnInput.gatewayContext`), because the mode frames
+  already carry the surface wording and the surface-only line duplicated it.
+- **segments ⑩⑪⑫⑮ deferred (4.3 dependency matrix)**: home channel (⑩),
+  the multi-destination cron delivery menu (⑪), the shared-files ACL block
+  (⑫, `grantedHandles`), and onboarding detection (⑮) depend on qm
+  subsystems qm-next has not yet ported (delivery candidates + signing +
+  apiBaseUrl, the ACL grant ledger over audiences, onboarding-skill memory
+  detection). Recorded as explicit backlog for the delivery/ACL lanes;
+  the composer's segment slots remain reserved in ADR-0018 order.
+- **memory/skills decorators move to block fields**: `wrapResolutionWithMemory`
+  and `wrapResolutionWithSkills` now write `TurnResolution.memoryBlock` /
+  `skillsBlock` instead of appending to `systemPrompt`, so the orchestrator
+  fixes segment position (⑧ inside the stable prefix, ⑭ after the cache
+  boundary) without decorator order governing prompt semantics (ADR-0018).

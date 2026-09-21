@@ -4,7 +4,9 @@ export { applyPromptVars, loadProtocolFile, type PromptVars } from './protocols/
 export {
   cleanLabel,
   composeFrame,
+  currentTimeBlock,
   deriveSurfaceTools,
+  renderComputerBlock,
   renderGatewayBlock,
   selectFrameMode,
   type ComposeFrameOptions,

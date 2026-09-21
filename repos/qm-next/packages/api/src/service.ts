@@ -62,6 +62,7 @@ import {
 } from '@qm/model'
 import { createMemoryScopeMemory, type ScopeMemory } from '@qm/memory'
 import { renderSecurityPolicyPrompt, resolveSecurityPolicy, type SecurityScreener } from '@qm/security'
+import { renderComputerBlock } from '@qm/orchestrator'
 import { createMcpServerStore, createMcpToolService, type McpServerStore, type McpToolService } from '@qm/mcp'
 import {
   createBrowserSessionStore,
@@ -511,6 +512,7 @@ function createSoulResolution(
   config: ApiConfig,
   soulStore: SoulStore | undefined,
   branding: { selfLabel?: string; orgName?: string } | undefined,
+  getComputerBlock?: () => string | undefined,
 ): ResolutionService {
   const scope = config.scopeId ?? 'org:default'
   const posture = SECURITY_POSTURES.includes((config.securityPosture ?? 'auto') as (typeof SECURITY_POSTURES)[number])
@@ -525,10 +527,12 @@ function createSoulResolution(
     resolve: async () => {
       const view = soulStore?.getSoul(scope)
       const soul = view?.effectiveSoul.trim() ? view.effectiveSoul : (config.systemPrompt ?? '')
+      const computerBlock = getComputerBlock?.()
       return {
         systemPrompt: soul,
         orgScopeId: scope,
         securityPrompt,
+        ...(computerBlock ? { computerBlock } : {}),
         ...(Object.keys(resolvedBranding).length ? { branding: resolvedBranding } : {}),
       }
     },
@@ -806,7 +810,10 @@ export class ApiService extends Service<ApiConfig> {
       : undefined
     if (soulStore && 'ready' in soulStore) await (soulStore as { ready(): Promise<void> }).ready()
     const surfaceBranding = this.config.surfaceConfig?.branding
-    const resolution = createSoulResolution(this.config, soulStore, surfaceBranding)
+    const resolution = createSoulResolution(this.config, soulStore, surfaceBranding, () => {
+      const spec = this.sandbox?.profile.spec
+      return spec ? renderComputerBlock(spec, { hasGlobal: true }) : undefined
+    })
     let toolFactory: OrchestratorDeps['tools'] | undefined
     const sandboxHandles = new Map<ScopeId, SandboxHandle>()
     const sandboxConfig = this.config.sandbox

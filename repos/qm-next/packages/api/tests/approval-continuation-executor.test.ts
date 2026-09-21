@@ -56,7 +56,7 @@ async function buildRig(script: MockTurnStep[] = []): Promise<ExecutorRig> {
   const registry = createHarnessRouter({ defaultId: 'mock' })
   registry.register(harness)
   const resolution: ResolutionService = {
-    resolve: async () => ({ systemPrompt: 'You are qm-next.', orgScopeId: SCOPE }),
+    resolve: async () => ({ systemPrompt: 'test soul prompt', orgScopeId: SCOPE }),
     scopeFor: () => SCOPE,
   }
   const spawnRunner = (workerId: string): TurnRunner => {

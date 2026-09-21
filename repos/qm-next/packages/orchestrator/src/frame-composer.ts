@@ -63,7 +63,7 @@ export function cleanLabel(value: string | undefined, cap: number): string | und
 export interface ComposeFrameOptions extends TurnFrameContext {
   /** Segment ② — the scope's effective soul (possibly empty). */
   soul: string
-  resolution?: Pick<TurnResolution, 'securityPrompt' | 'branding' | 'skillsBlock'>
+  resolution?: Pick<TurnResolution, 'securityPrompt' | 'branding' | 'skillsBlock' | 'computerBlock'>
   /** Provider display name injected into platform-wording slots (deviation #55). */
   imLabel?: string
   /** Surface-tool name rendered into the mode frames (pi default: 'surface'). */
@@ -167,9 +167,76 @@ export function composeFrame(opts: ComposeFrameOptions): ComposedFrame {
     opts.soul,
     sharedCore,
     ...(opts.resolution?.securityPrompt ? [opts.resolution.securityPrompt] : []),
+    ...(opts.resolution?.computerBlock ? [opts.resolution.computerBlock] : []),
     ...(opts.resolution?.skillsBlock ? [opts.resolution.skillsBlock] : []),
     ...(gatewayBlock ? [gatewayBlock] : []),
   ]
   const systemPrompt = segments.join('\n\n')
   return { systemPrompt, stableSystemBytes: systemPrompt.length, mode }
+}
+
+/**
+ * qm prompt-blocks.ts currentTimeBlock (segment ⑬, post-boundary): the
+ * user's local time against an IANA timezone; empty for invalid zones.
+ */
+export function currentTimeBlock(timezone: string, nowMs: number): string {
+  let local: string
+  try {
+    local = new Intl.DateTimeFormat('en-US', { timeZone: timezone, dateStyle: 'full', timeStyle: 'short' }).format(nowMs)
+  } catch {
+    return ''
+  }
+  return [
+    "## The user's local time",
+    `It is currently ${local} for this user (timezone ${timezone}). Read "today", "tonight", "9am my time" and similar against this timezone unless they say otherwise.`,
+  ].join('\n')
+}
+
+/**
+ * qm environment-facts.ts renderComputerBlock (segment ⑥): machine facts
+ * from the sandbox computer spec plus the workspace layout.
+ */
+export function renderComputerBlock(
+  spec: {
+    os?: string
+    cpus?: number
+    memoryMb?: number
+    diskGb?: number
+    runtimes?: readonly string[]
+    tools?: readonly string[]
+    notInstalled?: readonly string[]
+    workdir?: string
+    homeDir?: string
+  }
+    | undefined,
+  layout: { hasGlobal?: boolean; teamCount?: number } = {},
+): string {
+  if (!spec) return ''
+  const lines: string[] = ['## This machine']
+
+  const size: string[] = []
+  if (spec.cpus) size.push(`${spec.cpus} vCPU`)
+  if (spec.memoryMb) size.push(`${Math.round(spec.memoryMb / 1024)} GB RAM`)
+  if (spec.diskGb) size.push(`${spec.diskGb} GB disk`)
+  const head = [spec.os, size.join(' / ')].filter(Boolean).join(' · ')
+  if (head) lines.push(`${head}.`)
+  if (spec.runtimes?.length) lines.push(`Runtimes: ${spec.runtimes.join(', ')}.`)
+  if (spec.tools?.length) lines.push(`Installed CLIs: ${spec.tools.join(', ')}.`)
+  if (spec.notInstalled?.length) {
+    lines.push(`NOT installed (install on demand if a task needs one): ${spec.notInstalled.join(', ')}.`)
+  }
+
+  const cwd = spec.workdir ?? '.'
+  const home = spec.homeDir ?? '~'
+  const ws = [
+    `Your workspace is \`${cwd}\` (read-write) and persists across turns — keep your work here, including anything you'll \`publish\` (publish ships files in your workspace, not files elsewhere under \`$HOME\`). \`$HOME\` (\`${home}\`) also persists and holds your logins and config.`,
+  ]
+  if (layout.hasGlobal) ws.push('Shared org files are at `./global` (read-only).')
+  const teamCount = layout.teamCount ?? 0
+  if (teamCount > 0) {
+    ws.push(`Team files are at \`./team-*\` (read-only; ${teamCount} mounted).`)
+  }
+  lines.push(ws.join(' '))
+
+  return lines.join('\n')
 }
