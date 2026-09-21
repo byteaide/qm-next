@@ -1,12 +1,17 @@
 # qm-next-c3-tool-ledger
 
-> ⚠️ **BATCH 2 — BLOCKED.** Do not dispatch until runs/replay lane is in.
+> ✅ **DONE — implemented 2026-09-21** (Slice B on `feat/runs-aggregate`). The
+> blocked premise dissolved: the design PRD
+> `docs/qm-next-parity-clearance/qm-next-observability-replay.md` resolved the
+> architecture — the ledger rides the `RunStore` contract (not a `DurableMap`
+> bundle) and `once()` lives in `createSandboxToolContext` with
+> `runId`/`attempt` threaded from the orchestrator, matching qm's semantics.
 
 ## Origin
 
 - **Created**: 2026-09-21
 - **Parent task**: parity clearance (cluster 3, item: per-turn tool ledger)
-- **Blocked by**: runs/replay lane (parity-deviations.md #28)
+- **Blocked by**: runs/replay lane (parity-deviations.md #28) — RESOLVED by the design PRD above
 - **Conversation context**: parity-deviations.md #28 marks per-turn tool ledger as deferred. qm caches tool results per (run, attempt, call index); qm-next executes every call live. Need replay-dedupe + ledger store to land.
 
 ## What
@@ -48,7 +53,10 @@ Without ledger, re-running a turn (debug, retry) re-executes every tool call. Wi
 
 ## Acceptance Criteria
 
-- [ ] `ToolLedger` port defined in `@qm/types`
+- [x] `ToolLedger` port defined in `@qm/types` — `packages/types/src/run.ts`
+      (`LedgerBegin` + `ToolLedger`, consumed by `RunStore.ledger?`);
+      `packages/runs/src/tool-ledger.ts` re-exports the types and keeps
+      `createNullLedger`
 
   ```yaml
   verify:
@@ -57,16 +65,26 @@ Without ledger, re-running a turn (debug, retry) re-executes every tool call. Wi
     path: packages/types/src
   ```
 
-- [ ] Memory + PG twins exist
+- [x] Memory + PG twins exist — as `RunStore.ledger` members:
+      `packages/store/src/memory-run-store.ts` (map keyed
+      `runId:attempt:callIndex`) and `packages/store/src/postgres-run-store.ts`
+      (`tool_calls` table, PK `(run_id, attempt, call_index)`); the original
+      factory-bundle shape was superseded by the PRD decision to avoid
+      churning every call site
 
   ```yaml
   verify:
     method: codebase
-    pattern: "createPostgresToolLedger|createMemoryToolLedger"
-    path: packages/runs/src
+    pattern: "tool_calls|toolCalls"
+    path: packages/store/src
   ```
 
-- [ ] Replay test: same tool called twice returns cached result
+- [x] Replay test: same tool called twice returns cached result —
+      `replay: execute/read cache through the ledger keyed by (runId,
+      attempt, callIndex) (#28)` in
+      `packages/orchestrator/tests/tool-context.test.ts` plus the store
+      contract case `tool ledger replays by (runId, attempt, callIndex)`
+      in `packages/store/tests/stores.test.ts`
 
   ```yaml
   verify:
@@ -74,7 +92,7 @@ Without ledger, re-running a turn (debug, retry) re-executes every tool call. Wi
     run: "pnpm --filter @qm/orchestrator test tool-ledger"
   ```
 
-- [ ] `parity-deviations.md` #28 marked ✅
+- [x] `parity-deviations.md` #28 marked ✅
 
   ```yaml
   verify:

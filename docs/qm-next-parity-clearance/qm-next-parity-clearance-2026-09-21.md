@@ -36,8 +36,8 @@
 | 22 | secret-drop + codex-device-login | 🟡 / ❌ | secret-drop form/redeem ladder in; **`requiresToken` binding still open** (`parity-lanes-routes.ts:146`); codex-device-login **still 502** in `user-model-auth-routes.ts:55-64` |
 | 23-24 | pi-coding-agent vendored + config injection | ✅ | `@qm/pi-coding-agent` |
 | 25 | tape audience filtering + RunSignal.request | 🟡 | `RunSignal.request: TurnInput` typed; audience filter per harness needs spot check |
-| 27 | Local sandbox image is P1 subset | 🟡 | `aws/microvm-agent` + `fly/Dockerfile` + `local/Dockerfile` exist at root; base tags still unpinned (operations.md §8) |
-| 28 | No per-turn tool ledger | ❌ | Comment in tools lane: "lands with runs/replay lane" |
+| 27 | Local sandbox image is P1 subset | ✅ | `aws/microvm-agent` + `fly/Dockerfile` + `local/Dockerfile`; base tags digest-pinned 2026-09-21 (cluster 3 brief) |
+| 28 | No per-turn tool ledger | ✅ | `RunStore.ledger` (memory + PG `tool_calls`); `once()` in `createSandboxToolContext` (#28 closed 2026-09-21) |
 | 30 | Per-package narrow task-store | ✅ | `@qm/tasks` |
 | 31-32 | Platform-neutral surface name + 5s signal timeout | ✅ | check:im clean |
 | 33-34 | Run-signal contract + Reaper | ✅ | `@qm/runs` |
@@ -128,7 +128,6 @@
 🟡  revoked-scope 403                 — #47d, identity+capability scope-membership unwired
 🟡  Ambient judge model default-on    — currently `keyword` is default; `model` requires explicit config
 🟡  Local sandbox base image digest pin — #27, lands with image-supply lane
-🟡  Per-turn tool ledger              — #28, lands with runs/replay lane
 🟡  Reach / ambient DM unresolvable    — #53/54, warn+mark
 🟡  PG twins gap list                 — tasks/acl/admin sinks/runs activity/signals/instance registry/ambient/ack (per `docs/migration.md` 20.0 checklist)
 ```
@@ -139,7 +138,7 @@ Since 2026-09-15 the deviations ledger has closed substantially (12.0 control pl
 
 1. **Deploy runtime** — biggest: DeployProvider, `/d/<slug>` serving, git http-backend, AWS/Fly/Docker providers. Marked 13.0 but not started.
 2. **Productionization follow-ups** — S3 / pg-boss / MonitorPoller / codex-device-login / emoji-upload. All explicitly tagged as 16.0 follow-ups and not started.
-3. **Small tails** — secret-drop `requiresToken` binding, portal identity enforcement, PG twins gap list, digest-pinned sandbox base, per-turn tool ledger. Each is a single targeted ticket. (runs aggregate seam #47e closed 2026-09-21.)
+3. **Small tails** — secret-drop `requiresToken` binding, portal identity enforcement, PG twins gap list, digest-pinned sandbox base. Each is a single targeted ticket. (runs aggregate seam #47e and per-turn tool ledger #28 closed 2026-09-21.)
 
 The 16.0 follow-up cluster has the longest "documented but not started" runway and the least external coordination cost — good candidate for the next planning round.
 
@@ -163,7 +162,7 @@ Three gap clusters mapped to plan artifacts in this directory:
   - Worker A: cluster 2 active briefs (S3 + pg-boss + emoji-upload) — ✅ done
   - Worker B: cluster 3 active briefs (secret-drop + portal identity + digest pin + PG twins) — ✅ done
 - **Batch 2** (after Batch 1, blocked on observability/replay/credentials):
-  - Cluster 3 blocked: runs aggregate + per-turn tool ledger
+  - Cluster 3 blocked: runs aggregate + per-turn tool ledger — ✅ both closed 2026-09-21 (design PRD + Slices A/B)
   - Cluster 2 blocked: codex-device-login (needs ChatGPT creds) + MonitorPoller (needs surface exposure)
 
 Total: 11 worker briefs + 1 PRD. Each brief is `tier:simple` or `tier:standard` except the four blocked briefs (marked `tier:thinking` until dependencies resolve).
