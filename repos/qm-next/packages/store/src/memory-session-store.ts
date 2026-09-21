@@ -18,13 +18,14 @@ import type {
   NewTapeRecord,
   ScopeId,
   Session,
-  SessionEntryHit,
-  SessionEntry,
-  SessionForkResult,
-  SessionPatch,
-  SessionStore,
-  TapeRecord,
-} from '@qm/types'
+   SessionEntryHit,
+   SessionEntry,
+   SessionForkResult,
+   SessionPatch,
+   SessionRef,
+   SessionStore,
+   TapeRecord,
+ } from '@qm/types'
 
 export interface MemoryStoreOptions {
   now?: () => number
@@ -341,6 +342,13 @@ export function createMemorySessionStore(opts: MemoryStoreOptions = {}): Session
       const threadRef = [...byThread.entries()].find(([, id]) => id === sessionId)?.[0]
       if (threadRef) byThread.delete(threadRef)
       return true
+    },
+
+    async sessionsByThreadRefs(threadRefs): Promise<SessionRef[]> {
+      const wanted = new Set(threadRefs)
+      return [...sessions.values()]
+        .filter((s) => wanted.has(s.threadRef))
+        .map((s) => ({ id: s.id, threadRef: s.threadRef, scopeId: s.scopeId, type: s.type, title: s.title ?? null }))
     },
   }
 }

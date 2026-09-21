@@ -165,6 +165,15 @@ export interface SessionForkResult {
   entriesCopied: number
 }
 
+/** Session metadata projection used for admin runs aggregation. */
+export interface SessionRef {
+  id: string
+  threadRef: string
+  scopeId: ScopeId
+  type: SessionType
+  title?: string | null
+}
+
 export interface SessionStore {
   getOrCreateByThread(
     threadRef: string,
@@ -207,4 +216,10 @@ export interface SessionStore {
   forkSession(sessionId: string, by: string, opts?: { upToSeq?: number }): Promise<SessionForkResult | null>
   /** Drop a session and its transcript (seed-refusal rollback). */
   discardSession(sessionId: string, by: string): Promise<boolean>
+
+  // --- admin observability lane (additive) ---
+
+  /** Metadata for the sessions owning the given thread refs (runs carry
+   *  sessionId = threadRef); unknown refs are simply absent. */
+  sessionsByThreadRefs(threadRefs: readonly string[]): Promise<SessionRef[]>
 }

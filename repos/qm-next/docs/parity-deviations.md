@@ -447,9 +447,12 @@ Each entry names the qm source shape, the qm-next shape, and why.
     scope-membership checks (qm `authorizesCapabilityScope`) stay
     unwired, so revoked-scope 403s cannot fire yet; (e) admin metrics
     reads the real turn-metrics sink and audit/errors/egress read the
-    sinks, but runs-based aggregates keep session-scope mapping null (no
-    `sessionsByThreadRefs` seam) and the anatomy/phase histograms land
-    with the observability convergence; (f) `check:im` was red since the
+    sinks; runs-based aggregates scope through the `sessionsByThreadRefs`
+    SessionStore seam (memory + PG) with real queueWait/runLatency in
+    metrics and per-run sessionScope/sessionType plus active-first
+    ordering in the admin runs list, though anatomy/phase histograms land
+    with the observability convergence (#47e ✅ 2026-09-21, runs-aggregate
+    seam closed); (f) `check:im` was red since the
     parity routes introduced qm's IM-named contract vocabulary — the gate
     now scans every core package except the api parity surface for
     platform symbols and adds an SDK-import scan (no provider SDK may be

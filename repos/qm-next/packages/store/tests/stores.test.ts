@@ -350,6 +350,23 @@ async function sessionStoreCases(t: import('node:test').TestContext, make: () =>
     assert.deepEqual((await h.store.participantsOf(s.id)).sort(), ['alice', 'bob'])
     await h.close()
   })
+
+  await t.test('sessionsByThreadRefs maps refs to metadata and short-circuits empty', async () => {
+    const h = await make()
+    assert.deepEqual(await h.store.sessionsByThreadRefs([]), [])
+    const ref1 = `thread:${freshSessionId()}`
+    const ref2 = `thread:${freshSessionId()}`
+    const a = await h.store.getOrCreateByThread(ref1, 'dm', SCOPE, SURFACE)
+    await h.store.updateTitle(a.id, 'first')
+    const b = await h.store.getOrCreateByThread(ref2, 'channel', 'org:other', SURFACE)
+    const refs = await h.store.sessionsByThreadRefs([ref1, ref2, 'thread:missing'])
+    assert.equal(refs.length, 2)
+    const byRef = new Map(refs.map((r) => [r.threadRef, r]))
+    assert.deepEqual(byRef.get(ref1), { id: a.id, threadRef: ref1, scopeId: SCOPE, type: 'dm', title: 'first' })
+    assert.deepEqual(byRef.get(ref2), { id: b.id, threadRef: ref2, scopeId: 'org:other', type: 'channel', title: null })
+    assert.deepEqual(await h.store.sessionsByThreadRefs([]), [])
+    await h.close()
+  })
 }
 
 test('run store contract: memory', async (t) => {

@@ -15,7 +15,7 @@ import { createMemoryScopeMemory } from '@qm/memory'
 import { createHarnessRouter, createMockHarness, OrchestratorService } from '@qm/orchestrator'
 import { createMemorySkillStore } from '@qm/skills'
 import { createMemoryRunStore, createMemorySessionStore } from '@qm/store'
-import type { ResolutionService, ScopeId } from '@qm/types'
+import type { ResolutionService, ScopeId, TurnInput } from '@qm/types'
 import {
   adminRoutes,
   createApiServer,
@@ -490,4 +490,62 @@ test('emoji gate, egress-audit ingest + admin view, auth-broker gates', async ()
   const email = await emojiApp.inject({ method: 'GET', url: '/v1/auth/broker/email-allowed?email=x@y.z', headers: ada })
   assert.deepEqual(email.json(), { allowed: false })
   await emojiApp.close()
+})
+
+test('admin: metrics and runs aggregates scope via session thread refs (#47e)', async () => {
+  const sessions = createMemorySessionStore()
+  const runs = createMemoryRunStore()
+  const orgThread = 'thread:agg-org'
+  const chanThread = 'thread:agg-chan'
+  const orgSession = await sessions.getOrCreateByThread(orgThread, 'dm', SCOPE, 'test')
+  await sessions.updateTitle(orgSession.id, 'org session')
+  await sessions.getOrCreateByThread(chanThread, 'channel', 'slack:C1', 'test')
+
+  const turn = (threadRef: string): TurnInput => ({
+    surface: 'test',
+    actor: { id: 'user-1', type: 'internal' },
+    conversation: { kind: 'dm', threadRef, audience: [{ id: 'user-1', type: 'internal' }] },
+    origin: { kind: 'direct' },
+    text: 'go',
+  })
+  const first = await runs.enqueue({ sessionId: orgThread, request: turn(orgThread) })
+  const firstClaim = await runs.claim('worker-1', 5_000)
+  assert.ok(firstClaim)
+  await runs.complete(first.run.id, firstClaim.leaseToken!, { status: 'ok', reply: 'hi' })
+  const second = await runs.enqueue({ sessionId: chanThread, request: turn(chanThread) })
+  const secondClaim = await runs.claim('worker-2', 5_000)
+  assert.ok(secondClaim)
+  await runs.fail(second.run.id, secondClaim.leaseToken!, 'boom', { retry: false })
+
+  const app = createApiServer({ ...baseDeps(), admin: adminDeps({ sessions, runs }) }, OPTS)
+  const ada = auth(await token('person:ada'))
+
+  const orgMetrics = await app.inject({ method: 'GET', url: `/v1/admin/metrics?scope=${ORG}`, headers: ada })
+  assert.equal(orgMetrics.statusCode, 200)
+  assert.deepEqual(orgMetrics.json().throughput, { total: 2, done: 1, failed: 1, failureRate: 0.5 })
+  assert.equal(orgMetrics.json().runLatency.count, 2, 'both terminal runs carry real start/finish times')
+  assert.equal(orgMetrics.json().queueWait.count, 2)
+
+  const chanMetrics = await app.inject({ method: 'GET', url: '/v1/admin/metrics?scope=slack:C1', headers: ada })
+  assert.equal(chanMetrics.statusCode, 200)
+  assert.deepEqual(chanMetrics.json().throughput, { total: 1, done: 0, failed: 1, failureRate: 1 })
+  assert.equal(chanMetrics.json().runLatency.count, 1, 'only the channel-scoped run aggregates here')
+  assert.equal(chanMetrics.json().queueWait.count, 1)
+
+  const orgRuns = await app.inject({ method: 'GET', url: `/v1/admin/runs?scope=${ORG}`, headers: ada })
+  assert.equal(orgRuns.statusCode, 200)
+  const orgRows = orgRuns.json().runs
+  assert.equal(orgRows.length, 2)
+  const chanRow = orgRows.find((r: { threadRef: string }) => r.threadRef === chanThread)
+  assert.equal(chanRow.sessionScope, 'slack:C1')
+  assert.equal(chanRow.sessionType, 'channel')
+  const orgRow = orgRows.find((r: { threadRef: string }) => r.threadRef === orgThread)
+  assert.equal(orgRow.sessionScope, 'org:test')
+  assert.equal(orgRow.sessionType, 'dm')
+
+  const chanRuns = await app.inject({ method: 'GET', url: '/v1/admin/runs?scope=slack:C1', headers: ada })
+  const chanRows = chanRuns.json().runs
+  assert.equal(chanRows.length, 1)
+  assert.equal(chanRows[0].threadRef, chanThread)
+  await app.close()
 })

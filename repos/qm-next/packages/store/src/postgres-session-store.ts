@@ -18,14 +18,15 @@ import type {
   NewTapeRecord,
   ScopeId,
   Session,
-  SessionEntryHit,
-  SessionEntry,
-  SessionForkResult,
-  SessionPatch,
-  SessionStore,
-  SessionType,
-  TapeRecord,
-} from '@qm/types'
+   SessionEntryHit,
+   SessionEntry,
+   SessionForkResult,
+   SessionPatch,
+   SessionRef,
+   SessionStore,
+   SessionType,
+   TapeRecord,
+ } from '@qm/types'
 import { createPgPool, withPgTransaction, type PgPool, type PoolClient } from './pg-pool.ts'
 import { SESSION_SCHEMA_STATEMENTS } from './schema.ts'
 
@@ -530,6 +531,20 @@ export function createPostgresSessionStore(
         await client.query('DELETE FROM sessions WHERE id = $1', [sessionId])
         return true
       })
+    },
+
+    async sessionsByThreadRefs(threadRefs): Promise<SessionRef[]> {
+      if (threadRefs.length === 0) return []
+      const rows = await q('SELECT id, thread_ref, scope_id, type, title FROM sessions WHERE thread_ref = ANY($1)', [
+        [...new Set(threadRefs)],
+      ])
+      return rows.map((r) => ({
+        id: r.id as string,
+        threadRef: r.thread_ref as string,
+        scopeId: r.scope_id as ScopeId,
+        type: r.type as SessionType,
+        title: (r.title as string | null) ?? null,
+      }))
     },
 
     async close(): Promise<void> {

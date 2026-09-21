@@ -119,6 +119,13 @@ class FakeSessions implements SessionStore {
     return false
   }
 
+  async sessionsByThreadRefs(threadRefs: readonly string[]) {
+    const wanted = new Set(threadRefs)
+    return [...this.sessions.values()]
+      .filter((s) => wanted.has(s.threadRef))
+      .map((s) => ({ id: s.id, threadRef: s.threadRef, scopeId: SCOPE, type: 'dm' as const, title: null }))
+  }
+
   tapeRows = new Map<string, any[]>()
   async appendTape(lease: { sessionId: string; token: string }, rec: any) {
     if (this.leases.get(lease.sessionId) !== lease.token) throw new Error('appendTape without a valid session lease')

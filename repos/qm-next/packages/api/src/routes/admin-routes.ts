@@ -330,7 +330,16 @@ async function metrics(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> 
     cacheWriteTotal: sum((s) => s.cacheWrite),
     uncachedInputTotal: sum((s) => s.uncachedInput),
   }
-  const runs = (await deps.runs?.list({ limit: 500 })) ?? []
+  const allRuns = (await deps.runs?.list({ limit: 500 })) ?? []
+  const runScopes = orgWide
+    ? null
+    : new Map(
+        ((await deps.sessions?.sessionsByThreadRefs(allRuns.map((r) => r.sessionId))) ?? []).map((s) => [
+          s.threadRef,
+          s.scopeId,
+        ]),
+      )
+  const runs = allRuns.filter((r) => orgWide || runScopes!.get(r.sessionId) === authz.scope)
   // Phase 7 cutover: terminal truth is `targetState`; the legacy
   // `status='done'` literal is never written on target rows.
   const done = runs.filter((r) => r.targetState === 'succeeded').length
@@ -340,8 +349,10 @@ async function metrics(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> 
     scopeId: authz.scope,
     ttft,
     turnLatency,
-    runLatency: latencySummary([]),
-    queueWait: latencySummary([]),
+    runLatency: latencySummary(
+      runs.filter((r) => r.startedAt != null && r.finishedAt != null).map((r) => r.finishedAt! - r.startedAt!),
+    ),
+    queueWait: latencySummary(runs.filter((r) => r.startedAt != null).map((r) => r.startedAt! - r.createdAt)),
     throughput: { total: runs.length, done, failed, failureRate: finished ? failed / finished : 0 },
     series,
     cache,
@@ -384,22 +395,32 @@ async function egress(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
 async function listAdminRuns(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const authz = await requireScopedAdmin(ctx, deps)
   if (!authz) return undefined
+  const orgWide = parseScopeId(authz.scope).kind === 'org'
   const rawRuns = (await deps.runs?.list({ limit: 200 })) ?? []
+  const byThread = new Map(
+    ((await deps.sessions?.sessionsByThreadRefs(rawRuns.map((r) => r.sessionId))) ?? []).map((s) => [s.threadRef, s]),
+  )
   const ACTIVE = new Set(['pending', 'running'])
-  const runs = rawRuns.map((r) => ({
-    id: r.id,
-    status: r.status,
-    sessionScope: null,
-    sessionType: null,
-    threadRef: r.sessionId,
-    attempts: r.attempts,
-    maxAttempts: r.maxAttempts,
-    workerId: r.workerId,
-    leaseExpiresAt: r.leaseExpiresAt,
-    createdAt: r.createdAt,
-    startedAt: r.startedAt,
-    finishedAt: r.finishedAt,
-  }))
+  const runs = rawRuns
+    .map((r) => {
+      const s = byThread.get(r.sessionId)
+      return {
+        id: r.id,
+        status: r.status,
+        sessionScope: s?.scopeId ?? null,
+        sessionType: s?.type ?? null,
+        threadRef: r.sessionId,
+        attempts: r.attempts,
+        maxAttempts: r.maxAttempts,
+        workerId: r.workerId,
+        leaseExpiresAt: r.leaseExpiresAt,
+        createdAt: r.createdAt,
+        startedAt: r.startedAt,
+        finishedAt: r.finishedAt,
+      }
+    })
+    .filter((r) => orgWide || r.sessionScope === authz.scope)
+    .sort((a, b) => Number(ACTIVE.has(b.status)) - Number(ACTIVE.has(a.status)) || b.createdAt - a.createdAt)
   const active = runs.filter((r) => ACTIVE.has(r.status)).length
   return { scopeId: authz.scope, active, runs }
 }
