@@ -124,7 +124,7 @@
 🟡  environments / projects stores    — deliberately per-process in @qm/api/src/services/
 🟡  ToolContext publish/background/MCP — honest-unavailable per route
 ✅  secret-drop dropUrl token binding — #47a closed 2026-09-21 (2fefa54, fail-closed verify)
-🟡  Ambient judge model default-on    — currently `keyword` is default; `model` requires explicit config
+✅  Ambient judge default (decided 2026-09-21) — `keyword` stays default (zero external deps); `model` is explicit opt-in via `ambientJudgeMode`
 ```
 
 ## Bottom line
@@ -133,9 +133,9 @@ Since 2026-09-15 the deviations ledger has closed substantially (12.0 control pl
 
 1. **Deploy runtime** — mostly closed 2026-09-21: Docker provider + `/d/<slug>` proxy (`ea6303f`) and git http-backend with use-time capability binding (`deployment-git-routes.ts`, `8fd6141`) are live. Remaining: AWS/Fly providers (future PRD).
 2. **Productionization follow-ups** — 4/5 closed 2026-09-21: S3 byte store, pg-boss queue, MonitorPoller (`packages/monitors/src/monitor-poller.ts`), emoji-upload all landed. Remaining: codex-device-login (blocked on ChatGPT creds).
-3. **Small tails** — Ambient judge default-mode decision. (Closed 2026-09-21: secret-drop `requiresToken` binding #47a via `2fefa54`, runs aggregate #47e, per-turn tool ledger #28, portal identity enforcement #47b, revoked-scope 403 #47d, digest-pinned sandbox base #27, Reach warn+mark #53/54 — verified implemented, PG twins — verified wired per migration.md 20.0.)
+3. **Small tails** — none open. (Closed 2026-09-21: Ambient judge default-mode decision — `keyword` stays default, `model` opt-in (user decision); secret-drop `requiresToken` binding #47a via `2fefa54`, runs aggregate #47e, per-turn tool ledger #28, portal identity enforcement #47b, revoked-scope 403 #47d, digest-pinned sandbox base #27, Reach warn+mark #53/54 — verified implemented, PG twins — verified wired per migration.md 20.0.)
 
-The 16.0 follow-up cluster that opened this report is now closed except codex-device-login. What remains across all clusters is dependency-bound: ChatGPT creds (codex-device-login + subscription OAuth), AWS/Fly provider PRD, and the Ambient judge default-mode call.
+The 16.0 follow-up cluster that opened this report is now closed except codex-device-login. What remains across all clusters is dependency-bound: ChatGPT creds (codex-device-login + subscription OAuth) and the AWS/Fly provider PRD. The Ambient judge default was decided 2026-09-21: `keyword` stays default; `model` is explicit opt-in.
 
 ---
 
