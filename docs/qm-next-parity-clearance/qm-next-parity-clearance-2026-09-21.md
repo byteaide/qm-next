@@ -66,7 +66,7 @@
 
 | # | Item | Status | Evidence |
 |---|---|---|---|
-| 47 | 12.0 control plane substitutions | 🟡 | `@qm/admin` + `@qm/auth` landed; share / capability / blobs / secret-drop routed. Open sub-items: (a) drop URL `requiresToken` binding (parity-lanes-routes.ts:146); (b) portal identity wired in `@qm/auth` but **not enforced by gate**; (d) identity + capability scope-membership (`authorizesCapabilityScope`) unwired, so revoked-scope 403s cannot fire; (e) runs-based aggregates keep `sessionsByThreadRefs` seam null |
+| 47 | 12.0 control plane substitutions | 🟡 | `@qm/admin` + `@qm/auth` landed; share / capability / blobs / secret-drop routed. Open sub-items: (a) drop URL `requiresToken` binding (parity-lanes-routes.ts:146) — awaits 13.0 web runtime. Closed 2026-09-21: (b) portal identity enforced by admin gate (signed `x-portal-identity` ↔ `x-admin-actor` principal check, admin-ui proxy forwards); (d) capability tokens bound at use time — deployment-git re-verifies aud + `deployment-git:<id>` grant + live `ownerScopeId` match, so transfers/deletes revoke outstanding tokens; (e) `sessionsByThreadRefs` live in memory + PG (`ANY($1)`), runs-aggregate metrics scope-filtered |
 | 48 | Admin console | ✅ | `packages/api/admin-ui/` byte-level port + `/admin/ui` served |
 | 49 | Portal SSO | 🟡 | `@qm/portal` package in (18.2); **impersonation routes unported** (self-documented); playground anonymous sessions stay with 13.0 (dropped); production boot checklist reduced — full one lands with deployment hardening |
 
