@@ -93,6 +93,7 @@ import {
   createPostgresSessionStore,
   createLocalByteStore,
   createMemoryByteStore,
+  createS3ByteStore,
   type DurableByteStore,
   type PgPool,
 } from '@qm/store'
@@ -868,10 +869,22 @@ export class ApiService extends Service<ApiConfig> {
     // Files (20.0 twin lane): with databaseUrl the metadata lands in the
     // qm-shaped `file_artifacts` table and bytes go through the
     // content-addressed byte store (`filesDir` for the FS backend; without
-    // it bytes stay in RAM and a warning says so).
+    // it bytes stay in RAM and a warning says so).  S3 leg is selected when
+    // `S3_BUCKET` env is set (multi-host durability).
     let byteStore: DurableByteStore | undefined
     if (this.config.files || this.config.blobs) {
-      if (this.config.filesDir) {
+      const s3Bucket = process.env.S3_BUCKET
+      if (s3Bucket) {
+        byteStore = createS3ByteStore({
+          bucket: s3Bucket,
+          region: process.env.S3_REGION ?? 'us-east-1',
+          ...(process.env.S3_ENDPOINT ? { endpoint: process.env.S3_ENDPOINT } : {}),
+          ...(process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY
+            ? { accessKeyId: process.env.S3_ACCESS_KEY_ID, secretAccessKey: process.env.S3_SECRET_ACCESS_KEY }
+            : {}),
+          ...(process.env.S3_PREFIX ? { prefix: process.env.S3_PREFIX } : {}),
+        })
+      } else if (this.config.filesDir) {
         byteStore = createLocalByteStore(this.config.filesDir)
       } else {
         if (databaseUrl) this.ctx.logger.warn('api: databaseUrl set but filesDir missing — file bytes stay in RAM')

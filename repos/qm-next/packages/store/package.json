@@ -10,11 +10,13 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1075.0",
     "@qm/types": "workspace:^",
     "pg": "^8.13.0"
   },
   "devDependencies": {
     "@qm/concurrency": "workspace:^",
-    "@types/pg": "^8.11.0"
+    "@types/pg": "^8.11.0",
+    "aws-sdk-client-mock": "^4.1.0"
   }
 }

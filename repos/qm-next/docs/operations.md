@@ -64,7 +64,7 @@
 - **identity 面（`deactivated_principals` / `external_members`）**：v1 不带（不迁移、不建 twin）；启用停用名单需求出现时再立项。
 - **surface-cache / channel_messages 等缓存类**：not-carried，重同步可重建。
 - **webhooks**：PG twin 已落（同名 `webhooks` 表），但 qm 与 qm-next 记录形状不同——**数据走 export-seed，不做行级拷贝**。
-- **S3 字节后端**：v1 仅 local-FS `DurableByteStore`；S3 变体平移延后（偏差记录 `parity-deviations.md` §P5 20.0）。
+- **S3 字节后端**：v1 仅 local-FS `DurableByteStore`；S3 变体平移延后（偏差记录 `parity-deviations.md` §P5 20.0）。✅ 2026-09-21 已落地 `createS3ByteStore()`（cluster 2 brief `qm-next-c2-s3-byte-store`）：composition root 在 `S3_BUCKET` 环境变量存在时自动切换；IAM role / 显式凭据 + endpoint（minio / R2）皆支持；键布局仍为 `files/<sha256>`，与 local-FS 行级一致以利迁移。
 
 ## 9. Phase 1 Run Lifecycle 指标（slice 1.6）
 
