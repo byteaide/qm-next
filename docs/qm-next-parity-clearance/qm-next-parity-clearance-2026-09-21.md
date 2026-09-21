@@ -59,14 +59,14 @@
 |---|---|---|---|
 | 42 | Surface sessions/conversations | ✅ | SessionStore extensions all in; **`regenerateTitle` LLM path is live** in `pi-harness.ts:2095`, `claude-harness.ts:955`, `codex-harness.ts:1727`, `opencode-harness.ts:1492` |
 | 44 | Context/surface-cache/projects lane-A | 🟡 | (a) `identity_unverified` / `channel_not_found` / `ambiguous_channel` vocabulary imported in `@qm/reach` (`contract.ts:103,165,171`) and `packages/types/src/tools.ts:459-463`; (b) `/v1/surface-file` `download: null` shape in; (c) `context-policy-routes.ts:5` self-documents "lane A" gap (membership check missing); (d) projects member check + environments viewer-only list still lane-A |
-| 45 | Files/grants/share/soul/... | 🟡 | (a) share 401 resolved via 12.0; (b) **deployment proxy lane (`/d/<slug>`, git http-backend, admin proxy) routes are NOT registered** — only the in-memory `DeploymentStore` is wired; `deployment-routes.ts:4` self-documents "needs the deployment runtime, which lands with the 13.0 im-bridge"; (c) connectors OAuth consent mint/redeem routes are live in `connector-routes.ts:211-212`; (e) `soul-routes.ts:4` self-documents `managesScope` unwired; (g) per-process stores for environments/projects/connectors/webhooks deliberately preserved per `services/{environment-registry, project-store, webhook-store}.ts` (see #816 comment) |
+| 45 | Files/grants/share/soul/... | 🟡 | (a) share 401 resolved via 12.0; (b) closed 2026-09-21 — deployment proxy lane registered: `/d/<slug>` proxy + Docker provider (`ea6303f`), git http-backend capability-bound (`deployment-git-routes.ts`, `8fd6141`); (c) connectors OAuth consent mint/redeem routes are live in `connector-routes.ts:211-212`; (e) `soul-routes.ts:4` self-documents `managesScope` unwired; (g) per-process stores for environments/projects/connectors/webhooks deliberately preserved per `services/{environment-registry, project-store, webhook-store}.ts` (see #816 comment) |
 | 46 | Admin block + closing modules | 🟡 | (a) Admin guards in; **`command-policy-simulate` still 501** (13.0 deferred); (b) admin file ACL bypass for reads — note (12.0) but ACL package now exists, may have closed — needs spot check; (g) secret-drop mint 401 + form/redeem ladder live |
 
 ## 12.0 control plane (#47-49)
 
 | # | Item | Status | Evidence |
 |---|---|---|---|
-| 47 | 12.0 control plane substitutions | 🟡 | `@qm/admin` + `@qm/auth` landed; share / capability / blobs / secret-drop routed. Open sub-items: (a) drop URL `requiresToken` binding (parity-lanes-routes.ts:146) — awaits 13.0 web runtime. Closed 2026-09-21: (b) portal identity enforced by admin gate (signed `x-portal-identity` ↔ `x-admin-actor` principal check, admin-ui proxy forwards); (d) capability tokens bound at use time — deployment-git re-verifies aud + `deployment-git:<id>` grant + live `ownerScopeId` match, so transfers/deletes revoke outstanding tokens; (e) `sessionsByThreadRefs` live in memory + PG (`ANY($1)`), runs-aggregate metrics scope-filtered |
+| 47 | 12.0 control plane substitutions | ✅ | `@qm/admin` + `@qm/auth` landed; share / capability / blobs / secret-drop routed. All sub-items closed 2026-09-21: (a) drop URL `requiresToken` binding — `verifyDropToken` gates form + redeem fail-closed (`parity-lanes-routes.ts:77-94,206-247`, commit `2fefa54`, tests `tranche7-routes.test.ts:352`); (b) portal identity enforced by admin gate (signed `x-portal-identity` ↔ `x-admin-actor` principal check, admin-ui proxy forwards); (d) capability tokens bound at use time — deployment-git re-verifies aud + `deployment-git:<id>` grant + live `ownerScopeId` match, so transfers/deletes revoke outstanding tokens; (e) `sessionsByThreadRefs` live in memory + PG (`ANY($1)`), runs-aggregate metrics scope-filtered |
 | 48 | Admin console | ✅ | `packages/api/admin-ui/` byte-level port + `/admin/ui` served |
 | 49 | Portal SSO | 🟡 | `@qm/portal` package in (18.2); **impersonation routes unported** (self-documented); playground anonymous sessions stay with 13.0 (dropped); production boot checklist reduced — full one lands with deployment hardening |
 
@@ -93,13 +93,13 @@
 | Reach `openGroup` write-back | ✅ | `ReachOpts.mayOpenGroup` + 502 ladder in `@qm/reach` |
 | Directory `personKey` | ✅ | `@qm/directory/src/person.ts` |
 | Skills full lifecycle | ✅ | `@qm/skills` 14.0 + 15.0c |
-| Monitors | 🟡 | Store + broker live in `@qm/monitors`; **poller not ported** (`monitor-broker.ts:6`, `monitor-store.ts:8` self-document) |
+| Monitors | ✅ | Store + broker + poller live in `@qm/monitors` (`monitor-poller.ts`); wired in `service.ts:811` |
 | ACL | ✅ | `@qm/acl` + `acl_grants_version` PG trigger |
 | Tasks | ✅ | `@qm/tasks` + PG schema |
 | Processes / insights | ✅ | `@qm/processes`, `@qm/insights` |
 | Security | ✅ | `@qm/security` (screener + posture) |
 | Egress authz | ✅ | `@qm/egress-authz` |
-| Connectors cores | 🟡 | Background-exec / oauth-flow / consent-link / browser-session / secret-envelope live; **`connectors/oauth.ts` (626L, PROVIDERS+well-known+PKCE+refresh) and `emoji-upload-service.ts` (199L, IM-specific) still out** — comment at connectors section says "until IM providers land in P5 18.0" |
+| Connectors cores | 🟡 | Background-exec / oauth-flow / consent-link / browser-session / secret-envelope / emoji-upload live (`emoji-upload-service.ts`, `6d58dca`); **`connectors/oauth.ts` (626L, PROVIDERS+well-known+PKCE+refresh) still out** — comment at connectors section says "until IM providers land in P5 18.0" |
 
 ## P5 19.0 / 20.0 productionization
 
@@ -107,23 +107,23 @@
 |---|---|---|
 | 19.0 Migration decisions + 44/44 rehearsal | ✅ | `docs/migration.md` |
 | 20.0 Durable-by-default sweep | ✅ | `packages/api/src/service.ts` PG twins; new twins: `createPostgresDeliveryQueue`, `createPostgresChannelPolicyStore`, `createPostgresFileStore` |
-| S3 byte backend | ❌ | `operations.md` §8 explicitly defers; byte-store only has memory + local |
+| S3 byte backend | ✅ | `store/src/s3-byte-store.ts`; `service.ts:941-953` selects S3 when `S3_BUCKET` set (local fallback, memory last) |
 | `instance_heartbeats` 21.0 multi-instance | 🟡 | Table in `packages/runs/src/instance-registry.ts`; `TRUNCATE_ONLY notes-only` path is by design — not a true multi-instance handoff |
 
 ## Cross-cutting 16.0 follow-ups (status)
 
 ```
-❌  Deploy runtime (13.0)             — AWS/Fly/Docker providers + /d/<slug> proxy + git http-backend
-❌  S3 byte backend (20.0+)           — memory/local only
-❌  MonitorPoller (16.0 follow-up)    — broker/store live, poller absent
-❌  pg-boss job queue (16.0 follow-up) — blocked by lockfile-only policy; comment in triggers/contract.ts
+🟡  Deploy runtime (13.0)             — Docker provider + /d/<slug> proxy (ea6303f) + git http-backend (8fd6141) live; AWS/Fly providers future PRD
+✅  S3 byte backend (20.0+)           — s3-byte-store.ts; service.ts:941 S3_BUCKET selection
+✅  MonitorPoller (16.0 follow-up)    — monitor-poller.ts, wired in service.ts:811
+✅  pg-boss job queue (16.0 follow-up) — createPgBossSink opt-in in @qm/triggers
 ❌  codex-device-login                — user-model-auth returns 502 oauth_start_failed
 ❌  subscription OAuth                — user-model-auth returns 502 oauth_complete_failed
-❌  emoji-upload-service              — returns "isn't available in this deployment"
+✅  emoji-upload-service              — connectors/src/emoji-upload-service.ts (6d58dca)
 ❌  Webhook deliveries → agent        — IM domain (decision: dropped)
 🟡  environments / projects stores    — deliberately per-process in @qm/api/src/services/
 🟡  ToolContext publish/background/MCP — honest-unavailable per route
-🟡  secret-drop dropUrl token binding  — #47a, awaits 13.0 web runtime
+✅  secret-drop dropUrl token binding — #47a closed 2026-09-21 (2fefa54, fail-closed verify)
 🟡  Ambient judge model default-on    — currently `keyword` is default; `model` requires explicit config
 ```
 
@@ -133,9 +133,9 @@ Since 2026-09-15 the deviations ledger has closed substantially (12.0 control pl
 
 1. **Deploy runtime** — mostly closed 2026-09-21: Docker provider + `/d/<slug>` proxy (`ea6303f`) and git http-backend with use-time capability binding (`deployment-git-routes.ts`, `8fd6141`) are live. Remaining: AWS/Fly providers (future PRD).
 2. **Productionization follow-ups** — 4/5 closed 2026-09-21: S3 byte store, pg-boss queue, MonitorPoller (`packages/monitors/src/monitor-poller.ts`), emoji-upload all landed. Remaining: codex-device-login (blocked on ChatGPT creds).
-3. **Small tails** — secret-drop `requiresToken` binding (blocked on 13.0 web runtime), Ambient judge default-mode decision. (Closed 2026-09-21: runs aggregate #47e, per-turn tool ledger #28, portal identity enforcement #47b, revoked-scope 403 #47d, digest-pinned sandbox base #27, Reach warn+mark #53/54 — verified implemented, PG twins — verified wired per migration.md 20.0.)
+3. **Small tails** — Ambient judge default-mode decision. (Closed 2026-09-21: secret-drop `requiresToken` binding #47a via `2fefa54`, runs aggregate #47e, per-turn tool ledger #28, portal identity enforcement #47b, revoked-scope 403 #47d, digest-pinned sandbox base #27, Reach warn+mark #53/54 — verified implemented, PG twins — verified wired per migration.md 20.0.)
 
-The 16.0 follow-up cluster that opened this report is now closed except codex-device-login. What remains across all clusters is dependency-bound: 13.0 web runtime (#47a), ChatGPT creds (codex-device-login), AWS/Fly provider PRD, and the Ambient judge default-mode call.
+The 16.0 follow-up cluster that opened this report is now closed except codex-device-login. What remains across all clusters is dependency-bound: ChatGPT creds (codex-device-login + subscription OAuth), AWS/Fly provider PRD, and the Ambient judge default-mode call.
 
 ---
 
@@ -147,7 +147,7 @@ Three gap clusters mapped to plan artifacts in this directory:
 |---|---|---|---|
 | 1 — Deploy runtime | `qm-next-deploy-runtime-mvp.md` | Docker provider + `/d/<slug>` proxy; git HTTP deferred to follow-up PRD | ✅ merged on main: proxy `ea6303f` + git HTTP (capability-bound, `8fd6141`); Fly/AWS providers future PRD |
 | 2 — Productionization | `briefs/qm-next-c2-s3-byte-store.md`, `...-c2-pgboss-queue.md`, `...-c2-emoji-upload.md`, `...-c2-monitor-poller.md` (active) | 5 worker-ready briefs | 4/5 merged (S3 + pg-boss + emoji-upload + monitor-poller); codex-device-login still blocked (ChatGPT creds) |
-| 3 — Small tails | `briefs/qm-next-c3-secret-drop-requires-token.md`, `...-c3-portal-identity-enforce.md`, `...-c3-sandbox-digest-pin.md`, `...-c3-pg-twins-migration.md` (active); `...-c3-runs-aggregate.md`, `...-c3-tool-ledger.md` (blocked) | 6 worker-ready briefs | 6/6 closed 2026-09-21 (4 merged + runs-aggregate/tool-ledger via design PRD + Slices A/B); #47a `requiresToken` waits on 13.0 web runtime |
+| 3 — Small tails | `briefs/qm-next-c3-secret-drop-requires-token.md`, `...-c3-portal-identity-enforce.md`, `...-c3-sandbox-digest-pin.md`, `...-c3-pg-twins-migration.md` (active); `...-c3-runs-aggregate.md`, `...-c3-tool-ledger.md` (blocked) | 6 worker-ready briefs | 6/6 closed 2026-09-21 (4 merged + runs-aggregate/tool-ledger via design PRD + Slices A/B); #47a closed via `2fefa54` (fail-closed drop-token verify) |
 
 **Execution plan (recommended)**:
 
