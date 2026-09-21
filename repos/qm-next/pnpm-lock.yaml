@@ -128,6 +128,9 @@ importers:
       '@qm/credentials':
         specifier: workspace:^
         version: link:../credentials
+      '@qm/deploy-runtime':
+        specifier: workspace:^
+        version: link:../deploy-runtime
       '@qm/directory':
         specifier: workspace:^
         version: link:../directory
@@ -326,6 +329,15 @@ importers:
         specifier: workspace:^
         version: link:../../vendor/schemastery
 
+  packages/deploy-runtime:
+    dependencies:
+      '@qm/store':
+        specifier: workspace:^
+        version: link:../store
+      '@qm/types':
+        specifier: workspace:^
+        version: link:../types
+
   packages/directory:
     dependencies:
       '@qm/im-core':
@@ -424,7 +436,7 @@ importers:
         version: 0.0.4
       '@earendil-works/pi-ai':
         specifier: 0.82.0
-        version: 0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.6.4))(ws@8.21.3)(zod@4.6.4)
+        version: 0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
       '@qm/model':
         specifier: workspace:^
         version: link:../model
@@ -1030,10 +1042,10 @@ importers:
     dependencies:
       '@earendil-works/pi-agent-core':
         specifier: 0.82.0
-        version: 0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
+        version: 0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.6.4))(ws@8.21.3)(zod@4.6.4)
       '@earendil-works/pi-ai':
         specifier: 0.82.0
-        version: 0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
+        version: 0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.6.4))(ws@8.21.3)(zod@4.6.4)
       '@earendil-works/pi-tui':
         specifier: 0.82.0
         version: 0.82.0
@@ -2997,7 +3009,6 @@ packages:
 
   opencode-ai@1.17.18:
     resolution: {integrity: sha512-gpCE5X3dwvYam2ba9r3mw+FTPBTDlmKkguiOoYF1nv9MVA3sDIXje3tPQ+EMNxYkWD43FN3+eVC1GW6tRO9Aiw==}
-    cpu: [arm64, x64]
     os: [darwin, linux, win32]
     hasBin: true
 
@@ -4049,9 +4060,9 @@ snapshots:
       - ws
       - zod
 
-  '@earendil-works/pi-agent-core@0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)':
+  '@earendil-works/pi-agent-core@0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.6.4))(ws@8.21.3)(zod@4.6.4)':
     dependencies:
-      '@earendil-works/pi-ai': 0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
+      '@earendil-works/pi-ai': 0.82.0(@modelcontextprotocol/sdk@1.30.0(zod@4.6.4))(ws@8.21.3)(zod@4.6.4)
       diff: 8.0.4
       ignore: 7.0.5
       typebox: 1.1.38

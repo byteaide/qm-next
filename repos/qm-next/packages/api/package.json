@@ -18,6 +18,7 @@
     "@qm/credentials": "workspace:^",
     "@qm/cordis": "workspace:^",
     "@qm/concurrency": "workspace:^",
+    "@qm/deploy-runtime": "workspace:^",
     "@qm/directory": "workspace:^",
     "@qm/harness-claude": "workspace:^",
     "@qm/harness-codex": "workspace:^",

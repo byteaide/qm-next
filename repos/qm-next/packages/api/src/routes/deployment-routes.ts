@@ -1,9 +1,11 @@
 /**
  * /v1/deployments — qm deployment management lane. Shapes and error
- * ladders mirror repos/qm/src/api/routes/deployments.ts; the public proxy
- * lane (/d/<slug>, admin proxy, git http backend) and live fetch/logs
- * need the deployment runtime, which lands with the 13.0 im-bridge.
+ * ladders mirror repos/qm/src/api/routes/deployments.ts. The public
+ * reverse-proxy route (/d/<slug>) and live fetch/logs live in
+ * `deployment-proxy-routes.ts` (cluster 1 MVP, parity #45b); the git
+ * HTTP backend and admin proxy stay deferred to a follow-up PRD.
  */
+import type { DeployFile } from '@qm/types'
 import type { DeploymentStore } from '../services/deployment-store.ts'
 import { badRequest, isObj, notFound, sendJson, type ApiRouteContext, type Route } from './framework.ts'
 
@@ -17,8 +19,23 @@ const LOGS_MAX_TAIL_LINES = 2000
 const AGENT_FETCH_DEFAULT_MAX_BYTES = 256 * 1024
 const AGENT_FETCH_MAX_BYTES = 1024 * 1024
 
-function isDeployInput(b: unknown): b is { ownerScopeId: string; createdBy: string; entrypoint: string; files: unknown[] } {
-  return isObj(b) && typeof b.ownerScopeId === 'string' && typeof b.createdBy === 'string' && typeof b.entrypoint === 'string' && Array.isArray(b.files)
+function isDeployFile(value: unknown): value is DeployFile {
+  return (
+    isObj(value) &&
+    typeof value.path === 'string' &&
+    (typeof value.blobKey === 'string' || typeof value.content === 'string' || value.content instanceof Uint8Array)
+  )
+}
+
+function isDeployInput(b: unknown): b is { ownerScopeId: string; createdBy: string; entrypoint: string; files: DeployFile[] } {
+  return (
+    isObj(b) &&
+    typeof b.ownerScopeId === 'string' &&
+    typeof b.createdBy === 'string' &&
+    typeof b.entrypoint === 'string' &&
+    Array.isArray(b.files) &&
+    b.files.every(isDeployFile)
+  )
 }
 
 function callerId(ctx: ApiRouteContext): string | null {
@@ -168,11 +185,11 @@ async function redeployDeployment(ctx: ApiRouteContext, deps: DeploymentDeps): P
   if (!id) return sendJson(ctx, 404, { error: 'not_found' })
   if (!(await callerMayManage(ctx, deps, id))) return sendJson(ctx, 403, { error: 'forbidden' })
   const b = (ctx.body ?? {}) as { entrypoint?: unknown; files?: unknown }
-  if (typeof b.entrypoint !== 'string' || !Array.isArray(b.files)) {
-    return badRequest(ctx, 'entrypoint (string) and files (array) required')
+  if (typeof b.entrypoint !== 'string' || !Array.isArray(b.files) || !b.files.every(isDeployFile)) {
+    return badRequest(ctx, 'entrypoint (string) and files (array of {path, blobKey}) required')
   }
   try {
-    return { deployment: await deps.deployments.redeploy(id, { entrypoint: b.entrypoint, files: b.files }) }
+    return { deployment: await deps.deployments.redeploy(id, { entrypoint: b.entrypoint, files: b.files as DeployFile[] }) }
   } catch (error) {
     return sendJson(ctx, 400, { error: 'deploy_failed', message: error instanceof Error ? error.message : String(error) })
   }

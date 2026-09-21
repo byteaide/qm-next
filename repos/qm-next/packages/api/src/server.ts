@@ -29,6 +29,7 @@ import { grantRoutes, type GrantDeps } from './routes/grant-routes.ts'
 import { soulRoutes, type SoulDeps } from './routes/soul-routes.ts'
 import { surfaceConfigRoutes, type ConfigDeps } from './routes/surface-config-routes.ts'
 import { deploymentRoutes, type DeploymentDeps } from './routes/deployment-routes.ts'
+import { deploymentProxyRoutes, type DeploymentProxyDeps } from './routes/deployment-proxy-routes.ts'
 import { deploymentLayerRoutes, type DeploymentLayerDeps } from './routes/deployment-layer-routes.ts'
 import { connectorRoutes, connectorMatchRoutes, type ConnectorDeps } from './routes/connector-routes.ts'
 import { webhookRoutes, webhookRawRoutes, type WebhookDeps } from './routes/webhook-routes.ts'
@@ -84,8 +85,10 @@ export interface ApiDeps {
   soul?: SoulDeps
   /** Parity surface (11.0): surface-config, runtime-config, channel-header-pin. */
   config?: ConfigDeps
-  /** Parity surface (11.0): deployment management lane (proxy lane lands 13.0). */
+  /** Parity surface (11.0): deployment management lane. */
   deployments?: DeploymentDeps
+  /** Cluster 1 MVP (13.0 web runtime lane): public reverse-proxy for live deployments (/d/<slug>/*). */
+  deploymentProxy?: DeploymentProxyDeps
   /** Parity surface (11.0): the deployment CLI's tools/skills bundle lane. */
   deploymentLayer?: DeploymentLayerDeps
   /** Parity surface (11.0): connector OAuth/token surface over the token store. */
@@ -271,6 +274,9 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
   }
   if (deps.deployments) {
     registerRouteTable(app, opts, deploymentRoutes(deps.deployments))
+  }
+  if (deps.deploymentProxy) {
+    registerRouteTable(app, opts, deploymentProxyRoutes(deps.deploymentProxy))
   }
   if (deps.deploymentLayer) {
     registerRouteTable(app, opts, deploymentLayerRoutes(deps.deploymentLayer))

@@ -1,10 +1,13 @@
 /**
  * Lane-A deployment store: app deployments with versions, archive state,
  * viewer visibility (owner scope or grant), and the manage/share surface
- * the deployment routes use. There is no live runtime in lane A — fetch
- * and logs answer the qm unreachable/no-logs shapes.
+ * the deployment routes use. With the optional `provider` / `materializer`
+ * deps the store drives a live deploy runtime (cluster 1 MVP); without
+ * them it answers the qm unreachable/no-logs shapes (parity-deviations.md
+ * #45b lane-A fallback).
  */
 import { randomUUID } from 'node:crypto'
+import type { DeployFile, DeployMaterializer, DeployProvider } from '@qm/types'
 import type { GrantLedger } from './grant-ledger.ts'
 
 export type DeploymentStatus = 'live' | 'archived'
@@ -14,6 +17,11 @@ export interface DeploymentVersion {
   createdAt: number
   commit?: string
   parentCommit?: string
+  env?: Record<string, string>
+  /** Entrypoint shell command captured at deploy time; reused by `apply`/`rollback`. */
+  entrypoint?: string
+  /** Snapshot files captured at deploy time (preserved across materializations). */
+  files?: DeployFile[]
 }
 
 export interface DeploymentRecord {
@@ -28,6 +36,8 @@ export interface DeploymentRecord {
   status: DeploymentStatus
   lastAccessAt?: number
   versions: DeploymentVersion[]
+  /** Endpoint reported by the live provider; absent in lane-A fallback. */
+  endpoint?: { host: string; port: number }
 }
 
 export interface DeploymentView {
@@ -54,7 +64,7 @@ export interface DeployInput {
   ownerScopeId: string
   createdBy: string
   entrypoint: string
-  files: unknown[]
+  files: DeployFile[]
   name?: string
 }
 
@@ -82,6 +92,14 @@ export function deploymentView(d: DeploymentRecord): DeploymentView {
   }
 }
 
+export interface DeploymentStoreDeps {
+  grants: GrantLedger
+  provider?: DeployProvider
+  materializer?: DeployMaterializer
+  /** Logger; used to surface runtime hook failures without crashing the store. */
+  logger?: { warn(msg: string, extra?: unknown): void; error?(msg: string, extra?: unknown): void }
+}
+
 export interface DeploymentStore {
   deploy(input: DeployInput): Promise<DeploymentRecord>
   list(): Promise<DeploymentRecord[]>
@@ -89,7 +107,7 @@ export interface DeploymentStore {
   getByIdOrName(idOrName: string): Promise<DeploymentRecord | null>
   canManage(id: string, principalId: string): Promise<boolean>
   rollback(id: string, version: number): Promise<void>
-  redeploy(id: string, input: { entrypoint: string; files: unknown[] }): Promise<DeploymentRecord>
+  redeploy(id: string, input: { entrypoint: string; files: DeployFile[] }): Promise<DeploymentRecord>
   archive(id: string): Promise<void>
   restore(id: string): Promise<DeploymentRecord>
   rename(id: string, name: string): Promise<DeploymentRecord>
@@ -99,11 +117,51 @@ export interface DeploymentStore {
   reach(id: string, viewer: string): Promise<{ status: 'ok' | 'missing' }>
 }
 
-export function createMemoryDeploymentStore(deps: { grants: GrantLedger }): DeploymentStore {
+function errMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+export function createMemoryDeploymentStore(deps: DeploymentStoreDeps): DeploymentStore {
   const deployments = new Map<string, DeploymentRecord>()
+  const runtime = deps.provider && deps.materializer
+    ? { provider: deps.provider, materializer: deps.materializer }
+    : undefined
 
   const find = (idOrName: string): DeploymentRecord | null =>
     deployments.get(idOrName) ?? [...deployments.values()].find((d) => d.name === idOrName) ?? null
+
+  const applyRuntime = async (
+    record: DeploymentRecord,
+    versionNumber: number,
+    entrypoint: string,
+    files: DeployFile[],
+  ): Promise<void> => {
+    if (!runtime) return
+    const workspaceDir = await runtime.materializer.materialize({
+      deploymentId: record.id,
+      version: versionNumber,
+      entrypoint,
+      files,
+    })
+    const endpoint = await runtime.provider.apply({
+      deploymentId: record.id,
+      version: versionNumber,
+      workspaceDir,
+      entrypoint,
+      env: {},
+    })
+    record.endpoint = endpoint
+  }
+
+  const destroyRuntime = async (record: DeploymentRecord): Promise<void> => {
+    if (!runtime) return
+    try {
+      await runtime.provider.destroy(record.id)
+    } catch (error) {
+      deps.logger?.warn?.(`deployment-store: provider.destroy ${record.id} failed: ${errMessage(error)}`, { error })
+    }
+    delete record.endpoint
+  }
 
   return {
     async deploy(input) {
@@ -115,10 +173,18 @@ export function createMemoryDeploymentStore(deps: { grants: GrantLedger }): Depl
         ...(input.name ? { name: input.name } : {}),
         currentVersion: 1,
         status: 'live',
-        versions: [{ version: 1, createdAt: now }],
+        versions: [{ version: 1, createdAt: now, entrypoint: input.entrypoint, files: input.files, env: {} }],
       }
       deployments.set(record.id, record)
-      return record
+      if (runtime) {
+        try {
+          await applyRuntime(record, 1, input.entrypoint, input.files)
+          record.appliedVersion = 1
+        } catch (error) {
+          deps.logger?.warn?.(`deployment-store: deploy ${record.id} runtime hook failed: ${errMessage(error)}`, { error })
+        }
+      }
+      return { ...record }
     },
     async list() {
       return [...deployments.values()].map((d) => ({ ...d }))
@@ -147,29 +213,54 @@ export function createMemoryDeploymentStore(deps: { grants: GrantLedger }): Depl
     async rollback(id, version) {
       const d = deployments.get(id)
       if (!d) throw new Error('no such app')
-      if (!d.versions.some((v) => v.version === version)) throw new Error(`version ${version} does not exist`)
+      const target = d.versions.find((v) => v.version === version)
+      if (!target) throw new Error(`version ${version} does not exist`)
       d.currentVersion = version
-      d.appliedVersion = version
+      if (runtime) {
+        try {
+          await applyRuntime(d, version, target.entrypoint ?? '', target.files ?? [])
+          d.appliedVersion = version
+        } catch (error) {
+          deps.logger?.warn?.(`deployment-store: rollback ${id} → ${version} failed: ${errMessage(error)}`, { error })
+        }
+      }
     },
-    async redeploy(id, _input) {
+    async redeploy(id, input) {
       const d = deployments.get(id)
       if (!d) throw new Error('no such app')
       const next = d.currentVersion + 1
-      d.versions.push({ version: next, createdAt: Date.now() })
+      d.versions.push({ version: next, createdAt: Date.now(), entrypoint: input.entrypoint, files: input.files, env: {} })
       d.currentVersion = next
-      d.appliedVersion = next
       d.status = 'live'
+      if (runtime) {
+        try {
+          await applyRuntime(d, next, input.entrypoint, input.files)
+          d.appliedVersion = next
+        } catch (error) {
+          deps.logger?.warn?.(`deployment-store: redeploy ${id} runtime hook failed: ${errMessage(error)}`, { error })
+        }
+      }
       return { ...d }
     },
     async archive(id) {
       const d = deployments.get(id)
       if (!d) throw new Error('no such app')
       d.status = 'archived'
+      await destroyRuntime(d)
     },
     async restore(id) {
       const d = deployments.get(id)
       if (!d) throw new Error('no such app')
+      const target = d.versions.find((v) => v.version === d.currentVersion) ?? d.versions[d.versions.length - 1]
       d.status = 'live'
+      if (runtime && target) {
+        try {
+          await applyRuntime(d, target.version, target.entrypoint ?? '', target.files ?? [])
+          d.appliedVersion = target.version
+        } catch (error) {
+          deps.logger?.warn?.(`deployment-store: restore ${id} runtime hook failed: ${errMessage(error)}`, { error })
+        }
+      }
       return { ...d }
     },
     async rename(id, name) {
@@ -209,10 +300,17 @@ export function createMemoryDeploymentStore(deps: { grants: GrantLedger }): Depl
       }
       return grantees
     },
-    async logsFor(id, _viewer, _opts) {
+    async logsFor(id, _viewer, opts) {
       const d = deployments.get(id)
       if (!d) return { status: 'missing', logs: null }
-      return { status: 'ok', logs: null }
+      if (!runtime) return { status: 'ok', logs: null }
+      try {
+        const logs = await runtime.provider.logs(id, { tailLines: opts.tailLines })
+        return { status: 'ok', logs }
+      } catch (error) {
+        deps.logger?.warn?.(`deployment-store: logsFor ${id} runtime hook failed: ${errMessage(error)}`, { error })
+        return { status: 'ok', logs: null }
+      }
     },
     async reach(id, viewer) {
       const d = await this.listForViewer(viewer)

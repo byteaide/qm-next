@@ -272,3 +272,15 @@ M0-M2 单进程（in-process 插件，一 profile 一进程）。M3 视资源隔
 | `pnpm typecheck` | strict TS 全仓 |
 | `pnpm test` / `pnpm test:pg` | 单测 + e2e（无 PG / 一次性 PG 容器全量对拍） |
 | Lifecycle gates | retry 不关闭 event log；terminal post-commit；long run 不被 reap；`term: 'done'` grep 恒零；projection/parity 对拍（`pnpm test:architecture` + contract suites） |
+
+## 13. Deploy Runtime（cluster 1 MVP，parity #45b）
+
+`@qm/deploy-runtime` 把 lane-A 的 in-memory `DeploymentStore` 接上 docker 真实运行时：每次 `deploy`/`redeploy`/`rollback`/`restore` 调 `materializer.materialize()` 把 `DeployFile` 列表写入 `<workspaceRoot>/<deploymentId>/v<n>` 的临时目录，然后调 `provider.apply({deploymentId, version, workspaceDir, entrypoint, env})` 起容器。Archive 调 `provider.destroy()`。
+
+- **Provider 端口**（`@qm/types/deploy.ts`）：`DeployProvider` / `DeployMaterializer` / `DeployEndpoint` / `DeployProfile` / `DeployFile`。MVP 只 ship Docker provider；Fly/AWS 是同接口的后续 PRD。Provider 接 `workspaceDir` 字符串而不是 blob keys，把字节层隔离在 materializer 后面。
+- **Materializer**（`@qm/deploy-runtime/materialize.ts`）：从 `DurableByteStore.open()` 拉 bytes，按 `<workspaceRoot>/<id>/v<n>` 路径模板落盘；staging 目录 + `rename` 保证 partial 写不会污染已部署的工作区。path traversal 校验拒绝 `..` 和绝对路径。
+- **Docker provider**（`@qm/deploy-runtime/docker.ts`）：端口 qm `src/deploy/docker-deploy-provider.ts` 165 行；每个 deployment 一个隔离网络，host 端口 in-memory pool（freed list recycle）；`migrateTarget` 通过 inspect 自愈来保证 `resolveEndpoint` 与 daemon 状态一致。
+- **Public proxy**（`packages/api/src/routes/deployment-proxy-routes.ts`）：`/d/<slug>/**`（GET/POST/PUT/PATCH/DELETE），`either` auth；按部署的 `appliedVersion` 查 endpoint，用 `node:http` 转发到 `127.0.0.1:port`，原路径透传给上游容器。
+- **Composition root**（`packages/api/src/service.ts`）：`ApiConfig.deployRuntime = true` 时拼装 `DockerDeployProvider` + byteStore-backed `materializer` + `createMemoryDeploymentStore({grants, provider, materializer, logger})`；同时注册 `deploymentProxy` 路由。不开 `deployRuntime` 时 store 保持 lane-A in-memory 形态，proxy 不注册。
+- **DeployFile 兼容形态**：`{ path, blobKey }` 是运行时首选（content-addressed blob keys 走 `DurableByteStore`）；`{ path, content }` 是 lane-A 测试 / 小负载的内联形态。`isDeployFile` 守卫二选一，materializer 按字段分支处理。
+- **Lane-A fallback**：未配置 `deployRuntime` 时 store 维持原 lane-A 行为（fetch/logs 返回 502/`{ok,null}`，archive 不调 destroy）。

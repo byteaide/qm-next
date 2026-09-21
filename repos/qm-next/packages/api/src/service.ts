@@ -98,6 +98,7 @@ import {
   type DurableByteStore,
   type PgPool,
 } from '@qm/store'
+import { createDockerDeployProvider, createMaterializer, type DeployProvider, type DeployMaterializer } from '@qm/deploy-runtime'
 import { reachDirectory } from '@qm/reach'
 import {
   createVaultConnectorTokenStore,
@@ -364,6 +365,14 @@ export interface ApiConfig {
   publicUrl?: string
   /** Deploy apps domain for owner URLs (qm DEPLOY_APPS_DOMAIN). */
   deployAppsDomain?: string
+  /** Cluster 1 MVP — turn on the live deploy runtime (Docker provider + materialize hook + /d/<slug> proxy). */
+  deployRuntime?: boolean
+  /** Cluster 1 MVP — Docker image the deploy provider uses for the running app (default `node:24-alpine`). */
+  deployImage?: string
+  /** Cluster 1 MVP — first host port for the in-process port pool (default 9200). */
+  deployBasePort?: number
+  /** Cluster 1 MVP — directory under which per-deployment workspaces live (default `${tmpdir}/qm-next-deployments`). */
+  deployWorkspaceRoot?: string
   /** Static surface-config values served by GET /v1/surface-config. */
   surfaceConfig?: {
     webuiModels?: string[]
@@ -456,6 +465,10 @@ export const Config = Schema.object({
   portalLocalAuthBypass: Schema.boolean().description('Local dev bypass: loopback requests get a session without OIDC'),
   publicUrl: Schema.string().description('Public web base URL for webhook inbound URLs'),
   deployAppsDomain: Schema.string().description('Deploy apps domain for deployment owner URLs'),
+  deployRuntime: Schema.boolean().description('Cluster 1 MVP — turn on the live deploy runtime (Docker provider + /d/<slug> proxy)'),
+  deployImage: Schema.string().description('Cluster 1 MVP — Docker image the deploy provider uses for the running app'),
+  deployBasePort: Schema.number().description('Cluster 1 MVP — first host port for the in-process port pool'),
+  deployWorkspaceRoot: Schema.string().description('Cluster 1 MVP — directory under which per-deployment workspaces live'),
   surfaceConfig: Schema.any().description('Static surface-config values for GET /v1/surface-config'),
 })
 
@@ -899,7 +912,32 @@ export class ApiService extends Service<ApiConfig> {
       : undefined
     const soulStore = this.config.soul ? createMemorySoulStore(orgId) : undefined
     const runtimeConfigStore = this.config.config ? createMemoryRuntimeConfigStore() : undefined
-    const deploymentStore = this.config.deployments ? createMemoryDeploymentStore({ grants: grantLedger! }) : undefined
+    // Cluster 1 MVP (parity #45b): when `deployRuntime` is on, wire a
+    // Docker-backed `DeployProvider` + a `DeployMaterializer` over the
+    // same byte store the file surface uses. Without `deployRuntime` the
+    // deployment store keeps the lane-A in-memory shape (no live
+    // containers, fetch/logs answer the qm unreachable/no-logs stub).
+    const deployProvider: DeployProvider | undefined =
+      this.config.deployments && this.config.deployRuntime
+        ? createDockerDeployProvider({
+            ...(this.config.deployImage ? { image: this.config.deployImage } : {}),
+            ...(this.config.deployBasePort !== undefined ? { basePort: this.config.deployBasePort } : {}),
+          })
+        : undefined
+    const deployMaterializer: DeployMaterializer | undefined =
+      deployProvider && byteStore
+        ? createMaterializer(byteStore, {
+            ...(this.config.deployWorkspaceRoot ? { workspaceRoot: this.config.deployWorkspaceRoot } : {}),
+          })
+        : undefined
+    const deploymentStore = this.config.deployments
+      ? createMemoryDeploymentStore({
+          grants: grantLedger!,
+          ...(deployProvider ? { provider: deployProvider } : {}),
+          ...(deployMaterializer ? { materializer: deployMaterializer } : {}),
+          logger: this.ctx.logger,
+        })
+      : undefined
     const deploymentLayerStore = this.config.deploymentLayer ? createMemoryDeploymentLayerStore() : undefined
     // Phase 6 (ADR-0009/0017): the connector surface composes the
     // Connector-owned OAuth service over durable stores + the sealed
@@ -1212,6 +1250,9 @@ export class ApiService extends Service<ApiConfig> {
                 ...(this.config.deployAppsDomain ? { deployAppsDomain: this.config.deployAppsDomain } : {}),
               },
             }
+          : {}),
+        ...(deploymentStore && deployProvider
+          ? { deploymentProxy: { deployments: deploymentStore, provider: deployProvider } }
           : {}),
         ...(deploymentLayerStore ? { deploymentLayer: { deploymentLayer: deploymentLayerStore } } : {}),
         ...(connectorDeps ? { connectors: connectorDeps } : {}),
