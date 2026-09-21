@@ -68,6 +68,7 @@ import {
   createConsentLinkStore,
   createConnectorOAuthService,
   createConnectorTokenVault,
+  createEmojiUploadService,
   createOAuthFlowStore,
   deriveConnectorTokenKeks,
   type BrowserSessionStore,
@@ -1116,6 +1117,16 @@ export class ApiService extends Service<ApiConfig> {
     const skillPackStore = this.config.skillPacks ? createMemorySkillPackStore() : undefined
     const userModelCredentials = this.config.userModelAuth ? createMemoryUserModelCredentialsStore() : undefined
     const secretDropStore = this.config.secretDrops ? createMemorySecretDropStore() : undefined
+    // Cluster 2 brief `qm-next-c2-emoji-upload`: emoji upload service. Requires a
+    // DurableByteStore (so the gate forces filesDir / S3 / memory to be wired),
+    // and audits into adminAuditLog when available.
+    const emojiUploadService =
+      this.config.emoji && byteStore
+        ? createEmojiUploadService({
+            bytes: byteStore,
+            ...(adminAuditLog ? { audit: adminAuditLog } : {}),
+          })
+        : undefined
     // Late-binding wrappers: tests inject Postgres
     // twins via this.memoryStore / this.skillStore *after* boot, so the routes
     // (which captured the in-memory fallback at wire-up time) need a proxy that
@@ -1246,7 +1257,7 @@ export class ApiService extends Service<ApiConfig> {
         ...(skillPackStore && adminService ? { skillPacks: { packs: skillPackStore, ...(skillStore ? { skills: skillStore } : {}), orgScope: this.config.scopeId ?? 'org:default', admins: adminService } } : {}),
         ...(userModelCredentials ? { userModelAuth: { credentials: userModelCredentials } } : {}),
         ...(secretDropStore ? { secretDrops: { drops: secretDropStore, ...(this.config.publicUrl ? { publicUrl: this.config.publicUrl } : {}), orgId } } : {}),
-        ...(this.config.emoji ? { emoji: true } : {}),
+        ...(emojiUploadService ? { emoji: { service: emojiUploadService } } : {}),
         ...(egressAuditSink ? { egressAudit: { sink: egressAuditSink } } : {}),
         ...(this.config.credentials
           ? {

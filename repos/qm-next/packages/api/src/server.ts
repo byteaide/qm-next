@@ -106,8 +106,8 @@ export interface ApiDeps {
   userModelAuth?: UserModelAuthDeps
   /** Parity surface (11.0): secret-drop links over the drop store. */
   secretDrops?: SecretDropDeps
-  /** Parity surface (11.0): emoji upload gate (browser session store 13.0). */
-  emoji?: boolean
+  /** Parity surface (11.0): emoji upload gate (cluster 2 brief `qm-next-c2-emoji-upload`). */
+  emoji?: { service: import('@qm/connectors').EmojiUploadService }
   /** Parity surface (11.0): egress audit sink ingest. */
   egressAudit?: { sink: NonNullable<AdminDeps['egressAudit']> }
   /** Credential broker (12.0): aud-gated service-credential calls. */
@@ -307,7 +307,7 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
     registerRouteTable(app, opts, secretDropRoutes(deps.secretDrops))
   }
   if (deps.emoji) {
-    registerRouteTable(app, opts, emojiRoutes())
+    registerRouteTable(app, opts, emojiRoutes({ service: deps.emoji.service }))
   }
   if (deps.egressAudit) {
     registerRouteTable(app, opts, egressAuditRoutes(deps.egressAudit))
