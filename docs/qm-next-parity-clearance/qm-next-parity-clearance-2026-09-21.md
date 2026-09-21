@@ -151,7 +151,6 @@ Three gap clusters mapped to plan artifacts in this directory:
 | Cluster | Plan artifact | Scope | Status (2026-09-21) |
 |---|---|---|---|
 | 1 — Deploy runtime | `qm-next-deploy-runtime-mvp.md` | Docker provider + `/d/<slug>` proxy; git HTTP deferred to follow-up PRD | ✅ merged `ea6303f` on main (proxy slice; git HTTP + Fly/AWS providers still future PRD) |
-| 1.f — Git HTTP backend | `qm-next-git-http-backend.md` | `DeployGitStore` port + `/v1/deployments/:id/git/{info/refs,git-upload-pack,git-receive-pack}` + `git-url` real capability mint | 📝 PRD drafted (2026-09-21), awaiting engineering execution |
 | 2 — Productionization | `briefs/qm-next-c2-s3-byte-store.md`, `...-c2-pgboss-queue.md`, `...-c2-emoji-upload.md` (active); `...-c2-codex-device-login.md`, `...-c2-monitor-poller.md` (blocked) | 5 worker-ready briefs | 3/5 merged (cluster-2 worktree), 2/2 still blocked |
 | 3 — Small tails | `briefs/qm-next-c3-secret-drop-requires-token.md`, `...-c3-portal-identity-enforce.md`, `...-c3-sandbox-digest-pin.md`, `...-c3-pg-twins-migration.md` (active); `...-c3-runs-aggregate.md`, `...-c3-tool-ledger.md` (blocked) | 6 worker-ready briefs | 4/6 merged (cluster-3 worktree), 2/2 still blocked |
 
