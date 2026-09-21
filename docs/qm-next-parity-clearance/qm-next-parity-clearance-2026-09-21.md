@@ -124,12 +124,7 @@
 🟡  environments / projects stores    — deliberately per-process in @qm/api/src/services/
 🟡  ToolContext publish/background/MCP — honest-unavailable per route
 🟡  secret-drop dropUrl token binding  — #47a, awaits 13.0 web runtime
-🟡  portal identity enforcement        — #47b, wired not enforced
-🟡  revoked-scope 403                 — #47d, identity+capability scope-membership unwired
 🟡  Ambient judge model default-on    — currently `keyword` is default; `model` requires explicit config
-🟡  Local sandbox base image digest pin — #27, lands with image-supply lane
-🟡  Reach / ambient DM unresolvable    — #53/54, warn+mark
-🟡  PG twins gap list                 — tasks/acl/admin sinks/runs activity/signals/instance registry/ambient/ack (per `docs/migration.md` 20.0 checklist)
 ```
 
 ## Bottom line
@@ -138,7 +133,7 @@ Since 2026-09-15 the deviations ledger has closed substantially (12.0 control pl
 
 1. **Deploy runtime** — biggest: DeployProvider, `/d/<slug>` serving, git http-backend, AWS/Fly/Docker providers. Marked 13.0 but not started.
 2. **Productionization follow-ups** — S3 / pg-boss / MonitorPoller / codex-device-login / emoji-upload. All explicitly tagged as 16.0 follow-ups and not started.
-3. **Small tails** — secret-drop `requiresToken` binding, portal identity enforcement, PG twins gap list, digest-pinned sandbox base. Each is a single targeted ticket. (runs aggregate seam #47e and per-turn tool ledger #28 closed 2026-09-21.)
+3. **Small tails** — secret-drop `requiresToken` binding, Ambient judge model default-on. Each is a single targeted ticket. (Closed 2026-09-21: runs aggregate #47e, per-turn tool ledger #28, portal identity enforcement #47b, revoked-scope 403 #47d, digest-pinned sandbox base #27, Reach warn+mark #53/54 — verified implemented, PG twins — verified wired per migration.md 20.0.)
 
 The 16.0 follow-up cluster has the longest "documented but not started" runway and the least external coordination cost — good candidate for the next planning round.
 
