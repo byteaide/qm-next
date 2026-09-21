@@ -640,6 +640,9 @@ importers:
       '@qm/concurrency':
         specifier: workspace:^
         version: link:../concurrency
+      '@qm/security':
+        specifier: workspace:^
+        version: link:../security
       '@qm/store':
         specifier: workspace:^
         version: link:../store

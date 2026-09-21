@@ -1,5 +1,6 @@
 export { OrchestratorService, default } from './orchestrator.ts'
 export { createHarnessRouter, type ConfiguredHarnessRegistry, type HarnessRouterOptions } from './router.ts'
+export { applyPromptVars, loadProtocolFile, type PromptVars } from './protocols/prompt-vars.ts'
 export {
   resolveRuntimeChoice,
   type ResolveRuntimeChoiceOptions,
