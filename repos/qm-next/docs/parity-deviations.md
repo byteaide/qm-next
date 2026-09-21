@@ -1111,3 +1111,25 @@ backup drill live in `docs/operations.md`:
   the admin ladder) and `delivery-queue-pg.test.ts` (contract parity
   with the memory queue); `pnpm rehearsal:migrate` re-run covers the
   updated migrator (drain-check + channel-policy/file-artifacts copies).
+
+## qm-soul protocol frames (2026-09-21, ADR-0018)
+
+Port of qm's soul layer (16-segment assembly pipeline + three-mode protocol
+frames + soul federation) into the orchestrator; ADR
+`docs/adr/0018-soul-layer-is-composed-protocol-frames.md`, golden fixtures in
+`packages/orchestrator/tests/golden/`:
+
+- **#55 platform vocabulary in protocol templates**: qm's
+  `src/resolution/protocols/*.md` name the platform in text ("You're on
+  Slack", "This is Slack", surface label "Slack") and gate on
+  `{{#if slack}}`. The check:im gate forbids platform symbols in
+  `packages/orchestrator/src`, so the ported templates are neutralized:
+  `{{#if slack}}` → `{{#if imChannel}}`, platform display-name literals →
+  `{{imLabel}}` (bridge-injected from provider capabilities, replacing qm's
+  hardcoded surface label), `{{#if web}}` unchanged. Everything else stays
+  byte-identical to qm. `packages/orchestrator/src/protocols/` sits under the
+  existing `packages/orchestrator/src` CORE_SOURCES entry of
+  `scripts/check-im-isolation.sh`, so the neutralized templates are scanned
+  by the gate with no script change; golden fixtures annotate every
+  replacement point so the composer's structural diff against the qm baseline
+  can only diverge there.
