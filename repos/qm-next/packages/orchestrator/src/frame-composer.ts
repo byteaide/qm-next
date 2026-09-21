@@ -116,10 +116,10 @@ export function renderGatewayBlock(
 function frameVars(
   mode: FrameMode,
   opts: ComposeFrameOptions,
+  imLabel: string,
   branding: { botName: string; orgName: string; botHandle?: string },
 ): PromptVars {
   const isWeb = opts.surface === 'web'
-  const imLabel = opts.imLabel ?? 'the IM platform'
   if (mode === 'autonomous') {
     return { botName: branding.botName, surfaceTool: opts.surfaceToolName ?? 'surface', imChannel: !isWeb, imLabel }
   }
@@ -143,6 +143,7 @@ function frameVars(
  * core, security policy, skills block, gateway block, proactive opener line.
  */
 export function composeFrame(opts: ComposeFrameOptions): ComposedFrame {
+  const imLabel = opts.gatewayContext?.displayLabel ?? opts.imLabel ?? 'the IM platform'
   const botHandle = cleanLabel(opts.gatewayContext?.botHandle?.replace(/^@/, ''), 40)
   const branding = {
     botName: opts.resolution?.branding?.botName ?? 'QM',
@@ -150,7 +151,7 @@ export function composeFrame(opts: ComposeFrameOptions): ComposedFrame {
     ...(botHandle ? { botHandle } : {}),
   }
   const mode = selectFrameMode(opts)
-  let modeFrame = applyPromptVars(loadProtocolFile(`mode-${mode}`), frameVars(mode, opts, branding))
+  let modeFrame = applyPromptVars(loadProtocolFile(`mode-${mode}`), frameVars(mode, opts, imLabel, branding))
   if (mode === 'conversation' && opts.proactiveOpener) {
     modeFrame += '\nNo one has written yet; open the conversation yourself per the onboarding note below.'
   }
@@ -158,9 +159,9 @@ export function composeFrame(opts: ComposeFrameOptions): ComposedFrame {
     botName: branding.botName,
     orgName: branding.orgName,
     ...(branding.botHandle ? { botHandle: branding.botHandle } : {}),
-    imLabel: opts.imLabel ?? 'the IM platform',
+    imLabel,
   })
-  const gatewayBlock = opts.gatewayContext ? renderGatewayBlock(opts.surface, opts.gatewayContext, opts.imLabel) : ''
+  const gatewayBlock = opts.gatewayContext ? renderGatewayBlock(opts.surface, opts.gatewayContext, imLabel) : ''
   const segments: string[] = [
     modeFrame,
     opts.soul,

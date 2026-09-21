@@ -66,6 +66,7 @@ import { applyApprovalDecision, type ApprovalContinuationDeps } from '@qm/runs'
 import type {
   Conversation,
   Destination,
+  GatewayContext,
   KeychainAsk,
   PendingApproval,
   Principal,
@@ -208,6 +209,14 @@ export interface ImTurnBridgeOptions {
    * Intake Record so a redelivery maps to the same Turn.
    */
   onTurnCreated?: (eventId: string, runId: string) => void | Promise<void>
+  /**
+   * ADR-0018 gateway facts: provider display names keyed by provider id
+   * (deployment config supplies the values — core source never names
+   * platforms) and the bot's provider handle. Both ride the TurnInput
+   * gateway context into the frame composer.
+   */
+  surfaceLabels?: Record<string, string>
+  botHandle?: string
   loop?: ImTurnBridgeLoopOptions
 }
 
@@ -262,6 +271,16 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
   function conversationOf(destination: Destination, actor: Principal, threadId?: string): Conversation {
     const threadRef = `${destination.type}:${destination.target}${threadId ? `:${threadId}` : ''}`
     return { kind: 'channel', threadRef, audience: [actor] }
+  }
+
+  /** ADR-0018 gateway facts for a provider, when the deployment supplies any. */
+  function gatewayContextFor(provider: string): GatewayContext | undefined {
+    const displayLabel = options.surfaceLabels?.[provider]
+    if (!options.botHandle && !displayLabel) return undefined
+    return {
+      ...(options.botHandle ? { botHandle: options.botHandle } : {}),
+      ...(displayLabel ? { displayLabel } : {}),
+    }
   }
 
   async function enqueueTurn(input: TurnInput, route: ImReplyRoute, source?: { eventId?: string }): Promise<void> {
@@ -360,6 +379,7 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
   async function submitMessage(event: InboundMessageEvent): Promise<void> {
     const actor = principalOf(event.provider, event.actor)
     const conversation = conversationOf(event.destination, actor, event.threadId)
+    const gatewayContext = gatewayContextFor(event.provider)
     const input: TurnInput = {
       surface: event.provider,
       actor,
@@ -367,6 +387,7 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
       origin: { kind: 'human' },
       text: event.text,
       ...(event.attachments?.length ? { attachments: event.attachments } : {}),
+      ...(gatewayContext ? { gatewayContext } : {}),
     }
     const route: ImReplyRoute = {
       destination: event.destination,
@@ -517,6 +538,7 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
     const approved = decided.approved
     const prior = routes.get(value.runId)
     const conversation = prior?.conversation ?? conversationOf(event.ref.destination, actor)
+    const gatewayContext = gatewayContextFor(event.provider)
     const input: TurnInput = {
       surface: event.provider,
       actor,
@@ -524,6 +546,7 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
       origin: { kind: 'human' },
       text: `${approved ? 'Approve' : 'Reject'}: ${value.command}`,
       approval: { requestId: value.requestId, approved },
+      ...(gatewayContext ? { gatewayContext } : {}),
     }
     const route: ImReplyRoute = prior ?? {
       destination: event.ref.destination,
@@ -595,6 +618,7 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
       ...(record.replyToMessageId ? { replyToMessageId: record.replyToMessageId } : {}),
       conversation,
     }
+    const agentGatewayContext = gatewayContextFor(record.provider)
     await enqueueTurn(
       {
         surface: record.provider,
@@ -602,6 +626,7 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
         conversation,
         origin: { kind: 'human' },
         text: personalAgentTurnText(record),
+        ...(agentGatewayContext ? { gatewayContext: agentGatewayContext } : {}),
       },
       originRoute,
       { eventId: event.eventId },
@@ -765,8 +790,7 @@ export function createImTurnBridge(deps: ImTurnBridgeDeps, options: ImTurnBridge
         text: askResolutionInput(ask, grant),
       },
       { destination: dm.destination, conversation },
-    )
-  }
+    )  }
 
   const askSweep = options.askResolutions
     ? createAskExpirySweep({ keychain: options.askResolutions.keychain, fire: fireAskResolution })

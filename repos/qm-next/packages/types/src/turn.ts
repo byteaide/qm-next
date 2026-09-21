@@ -37,6 +37,8 @@ export interface GatewayContext {
   botHandle?: string
   details?: Record<string, string>
   instructions?: string
+  /** Provider display name (e.g. the product's name) injected into platform-wording slots. */
+  displayLabel?: string
 }
 
 export interface TurnInput {

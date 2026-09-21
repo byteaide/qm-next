@@ -11,6 +11,7 @@ import type {
   BudgetTracker,
   Harness,
   HarnessRegistry,
+  HarnessTurnInput,
   IdentityService,
   OrchestratorDeps,
   RateDecision,
@@ -480,4 +481,53 @@ test('tool context: the factory result rides the harness turn; null opts out', a
   await bare.handleTurn(turnInput())
   assert.equal(seen.length, 3)
   assert.equal(seen[2], undefined)
+})
+
+test('mode selection rides the harness turn input (ADR-0018)', async () => {
+  const captured: Array<{ systemPrompt: string; systemCacheBoundary: number | undefined; surfaceTools: boolean | undefined }> = []
+  const mock = createMockHarness()
+  const capturing: Harness = {
+    profile: mock.profile,
+    models: mock.models,
+    tools: mock.tools,
+    turns: {
+      runTurn: async (input: HarnessTurnInput) => {
+        captured.push({ systemPrompt: input.systemPrompt, systemCacheBoundary: input.systemCacheBoundary, surfaceTools: input.surfaceTools })
+        return mock.turns.runTurn(input)
+      },
+    },
+  } as unknown as Harness
+  const registry = createHarnessRouter({ defaultId: 'mock' })
+  registry.register(capturing)
+  const soulResolution: ResolutionService = {
+    resolve: async () => ({
+      systemPrompt: 'soul-body',
+      orgScopeId: ORG,
+      securityPrompt: '## Security posture: Strict',
+      memoryBlock: '\n\n## What you remember\nctx\n\nfact',
+    }),
+    scopeFor: () => SCOPE,
+  }
+  const orch = boot(buildDeps({ harness: registry, resolution: soulResolution }))
+
+  await orch.handleTurn(turnInput())
+  assert.equal(captured[0]!.surfaceTools, false, 'human DM is conversational — no surface tools')
+  assert.match(captured[0]!.systemPrompt, /live, private 1:1/)
+  assert.ok(captured[0]!.systemPrompt.includes('soul-body'))
+  assert.ok(captured[0]!.systemPrompt.includes('## Security posture: Strict'))
+  const boundary = captured[0]!.systemCacheBoundary!
+  assert.ok(!captured[0]!.systemPrompt.slice(0, boundary).includes('## What you remember'), 'memory stays outside the cache boundary')
+  assert.ok(captured[0]!.systemPrompt.slice(boundary).includes('## What you remember'), 'memory appends after the boundary')
+
+  captured.length = 0
+  await orch.handleTurn(
+    turnInput({ origin: { kind: 'ambient' }, conversation: { kind: 'channel', threadRef: 'thread:3', audience: [{ id: 'user-1', type: 'internal' }] } }),
+  )
+  assert.equal(captured[0]!.surfaceTools, true, 'ambient turns carry the surface tool set')
+  assert.match(captured[0]!.systemPrompt, /Silence is the default and costs nothing\./)
+
+  captured.length = 0
+  await orch.handleTurn(turnInput({ origin: { kind: 'automation' } }))
+  assert.equal(captured[0]!.surfaceTools, false)
+  assert.match(captured[0]!.systemPrompt, /no live 1:1 with a person and no surface tools/)
 })

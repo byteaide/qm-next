@@ -94,9 +94,9 @@ qm 的产品灵魂层不是一段提示词，而是**16 段顺序组装管线 + 
 
 ### M-Soul-3 模式选择激活（串行，行为质变点，~1d）
 
-- [ ] 3.1 orchestrator 按 qm 逻辑设 `surfaceTools`（ambient/自动化带目的地→autonomous；非自动化 dm/web→conversation；否则 fallback）并传 `systemCacheBoundary` ~2h
-- [ ] 3.2 im-bridge 补传 surface 显示名（provider label）、botHandle；`TurnInput` 增量加 `proactiveOpener?`（可选） ~2h
-- [ ] 3.3 行为对拍：mock harness 断言（ambient 群聊未寻址→stay_silent/无投递；DM→对话式直回）+ 四引擎 `surfaceTools` 路径冒烟 ~3h
+- [x] 3.1 orchestrator 按 qm 逻辑设 `surfaceTools`（ambient/自动化带目的地→autonomous；非自动化 dm/web→conversation；否则 fallback）并传 `systemCacheBoundary` ~2h（composeFrame.selectFrameMode/deriveSurfaceTools + orchestrator 接线，行为测试 mode selection rides the harness turn input）
+- [x] 3.2 im-bridge 补传 surface 显示名（provider label）、botHandle；`TurnInput` 增量加 `proactiveOpener?`（可选） ~2h（GatewayContext.displayLabel + bridge surfaceLabels/botHandle 配置（服务 Config 透传），部署配置供值——core 源码保持零平台词）
+- [x] 3.3 行为对拍：mock harness 断言（ambient 群聊未寻址→stay_silent/无投递；DM→对话式直回）+ 四引擎 `surfaceTools` 路径冒烟 ~3h（orchestrator.test.ts 捕获式 harness：ambient→autonomous+surfaceTools=true、DM→conversation、automation→fallback；ambient 静默的投递级断言与四引擎真机冒烟归 5.2 飞书 e2e 静默腿）
 
 ### M-Soul-4 环境事实与动态区块（B 车道可与 M-Soul-3 并行，~1.5d）
 

@@ -82,6 +82,10 @@ export interface ImBridgeConfig {
    * audit store is wired by composition.
    */
   intakeAudit?: boolean
+  /** The bot's provider handle, rendered into the shared-core identity line (ADR-0018). */
+  botHandle?: string
+  /** Provider display names keyed by provider id, injected into platform-wording slots (ADR-0018 #55). */
+  surfaceLabels?: Record<string, string>
 }
 
 export const Config = Schema.object({
@@ -103,6 +107,8 @@ export const Config = Schema.object({
   askResolutions: Schema.boolean().default(false).description('Keychain-ask resolution notices as personal DM turns'),
   askSweepMs: Schema.number().default(30_000).description('Ask-resolution sweep cadence in ms'),
   intakeAudit: Schema.boolean().default(false).description('Fan accepted intake out to the named audit subscriber'),
+  botHandle: Schema.string().description("The bot's provider handle, rendered into the shared-core identity line (ADR-0018)"),
+  surfaceLabels: Schema.any().description('Provider display names keyed by provider id, injected into platform-wording slots (ADR-0018 deviation #55)'),
 })
 
 export class ImTurnBridgeService extends Service<ImBridgeConfig> {
@@ -272,6 +278,8 @@ export class ImTurnBridgeService extends Service<ImBridgeConfig> {
       {
         ...(this.config.actorType ? { actorType: this.config.actorType } : {}),
         ...(this.config.replyAs ? { replyAs: this.config.replyAs } : {}),
+        ...(this.config.botHandle ? { botHandle: this.config.botHandle } : {}),
+        ...(this.config.surfaceLabels ? { surfaceLabels: this.config.surfaceLabels as Record<string, string> } : {}),
         ...(api.approvals ? { approvalStore: api.approvals } : {}),
         // ADR-0010 continuation executor — button decisions mutate the
         // SAME Run; the legacy follow-up-turn path stays dormant.
