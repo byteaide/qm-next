@@ -146,6 +146,32 @@ The 16.0 follow-up cluster has the longest "documented but not started" runway a
 
 ---
 
+## Going Forward (2026-09-21)
+
+Three gap clusters mapped to plan artifacts in this directory:
+
+| Cluster | Plan artifact | Scope |
+|---|---|---|
+| 1 — Deploy runtime | `qm-next-deploy-runtime-mvp.md` | Docker provider + `/d/<slug>` proxy; git HTTP deferred to follow-up PRD |
+| 2 — Productionization | `briefs/qm-next-c2-s3-byte-store.md`, `...-c2-pgboss-queue.md`, `...-c2-emoji-upload.md` (active); `...-c2-codex-device-login.md`, `...-c2-monitor-poller.md` (blocked) | 5 worker-ready briefs |
+| 3 — Small tails | `briefs/qm-next-c3-secret-drop-requires-token.md`, `...-c3-portal-identity-enforce.md`, `...-c3-sandbox-digest-pin.md`, `...-c3-pg-twins-migration.md` (active); `...-c3-runs-aggregate.md`, `...-c3-tool-ledger.md` (blocked) | 6 worker-ready briefs |
+
+**Execution plan (recommended)**:
+
+- **Batch 1** (parallel, ~8-10 days wall clock):
+  - 1 engineer: cluster 1 MVP (Docker provider + `/d/<slug>`)
+  - Worker A: cluster 2 active briefs (S3 + pg-boss + emoji-upload)
+  - Worker B: cluster 3 active briefs (secret-drop + portal identity + digest pin + PG twins)
+- **Batch 2** (after Batch 1, blocked on observability/replay/credentials):
+  - Cluster 3 blocked: runs aggregate + per-turn tool ledger
+  - Cluster 2 blocked: codex-device-login (needs ChatGPT creds) + MonitorPoller (needs surface exposure)
+
+Total: 11 worker briefs + 1 PRD. Each brief is `tier:simple` or `tier:standard` except the four blocked briefs (marked `tier:thinking` until dependencies resolve).
+
+**Migration plan**: once network access to `byteaide/qm-next.git` is restored, the entire `docs/` tree in this worktree (PRD + 11 briefs + this report) should be PR'd to `qm-next/docs/qm-next-parity-clearance/` so the plan lives next to the source of truth (`parity-deviations.md`).
+
+---
+
 ## Appendix: verification commands run
 
 ```
