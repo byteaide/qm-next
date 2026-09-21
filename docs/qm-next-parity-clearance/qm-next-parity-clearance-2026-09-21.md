@@ -150,18 +150,18 @@ The 16.0 follow-up cluster has the longest "documented but not started" runway a
 
 Three gap clusters mapped to plan artifacts in this directory:
 
-| Cluster | Plan artifact | Scope |
-|---|---|---|
-| 1 — Deploy runtime | `qm-next-deploy-runtime-mvp.md` | Docker provider + `/d/<slug>` proxy; git HTTP deferred to follow-up PRD |
-| 2 — Productionization | `briefs/qm-next-c2-s3-byte-store.md`, `...-c2-pgboss-queue.md`, `...-c2-emoji-upload.md` (active); `...-c2-codex-device-login.md`, `...-c2-monitor-poller.md` (blocked) | 5 worker-ready briefs |
-| 3 — Small tails | `briefs/qm-next-c3-secret-drop-requires-token.md`, `...-c3-portal-identity-enforce.md`, `...-c3-sandbox-digest-pin.md`, `...-c3-pg-twins-migration.md` (active); `...-c3-runs-aggregate.md`, `...-c3-tool-ledger.md` (blocked) | 6 worker-ready briefs |
+| Cluster | Plan artifact | Scope | Status (2026-09-21) |
+|---|---|---|---|
+| 1 — Deploy runtime | `qm-next-deploy-runtime-mvp.md` | Docker provider + `/d/<slug>` proxy; git HTTP deferred to follow-up PRD | ✅ merged `ea6303f` on main (proxy slice; git HTTP + Fly/AWS providers still future PRD) |
+| 2 — Productionization | `briefs/qm-next-c2-s3-byte-store.md`, `...-c2-pgboss-queue.md`, `...-c2-emoji-upload.md` (active); `...-c2-codex-device-login.md`, `...-c2-monitor-poller.md` (blocked) | 5 worker-ready briefs | 3/5 merged (cluster-2 worktree), 2/2 still blocked |
+| 3 — Small tails | `briefs/qm-next-c3-secret-drop-requires-token.md`, `...-c3-portal-identity-enforce.md`, `...-c3-sandbox-digest-pin.md`, `...-c3-pg-twins-migration.md` (active); `...-c3-runs-aggregate.md`, `...-c3-tool-ledger.md` (blocked) | 6 worker-ready briefs | 4/6 merged (cluster-3 worktree), 2/2 still blocked |
 
 **Execution plan (recommended)**:
 
 - **Batch 1** (parallel, ~8-10 days wall clock):
-  - 1 engineer: cluster 1 MVP (Docker provider + `/d/<slug>`)
-  - Worker A: cluster 2 active briefs (S3 + pg-boss + emoji-upload)
-  - Worker B: cluster 3 active briefs (secret-drop + portal identity + digest pin + PG twins)
+  - 1 engineer: cluster 1 MVP (Docker provider + `/d/<slug>`) — ✅ done
+  - Worker A: cluster 2 active briefs (S3 + pg-boss + emoji-upload) — ✅ done
+  - Worker B: cluster 3 active briefs (secret-drop + portal identity + digest pin + PG twins) — ✅ done
 - **Batch 2** (after Batch 1, blocked on observability/replay/credentials):
   - Cluster 3 blocked: runs aggregate + per-turn tool ledger
   - Cluster 2 blocked: codex-device-login (needs ChatGPT creds) + MonitorPoller (needs surface exposure)
