@@ -718,10 +718,12 @@ is `fn: () => T` (no lost promise), which mismatches qm's
 
 ### Monitors
 
-- **Poller deferred to `triggers` package landing** — `monitor-poller.ts`
-  depends on `runTrigger`/`IdentityService`/`DeliveryStore`/
-  `IdempotencyStore`/`SandboxHandle` provision, none of which are
-  in `@qm/monitors`. The store + broker (arm / reattach / unwatch)
+- **Poller landed (feat/monitor-poller)** — `monitor-poller.ts` drives
+  armed watches via the composition root's sandbox process sessions and
+  the shared `FireEngine` (structural injection; the qm deps
+  `runTrigger`/`IdentityService`/`DeliveryStore`/`IdempotencyStore`/
+  `SandboxHandle` all have qm-next equivalents composed in `service.ts`).
+  The store + broker (arm / reattach / unwatch)
   land now; the poller awaits a `triggers`/`runs` surface landing.
 - **Escalation guard inlined** — `assertNoEscalation` and
   `buildTriggerBase` move into `monitor-store.ts` (qm sources them
@@ -815,9 +817,9 @@ is `fn: () => T` (no lost promise), which mismatches qm's
 
 ## Cross-cutting 16.0 follow-ups
 
-- `MonitorPoller` (qm `monitors/monitor-poller.ts`, 296L) needs
-  `triggers` + `runs` surfaces to land. Tranche 9 closes the store +
-  broker only; the poller remains as a documented dependency.
+- `MonitorPoller` (qm `monitors/monitor-poller.ts`, 296L) — ✅ landed
+  via structural composition (sandbox process gate + shared `FireEngine`),
+  contract-tested in `@qm/monitors`.
 - `pg-boss` job queue (qm uses it for scheduled tasks and
   background sweeps) stays on the deferred list — `npm install
   pg-boss` blocked by the lockfile-only pnpm install policy until a
@@ -863,8 +865,8 @@ Items deferred to P5 18.0/19.0/20.0/22.0 (out of P4 scope):
 
 - `pg-boss` job queue — 16.0 added a note (no `npm install pg-boss` in
   pnpm-lockfile-only policy); stays deferred until a deployment wires it.
-- `monitor-poller.ts` — 296L; needs `triggers` + `runs` surfaces to
-  land (provision deps). 16.0 closed store + broker only.
+- `monitor-poller.ts` — 296L; ✅ ported (`packages/monitors/src/monitor-poller.ts`)
+  with composition wiring in `service.ts` (`monitorPoller` config flag).
 - `connectors/oauth.ts` (626L: PROVIDERS, well-known endpoints) and
   `emoji-upload-service.ts` (199L, IM-specific) — out of scope until
   IM providers land in P5 18.0. ✅ 2026-09-21 (cluster 2 brief
@@ -888,7 +890,7 @@ Items deferred to P5 18.0/19.0/20.0/22.0 (out of P4 scope):
 - `pnpm rescope-check` — green (no `@deepseek-ai` references in
   vendored surfaces)
 
-`MonitorPoller` and `pg-boss` are documented P5 follow-ups; nothing
+`pg-boss` remains a documented P5 follow-up; nothing
 in 16.0 depends on them being present today.
 
 ## P5 18.1 error-page / error-state inventory (2026-09-15)

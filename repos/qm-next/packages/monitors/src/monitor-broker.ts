@@ -3,10 +3,10 @@
  * a background job, re-arms an existing one for the same process +
  * thread, and unwatches. Idempotent on watch, owner-gated on unwatch.
  *
- * The poller (qm `src/monitors/monitor-poller.ts`) — the part that
- * provisions sandboxes, polls process output, and fires the trigger —
- * is not ported here; it sits on the running-process surface that needs
- * the trigger/sweeper plumbing to land in qm-next first.
+ * The poller (`./monitor-poller.ts`) drives armed watches on an
+ * interval: it provisions per-scope sandbox handles, reads process
+ * output through the injected gate, and fires the owner's turn through
+ * the shared fire engine.
  */
 import type { Destination, ScopeId } from '@qm/types'
 import type { ProcessRegistry, ProcessStatus } from '@qm/processes'

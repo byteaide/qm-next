@@ -127,7 +127,9 @@ import {
 } from './services/index.ts'
 import { createAmbientCursorStore, createPostgresAckEmojiPickStore, createPostgresAgentRequestStore, createPostgresAmbientJudgmentStore } from './services/ambient-stores.ts'
 import type { ChannelPolicyStore as ApiChannelPolicyStore } from './services/channel-policy-store.ts'
-import type { CronScheduler, CronStore } from '@qm/triggers'
+import { createFireEngine, type CronScheduler, type CronStore } from '@qm/triggers'
+import { createMemoryMonitorStore, createMonitorPoller, createPostgresMonitorStore, type MonitorPoller } from '@qm/monitors'
+import { createMemoryProcessRegistry, createPostgresProcessRegistry, type ProcessRegistry } from '@qm/processes'
 import { createInMemoryEventLog, createMemoryLeaderLease, createMemorySequenceAllocator, createMemorySessionReservationStore, createPostgresSessionReservationStore } from '@qm/concurrency'
 import type {
   Harness,
@@ -377,6 +379,10 @@ export interface ApiConfig {
   deployGit?: boolean
   /** Cluster 1 phase 2 — directory holding per-deployment bare repos (default `${tmpdir}/qm-next-deploy-git`). */
   deployGitRepoRoot?: string
+  /** Cluster 2 — monitor poller driving armed background-job watches (requires the sandbox block). */
+  monitorPoller?: boolean
+  /** Cluster 2 — monitor poller tick interval in ms (default 10s). */
+  monitorPollerIntervalMs?: number
   /** Static surface-config values served by GET /v1/surface-config. */
   surfaceConfig?: {
     webuiModels?: string[]
@@ -475,6 +481,8 @@ export const Config = Schema.object({
   deployWorkspaceRoot: Schema.string().description('Cluster 1 MVP — directory under which per-deployment workspaces live'),
   deployGit: Schema.boolean().description('Cluster 1 phase 2 — git smart-HTTP backend per deployment (clone/push)'),
   deployGitRepoRoot: Schema.string().description('Cluster 1 phase 2 — directory holding per-deployment bare git repos'),
+  monitorPoller: Schema.boolean().description('Cluster 2 — monitor poller driving armed background-job watches (requires sandbox)'),
+  monitorPollerIntervalMs: Schema.number().description('Cluster 2 — monitor poller tick interval in ms'),
   surfaceConfig: Schema.any().description('Static surface-config values for GET /v1/surface-config'),
 })
 
@@ -524,6 +532,12 @@ export class ApiService extends Service<ApiConfig> {
 
   /** Sandbox backend when tool execution is configured; torn down on dispose. */
   sandbox?: Sandbox
+
+  /** Monitor poller (cluster 2) when `monitorPoller` is on; stopped on dispose. */
+  monitorPoller?: MonitorPoller
+
+  /** Process registry for background jobs; exposed for the background-tool writer seam. */
+  processRegistry?: ProcessRegistry
 
   /**
    * Target Run event log (Phase 7 / KV-006): producers publish typed
@@ -777,6 +791,31 @@ export class ApiService extends Service<ApiConfig> {
             : {}),
         })
       }
+    }
+    // Monitor poller (cluster 2): drives armed background-job watches.
+    // The registry is exposed on the service for the background-process
+    // writer seam; durable with databaseUrl per the durable-by-default rule.
+    if (this.config.monitorPoller && this.sandbox && sandboxConfig) {
+      const sandbox = this.sandbox
+      if (!sandbox.readProcess) throw new Error('monitorPoller requires a sandbox with process sessions')
+      const readProcess = sandbox.readProcess
+      const monitors = databaseUrl ? createPostgresMonitorStore(databaseUrl) : createMemoryMonitorStore()
+      const processRegistry = databaseUrl ? createPostgresProcessRegistry(databaseUrl) : createMemoryProcessRegistry()
+      this.processRegistry = processRegistry
+      const poller = createMonitorPoller({
+        monitors,
+        processes: processRegistry,
+        gate: {
+          provision: async (scopeId) => sandbox.provision([{ scopeId, mountPath: 'global', mode: 'rw' }]),
+          release: async (handle) => {
+            await sandbox.teardown(handle as SandboxHandle, { keepWarm: true })
+          },
+          read: (handle, processId, opts) => readProcess(handle as SandboxHandle, processId, opts),
+        },
+        fire: createFireEngine({ sessions, runs, resolution }),
+      })
+      poller.start(this.config.monitorPollerIntervalMs)
+      this.monitorPoller = poller
     }
     const orchestrator = new OrchestratorService(this.ctx, {
       sessions,
@@ -1415,6 +1454,7 @@ export class ApiService extends Service<ApiConfig> {
       } catch {
         void 0
       }
+      this.monitorPoller?.stop()
       if (this.sandbox) {
         for (const handle of sandboxHandles.values()) {
           try {

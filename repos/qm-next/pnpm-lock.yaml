@@ -158,12 +158,18 @@ importers:
       '@qm/model':
         specifier: workspace:^
         version: link:../model
+      '@qm/monitors':
+        specifier: workspace:^
+        version: link:../monitors
       '@qm/orchestrator':
         specifier: workspace:^
         version: link:../orchestrator
       '@qm/portal':
         specifier: workspace:^
         version: link:../portal
+      '@qm/processes':
+        specifier: workspace:^
+        version: link:../processes
       '@qm/reach':
         specifier: workspace:^
         version: link:../reach

@@ -4,10 +4,9 @@
  * background process — what pattern to match, where to deliver the
  * reply, when to expire, and the cursor into the underlying stream.
  *
- * The store is the broker's only interface; the poller (qm
- * `src/monitors/monitor-poller.ts`) is wired into the running process
- * pipeline and lives outside this package until the trigger/sweeper
- * surface lands in qm-next.
+ * The store backs both the broker (arm/re-arm/unwatch) and the poller
+ * (`./monitor-poller.ts`), which drives armed watches from the
+ * composition root's sandbox and fire engine.
  */
 import { randomUUID } from 'node:crypto'
 import { samePerson } from '@qm/admin'
