@@ -10,7 +10,7 @@
  * Admin status probes the core `/v1/admin/whoami` lane (60s cache), matching
  * qm's whoami-based admin gate.
  */
-import { mintPortalIdentity, mintSignedPayload, PORTAL_IDENTITY_HEADER } from '@qm/auth'
+import { ALLOW_UNSIGNED_TEST_IDENTITY, mintPortalIdentity, mintSignedPayload, PORTAL_IDENTITY_HEADER } from '@qm/auth'
 import { Service, type Context } from '@qm/cordis'
 import Schema from '@qm/schemastery'
 import fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
@@ -207,6 +207,9 @@ export class PortalService extends Service<PortalConfig> {
     if (!api) throw new Error('portal requires the api service (ctx.api) — load @qm/api first')
     const webUi = ctx['web-ui']
     if (!webUi) throw new Error('portal requires the web-ui service (ctx.web-ui) — load @qm/web-ui first')
+    if ((this.config.localAuthBypass ?? true) && (process.env.NODE_ENV ?? 'development') !== 'production') {
+      console.warn(`[portal] ${ALLOW_UNSIGNED_TEST_IDENTITY} lane active — localAuthBypass mints unsigned dev identity; set portalIdentitySecret before production.`)
+    }
     const host = this.config.host ?? '127.0.0.1'
     const port = this.config.port ?? 8095
     const sessionSecret = this.config.sessionSecret ?? ''

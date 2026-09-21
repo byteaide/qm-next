@@ -54,4 +54,7 @@ export {
   mintPortalIdentity,
   verifyPortalIdentity,
   type PortalIdentity,
+  ALLOW_UNSIGNED_TEST_IDENTITY,
+  MissingPortalSecretError,
+  requirePortalIdentitySecret,
 } from './portal-identity.ts'

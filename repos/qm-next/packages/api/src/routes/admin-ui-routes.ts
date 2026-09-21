@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import { PORTAL_IDENTITY_HEADER, verifyPortalIdentity } from '@qm/auth'
+import { PORTAL_IDENTITY_HEADER, verifyPortalIdentity, MissingPortalSecretError, requirePortalIdentitySecret } from '@qm/auth'
 import type { AdminStatus } from '../services/admin-service.ts'
 
 export interface AdminUiDeps {
@@ -118,7 +118,34 @@ async function principalFrom(req: FastifyRequest, deps: AdminUiDeps): Promise<st
     const identity = await verifyPortalIdentity(token, deps.portalIdentitySecret, Date.now())
     return identity?.p ?? null
   }
-  return deps.portalIdentitySecret ? null : cookieValue(req, 'admin')
+  if (deps.portalIdentitySecret) return null
+  // No portal identity secret configured (parity #47b): fail closed in
+  // production (requirePortalIdentitySecret throws MissingPortalSecretError,
+  // translated to 503 by the route handlers) and keep the unsigned admin
+  // cookie dev lane with a console warning.
+  requirePortalIdentitySecret(deps.portalIdentitySecret, process.env.NODE_ENV)
+  return cookieValue(req, 'admin')
+}
+
+type AdminPrincipal =
+  | { ok: true; principal: string | null }
+  | { ok: false }
+
+/**
+ * Resolve the admin principal, translating a MissingPortalSecretError (parity
+ * #47b: production without portalIdentitySecret) into a 503 so a misconfigured
+ * deployment refuses the admin gate rather than trusting the unsigned cookie.
+ */
+async function resolveAdminPrincipal(req: FastifyRequest, deps: AdminUiDeps, reply: FastifyReply): Promise<AdminPrincipal> {
+  try {
+    return { ok: true, principal: await principalFrom(req, deps) }
+  } catch (e) {
+    if (e instanceof MissingPortalSecretError) {
+      reply.code(503).send({ error: 'portal_identity_secret_required' })
+      return { ok: false }
+    }
+    throw e
+  }
 }
 
 function acceptsGzip(req: FastifyRequest): boolean {
@@ -179,7 +206,9 @@ export function registerAdminUi(app: FastifyInstance, deps: AdminUiDeps): void {
   app.get('/admin/ui/healthz', async () => ({ ok: true }))
 
   const whoamiHandler = async (req: FastifyRequest, reply: FastifyReply) => {
-    const principal = await principalFrom(req, deps)
+    const outcome = await resolveAdminPrincipal(req, deps, reply)
+    if (!outcome.ok) return reply
+    const principal = outcome.principal
     if (!principal) return reply.code(401).send({ error: 'signed_out' })
     if (!deps.adminStatus) return reply.code(404).send({ error: 'not_found' })
     const status = await deps.adminStatus(principal)
@@ -200,7 +229,9 @@ export function registerAdminUi(app: FastifyInstance, deps: AdminUiDeps): void {
     method: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     url: '/admin/ui/api/*',
     handler: async (req, reply) => {
-      const principal = await principalFrom(req, deps)
+      const outcome = await resolveAdminPrincipal(req, deps, reply)
+      if (!outcome.ok) return reply
+      const principal = outcome.principal
       if (!principal) return reply.code(401).send({ error: 'signed_out' })
       return proxyToAdmin(app, req, reply, principal, deps.orgId)
     },

@@ -27,6 +27,9 @@ import {
   verifyCapabilityToken,
   verifyPortalIdentity,
   verifySignedPayload,
+  ALLOW_UNSIGNED_TEST_IDENTITY,
+  MissingPortalSecretError,
+  requirePortalIdentitySecret,
 } from '../src/index.ts'
 
 const SECRET = 'unit-test-signing-secret-0123456789abcdef'
@@ -219,4 +222,25 @@ test('postgres replay dedupe: an expired entry stops blocking after a prune', as
     true,
     'a fresh instance prunes the lapsed entry on first claim (qm restart shape)',
   )
+})
+
+test('requirePortalIdentitySecret fails closed in production without a secret', () => {
+  assert.equal(requirePortalIdentitySecret('a-portal-secret', 'production'), true)
+  assert.throws(() => requirePortalIdentitySecret(undefined, 'production'), MissingPortalSecretError)
+})
+
+test('requirePortalIdentitySecret keeps the unsigned dev lane with a warning', () => {
+  const warn = console.warn
+  const seen: string[] = []
+  console.warn = (msg: string) => { seen.push(String(msg)) }
+  try {
+    assert.equal(requirePortalIdentitySecret(undefined, 'development'), true)
+    assert.equal(seen.length, 1)
+    const first = seen[0]
+    assert.ok(first, 'expected one console.warn line')
+    assert.match(first, new RegExp(ALLOW_UNSIGNED_TEST_IDENTITY))
+    assert.match(first, /portalIdentitySecret/)
+  } finally {
+    console.warn = warn
+  }
 })

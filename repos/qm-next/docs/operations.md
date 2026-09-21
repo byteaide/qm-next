@@ -333,3 +333,25 @@ HTTP 路由只做适配器。Token 落库前经 AES-256-GCM 信封密封（KEK =
 
 **Linked ADRs:** 0009 (Connector context owns OAuth), 0016 (Connector
 tokens stay out of observation), 0017 (OAuth token encryption at rest)。
+
+## 14. Portal 身份强制与 portalIdentitySecret 迁移（parity #47b）
+
+**范围:** 管理控制台（admin console）身份门从"未配置 secret 时回退到未签名 `admin` cookie"改为生产 fail-closed。
+
+**背景:** parity-deviations #47b — `portalIdentitySecret` 在 `@qm/auth` 已接线但未由门强制。未配置 secret 时，`principalFrom` 落到未签名 `admin`/`webuiuser` cookie 的 dev 通道——dev 可用，生产不得走此路径。
+
+**新行为（`packages/api/src/routes/admin-ui-routes.ts` + `packages/auth/src/portal-identity.ts`）:**
+
+- `requirePortalIdentitySecret(secret, env)`：有 secret → 通过；无 secret + `NODE_ENV=production` → 抛 `MissingPortalSecretError`（admin 路由 handler 捕获后返回 **503 `portal_identity_secret_required`**）；无 secret + dev → `console.warn` 并保留未签名 cookie 的 `ALLOW_UNSIGNED_TEST_IDENTITY` dev 通道。
+- 有 secret + 有效 `x-portal-identity` 头 → 校验通过；有 secret 但缺/失效头 → 401。
+
+**迁移 runbook（生产部署）:**
+
+1. 在部署 secret store（gopass `qm-next/<env>/`）生成 `portalIdentitySecret`（≥ `MIN_SIGNING_SECRET_LENGTH`），经 profile `!!js` env 插值注入 `config.portalIdentitySecret`。
+2. `portalIdentitySecret` 与 `@qm/portal` 的 `sessionSecret`/`identitySecret` 共享同一密钥族（portal 签发、admin/web-ui 校验）。
+3. 灰度：先在非生产环境用同一 secret 验证 admin 登录链路（`/admin/ui/api/whoami` 返回 200）。
+4. 生产发布后，未配置 secret 的部署会在 `/admin/ui/api/*` 收到 503——这是 fail-closed 的预期行为，不要误判为故障；补齐 secret 后即恢复。
+
+**回滚:** §4 — 若新 secret 导致签名不兼容，回退镜像即可（校验逻辑向后兼容；旧签发器在轮换窗口内仍可校验）。dev 通道不变。
+
+**Linked:** parity-deviations.md #47b。
