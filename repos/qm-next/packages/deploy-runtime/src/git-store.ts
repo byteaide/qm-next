@@ -256,6 +256,10 @@ export function createDeployGitStore(opts: DeployGitStoreOptions = {}): DeployGi
         )
         const sha = (await git(['rev-parse', 'HEAD'], { cwd: workdir })).toString('utf8').trim()
         await git(['push', '--quiet', repo, `HEAD:refs/deploy-commits/${sha}`], { cwd: workdir })
+        // Keep the checkout ref in step with the deploy commit so plain
+        // `git clone` (which follows HEAD -> refs/heads/current) materialises
+        // the deployed files instead of reporting an empty repository.
+        await git(['--git-dir', repo, 'update-ref', CURRENT_REF, sha])
         await persistArchive(input.deploymentId, repo)
         return sha
       } finally {

@@ -9,7 +9,7 @@
  */
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -214,6 +214,68 @@ test('info/refs advertises upload-pack through the CGI for a committed repo', { 
     assert.equal(sha, deployment.versions[0].commit)
     await app.close()
   } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('real git clone and push round-trip over the CGI transport', { skip: !gitOk }, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'qm-next-git-routes-'))
+  let app: ReturnType<typeof createApiServer> | undefined
+  try {
+    const { deps, git } = gitWiredDeps(join(root, 'repos'))
+    app = createApiServer(deps, OPTS)
+    await app.listen({ port: 0, host: '127.0.0.1' })
+    const address = app.server.address()
+    assert.ok(address && typeof address === 'object', 'server should expose a TCP address')
+    const gitOpts = { env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, timeout: 30_000 }
+
+    const ada = auth(await token('person:ada'))
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/deployments',
+      headers: ada,
+      payload: { ownerScopeId: 'personal:person:ada', createdBy: 'person:ada', entrypoint: 'server.js', files: [{ path: 'server.js', content: 'console.log("hi")' }], name: 'e2e-clone' },
+    })
+    assert.equal(created.statusCode, 200)
+    const deployment = created.json().deployment
+    assert.ok(deployment.versions[0].commit, 'deploy() should land a git commit')
+
+    const capability = await mintCapabilityToken(
+      {
+        actorId: 'person:ada',
+        aud: DEPLOY_GIT_AUD,
+        scopeId: 'personal:person:ada',
+        grants: [`deployment-git:${deployment.id}`],
+        exp: Date.now() + 600_000,
+      },
+      SECRET,
+      'test',
+    )
+    const remote = `http://git:${capability}@127.0.0.1:${address.port}/v1/deployments/${deployment.id}/git`
+
+    // clone: the deployed files come back out through upload-pack
+    const cloneDir = join(root, 'clone')
+    await run('git', ['clone', remote, cloneDir], gitOpts)
+    assert.equal(readFileSync(join(cloneDir, 'server.js'), 'utf8'), 'console.log("hi")')
+
+    // push: a client commit lands in the bare repo through receive-pack
+    writeFileSync(join(cloneDir, 'pushed.md'), 'pushed via git-receive-pack')
+    await run('git', ['-C', cloneDir, 'add', 'pushed.md'], gitOpts)
+    await run('git', ['-C', cloneDir, '-c', 'user.email=e2e@test', '-c', 'user.name=e2e', 'commit', '--quiet', '-m', 'push'], gitOpts)
+    const revParse = await run('git', ['-C', cloneDir, 'rev-parse', 'HEAD'], gitOpts)
+    const pushedSha = revParse.stdout.trim()
+    await run('git', ['-C', cloneDir, 'push', 'origin', 'HEAD:refs/heads/e2e'], gitOpts)
+    assert.equal(await git.refOf(deployment.id, 'refs/heads/e2e'), pushedSha)
+
+    // a second clone sees the pushed ref and its content
+    const clone2 = join(root, 'clone-2')
+    await run('git', ['clone', '--branch', 'e2e', remote, clone2], gitOpts)
+    assert.equal(readFileSync(join(clone2, 'pushed.md'), 'utf8'), 'pushed via git-receive-pack')
+    assert.equal(readFileSync(join(clone2, 'server.js'), 'utf8'), 'console.log("hi")')
+  } finally {
+    // git clients leave keep-alive sockets open; drop them so close() settles
+    app?.server.closeAllConnections()
+    await app?.close()
     rmSync(root, { recursive: true, force: true })
   }
 })
