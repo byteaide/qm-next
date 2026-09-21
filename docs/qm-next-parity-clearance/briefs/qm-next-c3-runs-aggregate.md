@@ -1,12 +1,16 @@
 # qm-next-c3-runs-aggregate
 
-> ⚠️ **BATCH 2 — BLOCKED.** Do not dispatch until observability convergence is in.
+> ✅ **DONE — implemented 2026-09-21** (Slice A on `feat/runs-aggregate`). The
+> blocked premise dissolved: the design PRD
+> `docs/qm-next-parity-clearance/qm-next-observability-replay.md` resolved the
+> architecture question — the seam lives on the **SessionStore**
+> (`sessionsByThreadRefs`), not a new observability package, matching qm.
 
 ## Origin
 
 - **Created**: 2026-09-21
 - **Parent task**: parity clearance (cluster 3, item: runs aggregate `sessionsByThreadRefs`)
-- **Blocked by**: observability convergence seam (`/v1/admin/metrics` aggregates)
+- **Blocked by**: observability convergence seam (`/v1/admin/metrics` aggregates) — RESOLVED by the design PRD above
 - **Conversation context**: parity-deviations.md #47e marks runs-based aggregates as keeping `sessionsByThreadRefs` seam null. Admin metrics endpoint can't compute thread-scoped run counts.
 
 ## What
@@ -46,7 +50,9 @@ Currently admin metrics shows empty latency summaries for runs-based views. The 
 
 ## Acceptance Criteria
 
-- [ ] `sessionsByThreadRefs` API exists (after observability convergence)
+- [x] `sessionsByThreadRefs` API exists — landed on the SessionStore contract
+      (`packages/types/src/session-store.ts`), memory + PG implementations,
+      contract test in `packages/store/tests/stores.test.ts`
 
   ```yaml
   verify:
@@ -55,7 +61,10 @@ Currently admin metrics shows empty latency summaries for runs-based views. The 
     path: packages
   ```
 
-- [ ] `/v1/admin/metrics` returns non-null runs aggregate for valid thread ref
+- [x] `/v1/admin/metrics` returns non-null runs aggregate for valid thread ref —
+      real `queueWait`/`runLatency` + scope-filtered throughput; contract test
+      `admin: metrics and runs aggregates scope via session thread refs (#47e)`
+      in `packages/api/tests/tranche7-routes.test.ts`
 
   ```yaml
   verify:
@@ -63,7 +72,9 @@ Currently admin metrics shows empty latency summaries for runs-based views. The 
     run: "pnpm --filter @qm/api test admin-metrics"
   ```
 
-- [ ] `parity-deviations.md` #47e marked ✅ with commit link
+- [x] `parity-deviations.md` #47e marked ✅ with commit link — `#47e ✅
+      2026-09-21, runs-aggregate seam closed` in the #47 substitutions ledger;
+      commit on branch `feat/runs-aggregate`
 
   ```yaml
   verify:

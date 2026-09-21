@@ -126,7 +126,6 @@
 🟡  secret-drop dropUrl token binding  — #47a, awaits 13.0 web runtime
 🟡  portal identity enforcement        — #47b, wired not enforced
 🟡  revoked-scope 403                 — #47d, identity+capability scope-membership unwired
-🟡  runs aggregate sessionsByThreadRefs — #47e
 🟡  Ambient judge model default-on    — currently `keyword` is default; `model` requires explicit config
 🟡  Local sandbox base image digest pin — #27, lands with image-supply lane
 🟡  Per-turn tool ledger              — #28, lands with runs/replay lane
@@ -140,7 +139,7 @@ Since 2026-09-15 the deviations ledger has closed substantially (12.0 control pl
 
 1. **Deploy runtime** — biggest: DeployProvider, `/d/<slug>` serving, git http-backend, AWS/Fly/Docker providers. Marked 13.0 but not started.
 2. **Productionization follow-ups** — S3 / pg-boss / MonitorPoller / codex-device-login / emoji-upload. All explicitly tagged as 16.0 follow-ups and not started.
-3. **Small tails** — secret-drop `requiresToken` binding, portal identity enforcement, runs aggregate seam, PG twins gap list, digest-pinned sandbox base, per-turn tool ledger. Each is a single targeted ticket.
+3. **Small tails** — secret-drop `requiresToken` binding, portal identity enforcement, PG twins gap list, digest-pinned sandbox base, per-turn tool ledger. Each is a single targeted ticket. (runs aggregate seam #47e closed 2026-09-21.)
 
 The 16.0 follow-up cluster has the longest "documented but not started" runway and the least external coordination cost — good candidate for the next planning round.
 
