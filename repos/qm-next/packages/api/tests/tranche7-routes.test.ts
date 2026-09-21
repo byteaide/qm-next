@@ -33,6 +33,8 @@ import {
   type ApiServerOptions,
 } from '../src/index.ts'
 import { mintCapabilityToken, SECRET_DROP_AUD } from '@qm/auth'
+import { createEmojiUploadService } from '@qm/connectors'
+import { createMemoryByteStore } from '@qm/store'
 
 const SECRET = '[redacted-credential]'
 const SCOPE: ScopeId = 'org:test'
@@ -415,16 +417,42 @@ test('secret-drops: mint capability 401, form/redeem ladder, single-use redempti
 
 test('emoji gate, egress-audit ingest + admin view, auth-broker gates', async () => {
   const sink = createMemoryEgressAuditSink()
-  const emojiApp = createApiServer({ ...baseDeps(), admin: adminDeps({ egressAudit: sink, auditLog: createMemoryAuditLog() }), emoji: true, egressAudit: { sink }, authBroker: {}, grants: { grants: createMemoryGrantLedger(), orgScope: ORG } }, OPTS)
+  // Cluster 2 brief `qm-next-c2-emoji-upload`: wire an in-test
+  // EmojiUploadService backed by the memory byte store so the gate stays
+  // exercisable without an IM provider.
+  const emojiService = createEmojiUploadService({
+    bytes: createMemoryByteStore(),
+    audit: createMemoryAuditLog(),
+  })
+  const emojiApp = createApiServer(
+    {
+      ...baseDeps(),
+      admin: adminDeps({ egressAudit: sink, auditLog: createMemoryAuditLog() }),
+      emoji: { service: emojiService },
+      egressAudit: { sink },
+      authBroker: {},
+      grants: { grants: createMemoryGrantLedger(), orgScope: ORG },
+    },
+    OPTS,
+  )
   const ada = auth(await token('person:ada'))
 
   const emojiNoToken = await emojiApp.inject({ method: 'POST', url: '/v1/emoji', payload: { name: 'x', image: 'aGk=' } })
   assert.equal(emojiNoToken.statusCode, 401)
   assert.equal(emojiNoToken.json().message, 'agent capability token required')
 
-  const emoji = await emojiApp.inject({ method: 'POST', url: '/v1/emoji', headers: ada, payload: { name: 'x', image: 'aGk=' } })
-  assert.equal(emoji.statusCode, 404)
-  assert.equal(emoji.json().error, 'not_supported')
+  // With the service wired but no IM provider, the upload succeeds with
+  // pendingProviderRegistration: true (cluster 2 brief acceptance: not 500).
+  const emoji = await emojiApp.inject({
+    method: 'POST',
+    url: '/v1/emoji',
+    headers: ada,
+    payload: { name: 'party-parrot', contentType: 'image/png', bytes: 'aGk=' },
+  })
+  assert.equal(emoji.statusCode, 200)
+  assert.equal(emoji.json().ok, true)
+  assert.equal(emoji.json().pendingProviderRegistration, true)
+  assert.match(emoji.json().blobKey, /^files\//)
 
   const badBatch = await emojiApp.inject({ method: 'POST', url: '/v1/egress-audit', headers: ada, payload: { records: [] } })
   assert.equal(badBatch.statusCode, 400)

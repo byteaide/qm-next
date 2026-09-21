@@ -68,6 +68,7 @@ import {
   createConsentLinkStore,
   createConnectorOAuthService,
   createConnectorTokenVault,
+  createEmojiUploadService,
   createOAuthFlowStore,
   deriveConnectorTokenKeks,
   type BrowserSessionStore,
@@ -93,6 +94,7 @@ import {
   createPostgresSessionStore,
   createLocalByteStore,
   createMemoryByteStore,
+  createS3ByteStore,
   type DurableByteStore,
   type PgPool,
 } from '@qm/store'
@@ -868,10 +870,22 @@ export class ApiService extends Service<ApiConfig> {
     // Files (20.0 twin lane): with databaseUrl the metadata lands in the
     // qm-shaped `file_artifacts` table and bytes go through the
     // content-addressed byte store (`filesDir` for the FS backend; without
-    // it bytes stay in RAM and a warning says so).
+    // it bytes stay in RAM and a warning says so).  S3 leg is selected when
+    // `S3_BUCKET` env is set (multi-host durability).
     let byteStore: DurableByteStore | undefined
     if (this.config.files || this.config.blobs) {
-      if (this.config.filesDir) {
+      const s3Bucket = process.env.S3_BUCKET
+      if (s3Bucket) {
+        byteStore = createS3ByteStore({
+          bucket: s3Bucket,
+          region: process.env.S3_REGION ?? 'us-east-1',
+          ...(process.env.S3_ENDPOINT ? { endpoint: process.env.S3_ENDPOINT } : {}),
+          ...(process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY
+            ? { accessKeyId: process.env.S3_ACCESS_KEY_ID, secretAccessKey: process.env.S3_SECRET_ACCESS_KEY }
+            : {}),
+          ...(process.env.S3_PREFIX ? { prefix: process.env.S3_PREFIX } : {}),
+        })
+      } else if (this.config.filesDir) {
         byteStore = createLocalByteStore(this.config.filesDir)
       } else {
         if (databaseUrl) this.ctx.logger.warn('api: databaseUrl set but filesDir missing — file bytes stay in RAM')
@@ -1103,6 +1117,16 @@ export class ApiService extends Service<ApiConfig> {
     const skillPackStore = this.config.skillPacks ? createMemorySkillPackStore() : undefined
     const userModelCredentials = this.config.userModelAuth ? createMemoryUserModelCredentialsStore() : undefined
     const secretDropStore = this.config.secretDrops ? createMemorySecretDropStore() : undefined
+    // Cluster 2 brief `qm-next-c2-emoji-upload`: emoji upload service. Requires a
+    // DurableByteStore (so the gate forces filesDir / S3 / memory to be wired),
+    // and audits into adminAuditLog when available.
+    const emojiUploadService =
+      this.config.emoji && byteStore
+        ? createEmojiUploadService({
+            bytes: byteStore,
+            ...(adminAuditLog ? { audit: adminAuditLog } : {}),
+          })
+        : undefined
     // Late-binding wrappers: tests inject Postgres
     // twins via this.memoryStore / this.skillStore *after* boot, so the routes
     // (which captured the in-memory fallback at wire-up time) need a proxy that
@@ -1233,7 +1257,7 @@ export class ApiService extends Service<ApiConfig> {
         ...(skillPackStore && adminService ? { skillPacks: { packs: skillPackStore, ...(skillStore ? { skills: skillStore } : {}), orgScope: this.config.scopeId ?? 'org:default', admins: adminService } } : {}),
         ...(userModelCredentials ? { userModelAuth: { credentials: userModelCredentials } } : {}),
         ...(secretDropStore ? { secretDrops: { drops: secretDropStore, ...(this.config.publicUrl ? { publicUrl: this.config.publicUrl } : {}), orgId } } : {}),
-        ...(this.config.emoji ? { emoji: true } : {}),
+        ...(emojiUploadService ? { emoji: { service: emojiUploadService } } : {}),
         ...(egressAuditSink ? { egressAudit: { sink: egressAuditSink } } : {}),
         ...(this.config.credentials
           ? {

@@ -867,7 +867,13 @@ Items deferred to P5 18.0/19.0/20.0/22.0 (out of P4 scope):
   land (provision deps). 16.0 closed store + broker only.
 - `connectors/oauth.ts` (626L: PROVIDERS, well-known endpoints) and
   `emoji-upload-service.ts` (199L, IM-specific) — out of scope until
-  IM providers land in P5 18.0.
+  IM providers land in P5 18.0. ✅ 2026-09-21 (cluster 2 brief
+  `qm-next-c2-emoji-upload`) — provider-neutral core landed at
+  `packages/connectors/src/emoji-upload-service.ts`; the 502/501 stub
+  in `parity-lanes-routes.ts` is replaced with a real handler that
+  validates → stores via `DurableByteStore` → audits → calls
+  `provider.registerEmoji` (or returns
+  `pendingProviderRegistration: true` when no provider is present).
 - `im-slack` / `im-dingtalk` / `im-wecom` — 18.0/19.0/20.0 in P5.
 
 ## P4 17.0 acceptance evidence (2026-09-15)

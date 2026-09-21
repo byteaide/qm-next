@@ -27,3 +27,4 @@ export {
   type DurableByteStore,
   type PutBytesResult,
 } from './byte-store.ts'
+export { createS3ByteStore, type S3ByteStoreOptions } from './s3-byte-store.ts'

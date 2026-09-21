@@ -16,6 +16,11 @@
  * resolution sweeps, and delivery provenance arrive with the IM-domain
  * backfill (14.0); the pg-boss style job queue (tick scheduling suffices
  * at this scale) and webhook consent stay out.
+ *
+ * 2026-09-21 (cluster 2 brief `qm-next-c2-pgboss-queue`): an optional
+ * pg-boss-backed TriggerSink now lives at `./pgboss-sink.ts`; the tick
+ * scheduler remains the default. Composition flips to pgboss via
+ * `JOB_QUEUE=pgboss` (wiring lands in a follow-up).
  * Changes go back through the main session, never inside a parallel lane.
  */
 import type { Destination, PrincipalType, RecipientConsent, RunStore, ScopeId, SessionStore, TurnStatus } from '@qm/types'

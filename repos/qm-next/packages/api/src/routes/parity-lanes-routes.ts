@@ -300,19 +300,49 @@ export function secretDropRoutes(deps: SecretDropDeps): ReadonlyArray<Route> {
 
 // --- emoji ---
 
-export function emojiRoutes(): ReadonlyArray<Route> {
+export function emojiRoutes(deps: { service: import('@qm/connectors').EmojiUploadService }): ReadonlyArray<Route> {
   return [
     {
       method: 'POST',
       path: '/v1/emoji',
       auth: 'either',
       handle: async (ctx) => {
-        if (!ctx.actor) {
+        const principal = ctx.actor
+        if (!principal) {
           return sendJson(ctx, 401, { error: 'unauthorized', message: 'agent capability token required' })
         }
-        return sendJson(ctx, 404, {
-          error: 'not_supported',
-          message: "the emoji uploader isn't available in this deployment",
+        const body = ctx.body
+        if (!isObj(body)) {
+          return badRequest(ctx, 'expected JSON body with {name, contentType, bytes}', 'invalid_body')
+        }
+        const name = typeof body.name === 'string' ? body.name : ''
+        const contentType = typeof body.contentType === 'string' ? body.contentType : ''
+        const bytesField = body.bytes
+        let bytes: Uint8Array
+        if (typeof bytesField === 'string') {
+          try {
+            bytes = new Uint8Array(Buffer.from(bytesField, 'base64'))
+          } catch {
+            return badRequest(ctx, 'bytes must be base64-encoded', 'invalid_bytes')
+          }
+        } else if (bytesField instanceof Uint8Array) {
+          bytes = bytesField
+        } else if (Array.isArray(bytesField)) {
+          bytes = Uint8Array.from(bytesField as number[])
+        } else {
+          return badRequest(ctx, 'bytes must be a base64 string, Uint8Array, or number[]', 'invalid_bytes')
+        }
+        const result = await deps.service.upload(principal.id, { name, contentType, bytes })
+        if (!result.ok) {
+          const status = result.error === 'too_large' ? 413 : 400
+          return sendJson(ctx, status, { error: result.error, message: result.message })
+        }
+        return sendJson(ctx, 200, {
+          ok: true,
+          blobKey: result.blobKey,
+          sha256: result.sha256,
+          sizeBytes: result.sizeBytes,
+          pendingProviderRegistration: result.pendingProviderRegistration,
         })
       },
     },

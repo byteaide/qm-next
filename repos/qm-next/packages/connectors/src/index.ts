@@ -63,3 +63,14 @@ export {
   type TokenExchangeResult,
   type TokenExchanger,
 } from './oauth-flow-service.ts'
+export {
+  createEmojiUploadService,
+  type EmojiAuditLike,
+  type EmojiRegistry,
+  type EmojiUploadError,
+  type EmojiUploadInput,
+  type EmojiUploadResult,
+  type EmojiUploadService,
+  type EmojiUploadServiceDeps,
+  type EmojiUploadSuccess,
+} from './emoji-upload-service.ts'
