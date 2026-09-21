@@ -1,5 +1,7 @@
 # Cluster 1 — Deploy Runtime Interface Status Memo
 
+> **STATUS: IMPLEMENTED** — landed as `ea6303f` on `main` (2026-09-21). This memo is preserved as the engineer hand-off audit trail; the live implementation lives at `repos/qm-next/packages/deploy-runtime/` and the proxy at `packages/api/src/routes/deployment-proxy-routes.ts`. Follow-up gaps (git HTTP backend, Fly/AWS providers, e2e demo script) live in `qm-next-deploy-runtime-mvp.md` and `qm-next-parity-clearance-2026-09-21.md` Batch 2.
+
 **Worktree**: `~/Git/_worktrees/qm-next-deploy-runtime-mvp` · branch `feat/deploy-runtime-mvp`
 **Date**: 2026-09-21
 **Audience**: cluster-1 engineer (Docker provider + /d/<slug>)
