@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import type { ExecOptions, Sandbox, SandboxHandle } from '@qm/types'
+import type { ExecOptions, ProcessState, Sandbox, SandboxHandle } from '@qm/types'
 import { createSandboxToolContext } from '../src/index.ts'
 
 function fakeHandle(): SandboxHandle {
@@ -133,6 +133,52 @@ test('background: process-session backends map start/poll/list; watch is refused
 
   const bare = createSandboxToolContext({ sandbox: fakeSandbox(), handle: fakeHandle(), scopeId: 'org:test' })
   await assert.rejects(bare.backgroundStart('x'), /does not support background processes/)
+})
+
+test('background: starts register into the process registrar and terminal reads mark exited', async () => {
+  const registered: Array<{ processId: string; scopeId: string; kind: string; command: string; ttlMs: number }> = []
+  const marked: Array<{ processId: string; status: string }> = []
+  let readStatus: ProcessState = { state: 'running' }
+  const sandbox = fakeSandbox({
+    profile: { backend: 'fake', writablePersistence: 'resident_disk', processSessions: true },
+    startProcess: async (_handle, command) => ({ processId: `p-${command.length}` }),
+    readProcess: async (_handle, processId) => ({
+      chunks: `out of ${processId}`,
+      cursor: 11,
+      status: readStatus,
+    }),
+    signalProcess: async () => undefined,
+    writeStdin: async () => undefined,
+    listProcesses: async () => [],
+  })
+  const ctx = createSandboxToolContext({
+    sandbox,
+    handle: fakeHandle(),
+    scopeId: 'org:test',
+    processRegistrar: {
+      register: async (rec) => {
+        registered.push(rec)
+        return rec
+      },
+      markStatus: async (processId, status) => {
+        marked.push({ processId, status })
+      },
+    },
+  })
+  const start = await ctx.backgroundStart('npm run dev')
+  assert.deepEqual(registered, [
+    { processId: 'p-11', scopeId: 'org:test', kind: 'background', command: 'npm run dev', ttlMs: 1_800_000 },
+  ])
+  assert.equal(marked.length, 0)
+
+  readStatus = { state: 'exited', code: 0 }
+  await ctx.backgroundPoll('p-11')
+  assert.deepEqual(marked, [{ processId: 'p-11', status: 'exited' }])
+
+  marked.length = 0
+  await ctx.backgroundStop('p-11')
+  assert.deepEqual(marked, [{ processId: 'p-11', status: 'exited' }])
+  assert.equal(start.processId, 'p-11')
 })
 
 test('unavailable surfaces answer gracefully so tools render honest messages', async () => {

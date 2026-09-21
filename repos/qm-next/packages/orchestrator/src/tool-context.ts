@@ -33,10 +33,28 @@ export interface SandboxToolContextDeps {
   scopeId: ScopeId
   execTimeoutMs?: number
   execTimeoutCeilingMs?: number
+  processRegistrar?: ProcessRegistrar
+}
+
+/**
+ * Structural subset of the @qm/processes ProcessRegistry write face the
+ * composition may bind: background starts register so records outlive the
+ * turn (monitor poller, reaper, cross-instance visibility).
+ */
+export interface ProcessRegistrar {
+  register(rec: {
+    processId: string
+    scopeId: ScopeId
+    kind: 'background'
+    command: string
+    ttlMs: number
+  }): Promise<unknown>
+  markStatus?(processId: string, status: 'exited'): Promise<unknown>
 }
 
 const DEFAULT_EXEC_TIMEOUT_MS = 120_000
 const DEFAULT_EXEC_TIMEOUT_CEILING_MS = 600_000
+const DEFAULT_BACKGROUND_TTL_MS = 1_800_000
 
 function guardPath(path: string): void {
   if (hasParentPathSegment(path)) throw new Error('paths must stay inside the workspace')
@@ -46,7 +64,8 @@ function unavailable(method: string): never {
   throw new Error(`${method} is not available on this deployment`)
 }
 
-export function createSandboxToolContext(deps: SandboxToolContextDeps): ToolContext {  const { sandbox, handle, scopeId } = deps
+export function createSandboxToolContext(deps: SandboxToolContextDeps): ToolContext {
+  const { sandbox, handle, scopeId, processRegistrar } = deps
   const ceiling = deps.execTimeoutCeilingMs ?? DEFAULT_EXEC_TIMEOUT_CEILING_MS
   const processes: ProcessSandbox | null = supportsProcessSessions(sandbox) ? sandbox : null
 
@@ -126,7 +145,17 @@ export function createSandboxToolContext(deps: SandboxToolContextDeps): ToolCont
     async backgroundStart(command: string) {
       if (!processes) throw new CapabilityUnsupportedError(sandbox.profile.backend, 'background processes')
       const start = await processes.startProcess(handle, command)
+      if (processRegistrar) {
+        await processRegistrar.register({
+          processId: start.processId,
+          scopeId,
+          kind: 'background',
+          command,
+          ttlMs: DEFAULT_BACKGROUND_TTL_MS,
+        })
+      }
       const first = await processes.readProcess(handle, start.processId, { maxBytes: 8192 })
+      if (first.status.state === 'exited') await processRegistrar?.markStatus?.(start.processId, 'exited')
       return { processId: start.processId, output: first.chunks, cursor: first.cursor, status: first.status satisfies ProcessState, reattached: false }
     },
 
@@ -137,6 +166,7 @@ export function createSandboxToolContext(deps: SandboxToolContextDeps): ToolCont
         ...(opts?.maxBytes !== undefined ? { maxBytes: opts.maxBytes } : {}),
         ...(opts?.waitSeconds !== undefined ? { waitMs: opts.waitSeconds * 1000 } : {}),
       })
+      if (r.status.state === 'exited') await processRegistrar?.markStatus?.(processId, 'exited')
       return { processId, chunks: r.chunks, cursor: r.cursor, status: r.status satisfies ProcessState }
     },
 
@@ -144,6 +174,7 @@ export function createSandboxToolContext(deps: SandboxToolContextDeps): ToolCont
       if (!processes) throw new CapabilityUnsupportedError(sandbox.profile.backend, 'background processes')
       await processes.signalProcess(handle, processId, signal ?? 'TERM')
       const after = await processes.readProcess(handle, processId, { waitMs: 1000 })
+      if (after.status.state === 'exited') await processRegistrar?.markStatus?.(processId, 'exited')
       return { processId, status: after.status satisfies ProcessState, stopped: true }
     },
 

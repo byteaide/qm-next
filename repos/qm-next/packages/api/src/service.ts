@@ -775,6 +775,10 @@ export class ApiService extends Service<ApiConfig> {
         ...(sc.defaultTimeoutSec !== undefined ? { defaultTimeoutSec: sc.defaultTimeoutSec } : {}),
       })
       this.sandbox = sandbox
+      const processRegistry = sandbox.readProcess
+        ? (databaseUrl ? createPostgresProcessRegistry(databaseUrl) : createMemoryProcessRegistry())
+        : undefined
+      if (processRegistry) this.processRegistry = processRegistry
       toolFactory = async ({ scopeId }) => {
         let handle = sandboxHandles.get(scopeId)
         if (!handle) {
@@ -785,6 +789,7 @@ export class ApiService extends Service<ApiConfig> {
           sandbox,
           handle,
           scopeId,
+          ...(processRegistry ? { processRegistrar: processRegistry } : {}),
           ...(sc.defaultTimeoutSec !== undefined ? { execTimeoutMs: sc.defaultTimeoutSec * 1000 } : {}),
           ...(sc.defaultTimeoutCeilingSec !== undefined
             ? { execTimeoutCeilingMs: sc.defaultTimeoutCeilingSec * 1000 }
@@ -792,16 +797,15 @@ export class ApiService extends Service<ApiConfig> {
         })
       }
     }
-    // Monitor poller (cluster 2): drives armed background-job watches.
-    // The registry is exposed on the service for the background-process
-    // writer seam; durable with databaseUrl per the durable-by-default rule.
+    // Monitor poller (cluster 2): drives armed background-job watches over the
+    // shared process registry that backgroundStart writes through.
     if (this.config.monitorPoller && this.sandbox && sandboxConfig) {
       const sandbox = this.sandbox
       if (!sandbox.readProcess) throw new Error('monitorPoller requires a sandbox with process sessions')
       const readProcess = sandbox.readProcess
+      const processRegistry = this.processRegistry
+      if (!processRegistry) throw new Error('monitorPoller requires a process registry')
       const monitors = databaseUrl ? createPostgresMonitorStore(databaseUrl) : createMemoryMonitorStore()
-      const processRegistry = databaseUrl ? createPostgresProcessRegistry(databaseUrl) : createMemoryProcessRegistry()
-      this.processRegistry = processRegistry
       const poller = createMonitorPoller({
         monitors,
         processes: processRegistry,
