@@ -195,6 +195,13 @@ Each entry names the qm source shape, the qm-next shape, and why.
 28. **No per-turn tool ledger** — qm caches tool results per (run, attempt,
     call index) through a ledger store; P1 executes every call live (no
     replay dedupe). The `once()` seam lands with the runs/replay lane.
+    ✅ 2026-09-21 (cluster 3 brief `qm-next-c3-tool-ledger`, design PRD
+    `docs/qm-next-parity-clearance/qm-next-observability-replay.md`) —
+    `ToolLedger` lives on the `RunStore` contract (memory map + PG
+    `tool_calls` table, null ledger as fallback), and `once()` ports into
+    `createSandboxToolContext`: `execute` caches on exit 0 and `read` on
+    hit, the orchestrator threads `runId`/`attempt` from queued Run
+    executions, and interactive turns keep executing live.
 
 ## P2 convergence / multi-engine + runs (2026-09-13)
 

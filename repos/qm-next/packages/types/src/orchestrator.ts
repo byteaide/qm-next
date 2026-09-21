@@ -55,8 +55,17 @@ export interface OrchestratorDeps {
    * Optional per-turn tool context factory (P1 4.2a): when present, the
    * returned ToolContext rides the harness turn so tools execute; when it
    * returns null (or the factory is absent) the turn runs without tools.
+   * `runId`/`attempt` arrive only for queued Run executions — the factory
+   * forwards them into the tool context so tool calls replay through the
+   * run's ToolLedger (attempt replays observe cached outputs); interactive
+   * turns without a Run omit them and every call executes live.
    */
-  tools?: (input: { scopeId: ScopeId; sessionId: string }) => ToolContext | null | Promise<ToolContext | null>
+  tools?: (input: {
+    scopeId: ScopeId
+    sessionId: string
+    runId?: string
+    attempt?: number
+  }) => ToolContext | null | Promise<ToolContext | null>
 }
 
 export interface Orchestrator {

@@ -2,8 +2,7 @@
  * Postgres RunStore: durable translation of the frozen queue contract.
  * Claim atomicity via FOR UPDATE SKIP LOCKED plus a partial unique index
  * enforcing one running run per session; lease-guarded state transitions.
- * Translated from qm's postgres-run-store minus the tool ledger and legacy
- * migrations.
+ * Translated from qm's postgres-run-store minus the legacy migrations.
  */
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
@@ -11,6 +10,7 @@ import type {
   EnqueueInput,
   EnqueueResult,
   FailureReason,
+  LedgerBegin,
   ReapEvent,
   Run,
   RunDeliveryState,
@@ -122,6 +122,23 @@ const result: TurnResult = { status: 'failed', sessionId: run.sessionId, reason 
 
   const store: PostgresRunStore = {
     ...(Number.isFinite(maxClaims) ? { maxClaims } : {}),
+
+    ledger: {
+      async begin(runId, attempt, callIndex): Promise<LedgerBegin> {
+        const { rows } = await query('SELECT output FROM tool_calls WHERE run_id=$1 AND attempt=$2 AND call_index=$3', [
+          runId,
+          attempt,
+          callIndex,
+        ])
+        return rows[0] ? { cached: true, output: rows[0].output as string } : { cached: false }
+      },
+      async record(runId, attempt, callIndex, output): Promise<void> {
+        await query(
+          'INSERT INTO tool_calls(run_id, attempt, call_index, output, created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING',
+          [runId, attempt, callIndex, output, Date.now()],
+        )
+      },
+    },
 
     async enqueue({ sessionId, request, dedupKey, maxAttempts = 3 }: EnqueueInput): Promise<EnqueueResult> {
       const id = randomUUID()

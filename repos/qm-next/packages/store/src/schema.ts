@@ -37,6 +37,13 @@ export const RUN_SCHEMA_STATEMENTS = [
       PRIMARY KEY(run_id, seq)
     )`,
   `CREATE INDEX IF NOT EXISTS idx_run_event_log_run_ts ON run_event_log(run_id, ts)`,
+  // Tool replay ledger (#28): one row per cached tool call, keyed by
+  // (run_id, attempt, call_index); rows live and die with their run.
+  `CREATE TABLE IF NOT EXISTS tool_calls(
+      run_id TEXT NOT NULL, attempt INT NOT NULL DEFAULT 1, call_index INT NOT NULL,
+      output TEXT NOT NULL, created_at BIGINT NOT NULL,
+      PRIMARY KEY(run_id, attempt, call_index)
+    )`,
 ]
 
 export const SESSION_SCHEMA_STATEMENTS = [

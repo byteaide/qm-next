@@ -779,7 +779,7 @@ export class ApiService extends Service<ApiConfig> {
         ? (databaseUrl ? createPostgresProcessRegistry(databaseUrl) : createMemoryProcessRegistry())
         : undefined
       if (processRegistry) this.processRegistry = processRegistry
-      toolFactory = async ({ scopeId }) => {
+      toolFactory = async ({ scopeId, runId, attempt }) => {
         let handle = sandboxHandles.get(scopeId)
         if (!handle) {
           handle = await sandbox.provision([{ scopeId, mountPath: 'global', mode: 'rw' }])
@@ -794,6 +794,8 @@ export class ApiService extends Service<ApiConfig> {
           ...(sc.defaultTimeoutCeilingSec !== undefined
             ? { execTimeoutCeilingMs: sc.defaultTimeoutCeilingSec * 1000 }
             : {}),
+          ...(runId ? { runId, attempt: attempt ?? 1 } : {}),
+          ...(runs.ledger ? { ledger: runs.ledger } : {}),
         })
       }
     }

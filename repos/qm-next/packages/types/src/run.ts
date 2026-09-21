@@ -165,8 +165,31 @@ export interface EnqueueResult {
   deduped: boolean
 }
 
+export interface LedgerBegin {
+  cached: boolean
+  output?: string
+}
+
+/**
+ * Per-run tool-call replay ledger (#28): outputs are cached under the
+ * (runId, attempt, callIndex) key so a replayed attempt observes identical
+ * tool results. Only successful calls are recorded (the producer gates via
+ * shouldCache); failed calls always re-execute.
+ */
+export interface ToolLedger {
+  begin(runId: string, attempt: number, callIndex: number): Promise<LedgerBegin>
+  record(runId: string, attempt: number, callIndex: number, output: string): Promise<void>
+}
+
 export interface RunStore {
   readonly maxClaims?: number
+
+  /**
+   * Tool replay ledger (qm parity #28). Populated by stores that persist
+   * tool calls (memory map, PG `tool_calls` table); absent → callers fall
+   * back to the null ledger and every call executes live.
+   */
+  readonly ledger?: ToolLedger
 
   enqueue(input: EnqueueInput): Promise<EnqueueResult>
 

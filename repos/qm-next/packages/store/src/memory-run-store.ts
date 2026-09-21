@@ -1,11 +1,11 @@
 /**
  * In-memory RunStore: single-process reference semantics for the frozen
- * queue contract (dedup, per-session claim exclusion, leases, reaping).
- * Translated from qm's memory-run-store minus the tool ledger.
+ * queue contract (dedup, per-session claim exclusion, leases, reaping)
+ * plus the per-run tool ledger. Translated from qm's memory-run-store.
  */
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import type { EnqueueInput, EnqueueResult, FailureReason, ReapEvent, Run, RunDeliveryState, RunStore, RunSuspension } from '@qm/types'
+import type { EnqueueInput, EnqueueResult, FailureReason, LedgerBegin, ReapEvent, Run, RunDeliveryState, RunStore, RunSuspension } from '@qm/types'
 import { assertTargetRunInvariant, isTerminal, isTerminalTargetState, leaseLapsed } from '@qm/types'
 
 /**
@@ -23,6 +23,7 @@ export function createMemoryRunStore(
   const maxClaims = opts?.maxClaims ?? Number.POSITIVE_INFINITY
   const runs = new Map<string, Run>()
   const byKey = new Map<string, string>()
+  const toolCalls = new Map<string, string>()
   const events = new EventEmitter()
   events.setMaxListeners(0)
   const terminalListeners: Array<(run: Run) => void> = []
@@ -97,6 +98,16 @@ function lease(run: Run, workerId: string, ttlMs: number): Run {
 
   const store: RunStore = {
     ...(Number.isFinite(maxClaims) ? { maxClaims } : {}),
+
+    ledger: {
+      async begin(runId, attempt, callIndex): Promise<LedgerBegin> {
+        const output = toolCalls.get(`${runId}:${attempt}:${callIndex}`)
+        return output !== undefined ? { cached: true, output } : { cached: false }
+      },
+      async record(runId, attempt, callIndex, output) {
+        toolCalls.set(`${runId}:${attempt}:${callIndex}`, output)
+      },
+    },
 
     async enqueue({ sessionId, request, dedupKey, maxAttempts = 3 }: EnqueueInput): Promise<EnqueueResult> {
       if (dedupKey) {

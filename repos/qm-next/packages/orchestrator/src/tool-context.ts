@@ -26,6 +26,7 @@ import {
   type ToolContext,
   type WriteResult,
 } from '@qm/types'
+import { createNullLedger, type ToolLedger } from '@qm/runs'
 
 export interface SandboxToolContextDeps {
   sandbox: Sandbox
@@ -34,6 +35,10 @@ export interface SandboxToolContextDeps {
   execTimeoutMs?: number
   execTimeoutCeilingMs?: number
   processRegistrar?: ProcessRegistrar
+  /** Run replay context (qm parity #28): present for queued Run executions. */
+  runId?: string
+  attempt?: number
+  ledger?: ToolLedger
 }
 
 /**
@@ -68,6 +73,21 @@ export function createSandboxToolContext(deps: SandboxToolContextDeps): ToolCont
   const { sandbox, handle, scopeId, processRegistrar } = deps
   const ceiling = deps.execTimeoutCeilingMs ?? DEFAULT_EXEC_TIMEOUT_CEILING_MS
   const processes: ProcessSandbox | null = supportsProcessSessions(sandbox) ? sandbox : null
+
+  const ledger = deps.ledger ?? createNullLedger()
+  const runId = deps.runId
+  const attempt = deps.attempt ?? 1
+  let callIndex = -1
+
+  async function once<T>(produce: () => Promise<T>, shouldCache: (r: T) => boolean = () => true): Promise<T> {
+    callIndex += 1
+    if (runId === undefined) return produce()
+    const prior = await ledger.begin(runId, attempt, callIndex)
+    if (prior.cached) return JSON.parse(prior.output ?? 'null') as T
+    const result = await produce()
+    if (shouldCache(result)) await ledger.record(runId, attempt, callIndex, JSON.stringify(result ?? null))
+    return result
+  }
 
   const surfaceRefused = { ok: false, message: 'this deployment does not deliver to conversation surfaces' } as const
 
@@ -105,7 +125,10 @@ export function createSandboxToolContext(deps: SandboxToolContextDeps): ToolCont
         execOpts?.signal
           ? { timeoutMs, signal: execOpts.signal }
           : { timeoutMs }
-      return sandbox.run(handle, command, opts)
+      return once(
+        () => sandbox.run(handle, command, opts),
+        (r) => r.code === 0,
+      )
     },
 
     async computerStatus(): Promise<ComputerStatus> {
@@ -120,8 +143,13 @@ export function createSandboxToolContext(deps: SandboxToolContextDeps): ToolCont
 
     async read(path: string): Promise<ReadResult> {
       guardPath(path)
-      const content = await sandbox.readFile(handle, path)
-      return { content, sourceScopeId: content === null ? null : scopeId }
+      return once(
+        async () => {
+          const content = await sandbox.readFile(handle, path)
+          return { content, sourceScopeId: content === null ? null : scopeId }
+        },
+        (r) => r.content !== null,
+      )
     },
 
     async write(path: string, data?: string): Promise<WriteResult> {

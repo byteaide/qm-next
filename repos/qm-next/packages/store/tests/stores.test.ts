@@ -271,6 +271,22 @@ async function runStoreCases(t: import('node:test').TestContext, make: () => Pro
     assert.equal((await h.store.list()).length, 2)
     await h.close()
   })
+
+  await t.test('tool ledger replays by (runId, attempt, callIndex) (#28)', async () => {
+    const h = await make()
+    if (!h.store.ledger) {
+      await h.close()
+      return t.skip('store lacks the tool ledger')
+    }
+    const runId = `run-${freshSessionId()}`
+    assert.deepEqual(await h.store.ledger.begin(runId, 1, 0), { cached: false })
+    await h.store.ledger.record(runId, 1, 0, '{"code":0,"stdout":"hi"}')
+    assert.deepEqual(await h.store.ledger.begin(runId, 1, 0), { cached: true, output: '{"code":0,"stdout":"hi"}' })
+    assert.deepEqual(await h.store.ledger.begin(runId, 2, 0), { cached: false }, 'other attempt misses')
+    assert.deepEqual(await h.store.ledger.begin(runId, 1, 1), { cached: false }, 'other call index misses')
+    assert.deepEqual(await h.store.ledger.begin(`run-${freshSessionId()}`, 1, 0), { cached: false }, 'other run misses')
+    await h.close()
+  })
 }
 
 async function sessionStoreCases(t: import('node:test').TestContext, make: () => Promise<SessionHarness>): Promise<void> {

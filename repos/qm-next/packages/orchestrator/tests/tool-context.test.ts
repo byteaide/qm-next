@@ -196,3 +196,70 @@ test('unavailable surfaces answer gracefully so tools render honest messages', a
   const post = await ctx.post('hello')
   assert.equal(post.ok, false)
 })
+
+function fakeLedger() {
+  const rows = new Map<string, string>()
+  return {
+    rows,
+    begin: async (runId: string, attempt: number, callIndex: number) => {
+      const output = rows.get(`${runId}:${attempt}:${callIndex}`)
+      return output !== undefined ? { cached: true, output } : { cached: false }
+    },
+    record: async (runId: string, attempt: number, callIndex: number, output: string) => {
+      rows.set(`${runId}:${attempt}:${callIndex}`, output)
+    },
+  }
+}
+
+test('replay: execute/read cache through the ledger keyed by (runId, attempt, callIndex) (#28)', async () => {
+  const ledger = fakeLedger()
+  const sandbox = fakeSandbox({
+    run: async (_handle, command) => {
+      sandbox.runs.push({ command, opts: undefined })
+      if (command === 'boom') return { stdout: '', stderr: 'nope', code: 7, timedOut: false }
+      return { stdout: `ran ${command}`, stderr: '', code: 0, timedOut: false }
+    },
+  })
+  const deps = {
+    sandbox,
+    handle: fakeHandle(),
+    scopeId: 'org:test' as const,
+    runId: 'run-1',
+    attempt: 2,
+    ledger,
+  }
+
+  const first = createSandboxToolContext(deps)
+  const liveExec = await first.execute('ls -la')
+  assert.deepEqual(liveExec, { stdout: 'ran ls -la', stderr: '', code: 0, timedOut: false })
+  assert.equal((await first.execute('boom')).code, 7)
+  const liveRead = await first.read('notes.md')
+  assert.deepEqual(liveRead, { content: 'hello notes', sourceScopeId: 'org:test' })
+  const afterLive = sandbox.runs.length
+
+  const replay = createSandboxToolContext(deps)
+  const cachedExec = await replay.execute('ls -la')
+  assert.deepEqual(cachedExec, liveExec, 'same (runId, attempt, callIndex) replays the recorded output')
+  const afterCachedExec = sandbox.runs.length
+  assert.equal(afterCachedExec, afterLive, 'cached execute never touches the sandbox')
+
+  const retried = await replay.execute('boom')
+  assert.equal(retried.code, 7)
+  assert.equal(sandbox.runs.length, afterCachedExec + 1, 'failed calls always re-execute')
+
+  const cachedRead = await replay.read('notes.md')
+  assert.deepEqual(cachedRead, liveRead)
+  const miss = await replay.read('nope.md')
+  assert.equal(miss.content, null)
+  assert.equal(ledger.rows.size, 2, 'only successful calls are recorded')
+})
+
+test('replay: a context without runId executes live every call (#28)', async () => {
+  const ledger = fakeLedger()
+  const sandbox = fakeSandbox()
+  const ctx = createSandboxToolContext({ sandbox, handle: fakeHandle(), scopeId: 'org:test', ledger })
+  await ctx.execute('ls -la')
+  await ctx.execute('ls -la')
+  assert.equal(sandbox.runs.length, 2, 'no runId means no caching')
+  assert.equal(ledger.rows.size, 0)
+})

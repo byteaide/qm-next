@@ -128,7 +128,14 @@ export class OrchestratorService extends Service implements Orchestrator {
         scopeLabel: scopeId,
       })
       const emitted: SessionEntry[] = []
-      const tools = deps.tools ? await deps.tools({ scopeId, sessionId: session.id }) : undefined
+      const tools = deps.tools
+        ? await deps.tools({
+            scopeId,
+            sessionId: session.id,
+            ...(input.runId ? { runId: input.runId } : {}),
+            ...(input.runId ? { attempt: input.attempt ?? 1 } : {}),
+          })
+        : undefined
       const result = await harness.turns.runTurn({
         session,
         ...(input.runId ? { runId: input.runId } : {}),

@@ -1,12 +1,6 @@
-export interface LedgerBegin {
-  cached: boolean
-  output?: string
-}
+export type { LedgerBegin, ToolLedger } from '@qm/types'
 
-export interface ToolLedger {
-  begin(runId: string, attempt: number, callIndex: number): Promise<LedgerBegin>
-  record(runId: string, attempt: number, callIndex: number, output: string): Promise<void>
-}
+import type { ToolLedger } from '@qm/types'
 
 export function createNullLedger(): ToolLedger {
   return {
