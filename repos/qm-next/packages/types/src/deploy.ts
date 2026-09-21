@@ -67,3 +67,48 @@ export interface DeployProvider {
   resolveEndpoint(deploymentId: string, version: number): Promise<DeployEndpoint | null>
   logs(deploymentId: string, opts: DeployLogsInput): Promise<string | null>
 }
+
+export interface DeployGitInputFile {
+  path: string
+  data: string | Uint8Array
+}
+
+export interface DeployGitTreeFile {
+  path: string
+  sha: string
+  size: number
+  mode: '100644'
+}
+
+export interface DeployGitDiff {
+  added: DeployGitTreeFile[]
+  modified: DeployGitTreeFile[]
+  deleted: DeployGitTreeFile[]
+}
+
+export interface DeployGitStore {
+  commit(input: {
+    deploymentId: string
+    version: number
+    files: DeployGitInputFile[]
+    parent?: string
+    message?: string
+  }): Promise<string>
+  treeOf(deploymentId: string, commitSha: string): Promise<DeployGitTreeFile[]>
+  filesOf(deploymentId: string, commitSha: string, paths?: string[]): Promise<DeployGitInputFile[]>
+  diff(deploymentId: string, fromCommit: string | undefined, toCommit: string): Promise<DeployGitDiff>
+  bundle(deploymentId: string, commitSha: string): Promise<Uint8Array>
+  setRef(deploymentId: string, ref: string, sha: string): Promise<void>
+  deleteRef(deploymentId: string, ref: string): Promise<void>
+  refOf(deploymentId: string, ref: string): Promise<string | null>
+  blob(deploymentId: string, sha: string): Promise<Uint8Array | null>
+  repoUrl(deploymentId: string): Promise<string>
+}
+
+export interface DeployGitArchive {
+  deploymentId: string
+  bundleB64?: string
+  blobKey?: string
+  etag: string
+  updatedAt: number
+}

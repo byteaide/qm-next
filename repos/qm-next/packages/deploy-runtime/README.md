@@ -15,6 +15,7 @@ for the engineer hand-off.
 | `src/docker-exec.ts` | `spawnDockerExec` — node:child_process adapter; same shape as qm's `src/sandbox/docker-exec.ts` |
 | `src/docker.ts` | `createDockerDeployProvider` — port of qm's 165-line Docker provider, retargeted to the qm-next `DeployApplyInput` signature |
 | `src/materialize.ts` | `createMaterializer(byteStore, opts)` — writes `DeployFile` entries into a per-version workspace directory |
+| `src/git-store.ts` | `createDeployGitStore(opts)` — per-deployment bare repos (commit/treeOf/filesOf/diff/bundle/refs/blob); powers the git smart-HTTP backend (cluster 1 phase 2) |
 | `src/testing.ts` | `createRecordingDockerExec`, `createMockDockerDeployProvider`, `createStaticDeployProvider` — test fixtures |
 | `src/index.ts` | Public re-exports |
 

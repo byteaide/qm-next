@@ -2,16 +2,29 @@
  * /v1/deployments — qm deployment management lane. Shapes and error
  * ladders mirror repos/qm/src/api/routes/deployments.ts. The public
  * reverse-proxy route (/d/<slug>) and live fetch/logs live in
- * `deployment-proxy-routes.ts` (cluster 1 MVP, parity #45b); the git
- * HTTP backend and admin proxy stay deferred to a follow-up PRD.
+ * `deployment-proxy-routes.ts` (cluster 1 MVP); the git smart-HTTP
+ * transport lives in `deployment-git-routes.ts` (cluster 1 phase 2).
+ * `git-url` mints a real `deploy-git` capability token when the git
+ * store is wired, and keeps the 403 stub in the lane-A fallback.
  */
-import type { DeployFile } from '@qm/types'
+import type { DeployFile, DeployGitStore } from '@qm/types'
+import { mintCapabilityToken } from '@qm/auth'
 import type { DeploymentStore } from '../services/deployment-store.ts'
 import { badRequest, isObj, notFound, sendJson, type ApiRouteContext, type Route } from './framework.ts'
+
+/** Capability audience for deployment git transport tokens. */
+export const DEPLOY_GIT_AUD = 'deploy-git'
+const DEPLOY_GIT_TTL_SEC = 30 * 60
 
 export interface DeploymentDeps {
   deployments: DeploymentStore
   deployAppsDomain?: string
+  /** Cluster 1 phase 2: wired when the git HTTP backend is on; enables the real git-url mint. */
+  git?: DeployGitStore
+  /** Signing secrets used to mint the deploy-git capability token (first mints). */
+  secrets?: string[]
+  /** Org id carried in the minted token payload. */
+  orgId?: string
 }
 
 const LOGS_DEFAULT_TAIL_LINES = 200
@@ -136,8 +149,32 @@ async function deploymentLogs(ctx: ApiRouteContext, deps: DeploymentDeps): Promi
   return { logs: result.logs }
 }
 
-async function deploymentGitUrl(ctx: ApiRouteContext): Promise<unknown> {
-  return sendJson(ctx, 403, { error: 'forbidden', message: 'a git URL requires an agent capability token' })
+async function deploymentGitUrl(ctx: ApiRouteContext, deps: DeploymentDeps): Promise<unknown> {
+  if (!deps.git || !deps.secrets?.length) {
+    return sendJson(ctx, 403, { error: 'forbidden', message: 'a git URL requires an agent capability token' })
+  }
+  const caller = ctx.actor?.id ?? ctx.query.principalId
+  if (!caller) return sendJson(ctx, 401, { error: 'capability_required' })
+  const id = ctx.params.id
+  if (!id) return notFound(ctx)
+  const deployment = await deps.deployments.getByIdOrName(id)
+  if (!deployment) return sendJson(ctx, 404, { error: 'not_found' })
+  const capability = await mintCapabilityToken(
+    {
+      actorId: caller,
+      aud: DEPLOY_GIT_AUD,
+      scopeId: deployment.ownerScopeId,
+      grants: [`deployment-git:${deployment.id}`],
+      exp: Date.now() + DEPLOY_GIT_TTL_SEC * 1000,
+    },
+    deps.secrets[0]!,
+    deps.orgId ?? (deployment.ownerScopeId.replace(/^org:/, '') || 'default'),
+  )
+  return {
+    url: `/v1/deployments/${deployment.id}/git`,
+    capability,
+    expiresInSeconds: DEPLOY_GIT_TTL_SEC,
+  }
 }
 
 async function deploymentOwnerUrl(ctx: ApiRouteContext, deps: DeploymentDeps): Promise<unknown> {
@@ -267,7 +304,7 @@ export function deploymentRoutes(deps: DeploymentDeps): ReadonlyArray<Route> {
     { method: 'GET', path: '/v1/deployments/:id', auth: 'either', handle: (ctx) => getDeployment(ctx, deps) },
     { method: 'GET', path: '/v1/deployments/:id/fetch', auth: 'either', handle: (ctx) => fetchDeployment(ctx, deps) },
     { method: 'GET', path: '/v1/deployments/:id/logs', auth: 'either', handle: (ctx) => deploymentLogs(ctx, deps) },
-    { method: 'GET', path: '/v1/deployments/:id/git-url', auth: 'either', handle: (ctx) => deploymentGitUrl(ctx) },
+    { method: 'GET', path: '/v1/deployments/:id/git-url', auth: 'either', handle: (ctx) => deploymentGitUrl(ctx, deps) },
     { method: 'GET', path: '/v1/deployments/:id/owner-url', auth: 'source', handle: (ctx) => deploymentOwnerUrl(ctx, deps) },
     { method: 'POST', path: '/v1/deployments/:id/share', auth: 'either', handle: (ctx) => shareDeployment(ctx) },
     { method: 'POST', path: '/v1/deployments/:id/rollback', auth: 'source', handle: (ctx) => rollbackDeployment(ctx, deps) },

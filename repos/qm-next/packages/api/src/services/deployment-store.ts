@@ -2,12 +2,15 @@
  * Lane-A deployment store: app deployments with versions, archive state,
  * viewer visibility (owner scope or grant), and the manage/share surface
  * the deployment routes use. With the optional `provider` / `materializer`
- * deps the store drives a live deploy runtime (cluster 1 MVP); without
+ * deps the store drives a live deploy runtime (cluster 1 MVP); with the
+ * optional `gitStore` / `byteStore` deps every deploy/redeploy also lands
+ * a git commit on the deployment's bare repo (cluster 1 phase 2). Without
  * them it answers the qm unreachable/no-logs shapes (parity-deviations.md
  * #45b lane-A fallback).
  */
 import { randomUUID } from 'node:crypto'
-import type { DeployFile, DeployMaterializer, DeployProvider } from '@qm/types'
+import type { DurableByteStore } from '@qm/store'
+import type { DeployFile, DeployGitInputFile, DeployGitStore, DeployMaterializer, DeployProvider } from '@qm/types'
 import type { GrantLedger } from './grant-ledger.ts'
 
 export type DeploymentStatus = 'live' | 'archived'
@@ -96,6 +99,9 @@ export interface DeploymentStoreDeps {
   grants: GrantLedger
   provider?: DeployProvider
   materializer?: DeployMaterializer
+  /** Cluster 1 phase 2: with byteStore, every deploy/redeploy commits the files to the deployment's bare repo. */
+  gitStore?: DeployGitStore
+  byteStore?: DurableByteStore
   /** Logger; used to surface runtime hook failures without crashing the store. */
   logger?: { warn(msg: string, extra?: unknown): void; error?(msg: string, extra?: unknown): void }
 }
@@ -126,9 +132,48 @@ export function createMemoryDeploymentStore(deps: DeploymentStoreDeps): Deployme
   const runtime = deps.provider && deps.materializer
     ? { provider: deps.provider, materializer: deps.materializer }
     : undefined
+  const gitLane = deps.gitStore && deps.byteStore
+    ? { gitStore: deps.gitStore, byteStore: deps.byteStore }
+    : undefined
 
   const find = (idOrName: string): DeploymentRecord | null =>
     deployments.get(idOrName) ?? [...deployments.values()].find((d) => d.name === idOrName) ?? null
+
+  const gitInputFor = async (files: DeployFile[]): Promise<DeployGitInputFile[]> => {
+    if (!gitLane) return []
+    const out: DeployGitInputFile[] = []
+    for (const file of files) {
+      if (file.content !== undefined) {
+        out.push({ path: file.path, data: file.content })
+        continue
+      }
+      if (file.blobKey) {
+        const opened = await gitLane.byteStore.open(file.blobKey)
+        if (opened) out.push({ path: file.path, data: opened.bytes })
+      }
+    }
+    return out
+  }
+
+  const commitVersion = async (
+    record: DeploymentRecord,
+    versionNumber: number,
+    files: DeployFile[],
+  ): Promise<string | undefined> => {
+    if (!gitLane) return undefined
+    const input = await gitInputFor(files)
+    if (input.length === 0) return undefined
+    const parent = record.versions
+      .slice()
+      .reverse()
+      .find((v) => v.commit)?.commit
+    return await gitLane.gitStore.commit({
+      deploymentId: record.id,
+      version: versionNumber,
+      files: input,
+      ...(parent ? { parent } : {}),
+    })
+  }
 
   const applyRuntime = async (
     record: DeploymentRecord,
@@ -176,6 +221,14 @@ export function createMemoryDeploymentStore(deps: DeploymentStoreDeps): Deployme
         versions: [{ version: 1, createdAt: now, entrypoint: input.entrypoint, files: input.files, env: {} }],
       }
       deployments.set(record.id, record)
+      if (gitLane) {
+        try {
+          const commitSha = await commitVersion(record, 1, input.files)
+          if (commitSha) record.versions[0]!.commit = commitSha
+        } catch (error) {
+          deps.logger?.warn?.(`deployment-store: deploy ${record.id} git commit failed: ${errMessage(error)}`, { error })
+        }
+      }
       if (runtime) {
         try {
           await applyRuntime(record, 1, input.entrypoint, input.files)
@@ -232,6 +285,19 @@ export function createMemoryDeploymentStore(deps: DeploymentStoreDeps): Deployme
       d.versions.push({ version: next, createdAt: Date.now(), entrypoint: input.entrypoint, files: input.files, env: {} })
       d.currentVersion = next
       d.status = 'live'
+      if (gitLane) {
+        try {
+          const commitSha = await commitVersion(d, next, input.files)
+          if (commitSha) {
+            const pushed = d.versions[d.versions.length - 1]!
+            pushed.commit = commitSha
+            const parentCommit = d.versions.length > 1 ? d.versions[d.versions.length - 2]!.commit : undefined
+            if (parentCommit) pushed.parentCommit = parentCommit
+          }
+        } catch (error) {
+          deps.logger?.warn?.(`deployment-store: redeploy ${id} git commit failed: ${errMessage(error)}`, { error })
+        }
+      }
       if (runtime) {
         try {
           await applyRuntime(d, next, input.entrypoint, input.files)

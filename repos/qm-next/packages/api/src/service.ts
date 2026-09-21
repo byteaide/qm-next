@@ -98,7 +98,7 @@ import {
   type DurableByteStore,
   type PgPool,
 } from '@qm/store'
-import { createDockerDeployProvider, createMaterializer, type DeployProvider, type DeployMaterializer } from '@qm/deploy-runtime'
+import { createDockerDeployProvider, createDeployGitStore, createMaterializer, type DeployMaterializer, type DeployProvider } from '@qm/deploy-runtime'
 import { reachDirectory } from '@qm/reach'
 import {
   createVaultConnectorTokenStore,
@@ -373,6 +373,10 @@ export interface ApiConfig {
   deployBasePort?: number
   /** Cluster 1 MVP — directory under which per-deployment workspaces live (default `${tmpdir}/qm-next-deployments`). */
   deployWorkspaceRoot?: string
+  /** Cluster 1 phase 2 — git smart-HTTP backend per deployment (clone/push under /v1/deployments/:id/git/**). */
+  deployGit?: boolean
+  /** Cluster 1 phase 2 — directory holding per-deployment bare repos (default `${tmpdir}/qm-next-deploy-git`). */
+  deployGitRepoRoot?: string
   /** Static surface-config values served by GET /v1/surface-config. */
   surfaceConfig?: {
     webuiModels?: string[]
@@ -469,6 +473,8 @@ export const Config = Schema.object({
   deployImage: Schema.string().description('Cluster 1 MVP — Docker image the deploy provider uses for the running app'),
   deployBasePort: Schema.number().description('Cluster 1 MVP — first host port for the in-process port pool'),
   deployWorkspaceRoot: Schema.string().description('Cluster 1 MVP — directory under which per-deployment workspaces live'),
+  deployGit: Schema.boolean().description('Cluster 1 phase 2 — git smart-HTTP backend per deployment (clone/push)'),
+  deployGitRepoRoot: Schema.string().description('Cluster 1 phase 2 — directory holding per-deployment bare git repos'),
   surfaceConfig: Schema.any().description('Static surface-config values for GET /v1/surface-config'),
 })
 
@@ -930,11 +936,21 @@ export class ApiService extends Service<ApiConfig> {
             ...(this.config.deployWorkspaceRoot ? { workspaceRoot: this.config.deployWorkspaceRoot } : {}),
           })
         : undefined
+    // Cluster 1 phase 2 (parity #45b): the git smart-HTTP backend. Every
+    // deploy/redeploy commits the files to the deployment's bare repo and
+    // /v1/deployments/:id/git/** serves clone/push via `git http-backend`.
+    const deployGitStore =
+      this.config.deployments && this.config.deployGit
+        ? createDeployGitStore({
+            ...(this.config.deployGitRepoRoot ? { repoRoot: this.config.deployGitRepoRoot } : {}),
+          })
+        : undefined
     const deploymentStore = this.config.deployments
       ? createMemoryDeploymentStore({
           grants: grantLedger!,
           ...(deployProvider ? { provider: deployProvider } : {}),
           ...(deployMaterializer ? { materializer: deployMaterializer } : {}),
+          ...(deployGitStore && byteStore ? { gitStore: deployGitStore, byteStore } : {}),
           logger: this.ctx.logger,
         })
       : undefined
@@ -1248,12 +1264,14 @@ export class ApiService extends Service<ApiConfig> {
               deployments: {
                 deployments: deploymentStore,
                 ...(this.config.deployAppsDomain ? { deployAppsDomain: this.config.deployAppsDomain } : {}),
+                ...(deployGitStore ? { git: deployGitStore } : {}),
               },
             }
           : {}),
         ...(deploymentStore && deployProvider
           ? { deploymentProxy: { deployments: deploymentStore, provider: deployProvider } }
           : {}),
+        ...(deployGitStore ? { deploymentGit: { git: deployGitStore, orgId } } : {}),
         ...(deploymentLayerStore ? { deploymentLayer: { deploymentLayer: deploymentLayerStore } } : {}),
         ...(connectorDeps ? { connectors: connectorDeps } : {}),
         ...(webhookStore

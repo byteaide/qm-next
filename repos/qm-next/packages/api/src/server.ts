@@ -30,6 +30,7 @@ import { soulRoutes, type SoulDeps } from './routes/soul-routes.ts'
 import { surfaceConfigRoutes, type ConfigDeps } from './routes/surface-config-routes.ts'
 import { deploymentRoutes, type DeploymentDeps } from './routes/deployment-routes.ts'
 import { deploymentProxyRoutes, type DeploymentProxyDeps } from './routes/deployment-proxy-routes.ts'
+import { deploymentGitRoutes, type DeploymentGitDeps } from './routes/deployment-git-routes.ts'
 import { deploymentLayerRoutes, type DeploymentLayerDeps } from './routes/deployment-layer-routes.ts'
 import { connectorRoutes, connectorMatchRoutes, type ConnectorDeps } from './routes/connector-routes.ts'
 import { webhookRoutes, webhookRawRoutes, type WebhookDeps } from './routes/webhook-routes.ts'
@@ -89,6 +90,8 @@ export interface ApiDeps {
   deployments?: DeploymentDeps
   /** Cluster 1 MVP (13.0 web runtime lane): public reverse-proxy for live deployments (/d/<slug>/*). */
   deploymentProxy?: DeploymentProxyDeps
+  /** Cluster 1 phase 2 (parity #45b): git smart-HTTP transport under /v1/deployments/:id/git/**. */
+  deploymentGit?: Omit<DeploymentGitDeps, 'secrets'>
   /** Parity surface (11.0): the deployment CLI's tools/skills bundle lane. */
   deploymentLayer?: DeploymentLayerDeps
   /** Parity surface (11.0): connector OAuth/token surface over the token store. */
@@ -273,10 +276,18 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
     registerRouteTable(app, opts, surfaceConfigRoutes(deps.config))
   }
   if (deps.deployments) {
-    registerRouteTable(app, opts, deploymentRoutes(deps.deployments))
+    registerRouteTable(app, opts, deploymentRoutes({
+      ...deps.deployments,
+      ...(deps.deploymentGit
+        ? { git: deps.deploymentGit.git, secrets: opts.secrets, ...(deps.deploymentGit.orgId ? { orgId: deps.deploymentGit.orgId } : {}) }
+        : {}),
+    }))
   }
   if (deps.deploymentProxy) {
     registerRouteTable(app, opts, deploymentProxyRoutes(deps.deploymentProxy))
+  }
+  if (deps.deploymentGit) {
+    registerRawRouteTable(app, opts, deploymentGitRoutes({ git: deps.deploymentGit.git, secrets: opts.secrets }))
   }
   if (deps.deploymentLayer) {
     registerRouteTable(app, opts, deploymentLayerRoutes(deps.deploymentLayer))
