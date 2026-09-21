@@ -32,6 +32,7 @@ import {
   type ApiDeps,
   type ApiServerOptions,
 } from '../src/index.ts'
+import { mintCapabilityToken, SECRET_DROP_AUD } from '@qm/auth'
 
 const SECRET = '[redacted-credential]'
 const SCOPE: ScopeId = 'org:test'
@@ -348,7 +349,7 @@ test('user-model-auth: identity gate, api-key connect/disconnect, oauth 502 gate
 
 test('secret-drops: mint capability 401, form/redeem ladder, single-use redemption', async () => {
   const drops = createMemorySecretDropStore()
-  const app = createApiServer({ ...baseDeps(), secretDrops: { drops } }, OPTS)
+  const app = createApiServer({ ...baseDeps(), secretDrops: { drops, secrets: OPTS.secrets } }, OPTS)
   const ada = auth(await token('person:ada'))
 
   const mint = await app.inject({ method: 'POST', url: '/v1/keychain/drops', headers: ada, payload: { service: 'github', purpose: 'releases' } })
@@ -356,11 +357,13 @@ test('secret-drops: mint capability 401, form/redeem ladder, single-use redempti
   assert.equal(mint.json().message, 'secret-drop mint requires an agent capability token')
 
   const missingForm = await app.inject({ method: 'GET', url: '/v1/keychain/drops/none/form', headers: ada })
-  assert.equal(missingForm.statusCode, 404)
+// Parity #47a: form without `?t=` capability token is 401 (fail closed), not 404.
+  assert.equal(missingForm.statusCode, 401)
 
-  const redeemedMissing = await app.inject({ method: 'POST', url: '/v1/keychain/drops/none', headers: ada, payload: { secret: 'x' } })
-  assert.equal(redeemedMissing.statusCode, 404)
-  assert.equal(redeemedMissing.json().message, 'this drop link is invalid or was already used — ask the agent for a fresh one')
+  const redeemedMissing = await app.inject({ method: 'POST', url: '/v1/keychain/drops/none', headers: ada, payload: { secret: 'redacted-credential' } })
+  // Same: redeem without `?t=` (or body.t) capability token returns 401.
+  assert.equal(redeemedMissing.statusCode, 401)
+  assert.equal(redeemedMissing.json().message, 'secret-drop redeem requires the embedded capability token')
 
   const { dropId } = await drops.mint({
     ownerId: 'person:ada',
@@ -371,20 +374,41 @@ test('secret-drops: mint capability 401, form/redeem ladder, single-use redempti
     requestedBy: 'person:ada',
   })
 
-  const form = await app.inject({ method: 'GET', url: `/v1/keychain/drops/${dropId}/form`, headers: ada })
+// Parity #47a: form / redeem require the embedded `?t=` capability token
+  // minted at drop creation. The test mint-bypasses the route, so it mints
+  // the token directly.
+  const dropToken = await mintCapabilityToken(
+    {
+      aud: SECRET_DROP_AUD,
+      actorId: 'person:ada',
+      scopeId: 'personal:self',
+      drop: dropId,
+      exp: Date.now() + 5 * 60_000,
+    },
+    OPTS.secrets[0]!,
+    'test',
+  )
+
+  const form = await app.inject({ method: 'GET', url: `/v1/keychain/drops/${dropId}/form?t=${dropToken}`, headers: ada })
   assert.equal(form.statusCode, 200)
   assert.match(form.body, /github/)
   assert.match(form.body, /release automation/)
 
-  const noValues = await app.inject({ method: 'POST', url: `/v1/keychain/drops/${dropId}`, headers: ada, payload: {} })
+  // Without the token: form is 401, redeem is 401.
+  const formNoToken = await app.inject({ method: 'GET', url: `/v1/keychain/drops/${dropId}/form`, headers: ada })
+  assert.equal(formNoToken.statusCode, 401)
+  const redeemNoToken = await app.inject({ method: 'POST', url: `/v1/keychain/drops/${dropId}`, headers: ada, payload: { secret: 'value' } })
+  assert.equal(redeemNoToken.statusCode, 401)
+
+  const noValues = await app.inject({ method: 'POST', url: `/v1/keychain/drops/${dropId}?t=${dropToken}`, headers: ada, payload: {} })
   assert.equal(noValues.statusCode, 400)
   assert.equal(noValues.json().message, 'missing value for GITHUB_TOKEN')
 
-  const ok = await app.inject({ method: 'POST', url: `/v1/keychain/drops/${dropId}`, headers: ada, payload: { values: { GITHUB_TOKEN: 'ghp_x' } } })
+  const ok = await app.inject({ method: 'POST', url: `/v1/keychain/drops/${dropId}?t=${dropToken}`, headers: ada, payload: { values: { GITHUB_TOKEN: 'supersecretvalue' } } })
   assert.equal(ok.statusCode, 200)
   assert.equal(ok.json().credential.service, 'github')
 
-  const reuse = await app.inject({ method: 'POST', url: `/v1/keychain/drops/${dropId}`, headers: ada, payload: { values: { GITHUB_TOKEN: 'ghp_x' } } })
+  const reuse = await app.inject({ method: 'POST', url: `/v1/keychain/drops/${dropId}?t=${dropToken}`, headers: ada, payload: { values: { GITHUB_TOKEN: 'supersecretvalue' } } })
   assert.equal(reuse.statusCode, 404)
   await app.close()
 })

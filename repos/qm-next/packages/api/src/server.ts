@@ -304,7 +304,7 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
     registerRouteTable(app, opts, userModelAuthRoutes(deps.userModelAuth))
   }
   if (deps.secretDrops) {
-    registerRouteTable(app, opts, secretDropRoutes(deps.secretDrops))
+    registerRouteTable(app, opts, secretDropRoutes({ ...deps.secretDrops, secrets: opts.secrets }))
   }
   if (deps.emoji) {
     registerRouteTable(app, opts, emojiRoutes())

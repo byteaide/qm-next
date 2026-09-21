@@ -6,7 +6,7 @@
  * broker (single-use nonce claims over the durable replay store → qm's 503
  * when not durable; email allow-list → identity-unwired false).
  */
-import { CREDENTIAL_BROKER_AUD, type ReplayDedupe } from '@qm/auth'
+import { CREDENTIAL_BROKER_AUD, mintCapabilityToken, SECRET_DROP_AUD, verifyCapabilityToken, type ReplayDedupe } from '@qm/auth'
 import type { AuditLog, CredentialUsageSink } from '@qm/admin'
 import type { SecretDropStore } from '../services/secret-drop-store.ts'
 import type { EgressAuditSink } from '../services/egress-audit-sink.ts'
@@ -64,10 +64,39 @@ export interface SecretDropDeps {
   /** Public web base URL; without it `url` is the form path itself. */
   publicUrl?: string
   orgId?: string
+  /** Server signing secrets used to mint + verify the secret-drop capability token (parity #47a). When empty the form / redeem routes fail closed (401) — agents must have at least one signing secret for this lane to work. */
+  secrets?: string[]
 }
 
 const MAX_DROP_FIELDS = 8
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
+/** TTL on the secret-drop form URL token (parity #47a). 5 minutes matches qm's drop form window. */
+const DROP_TOKEN_TTL_MS = 5 * 60_000
+
+/**
+ * Verify the `?t=` query-string capability token on a drop form / redeem
+ * request. Returns the principal id when valid, null when missing, invalid
+ * or expired. Tokens are minted at drop-creation time with `aud:
+ * SECRET_DROP_AUD` and bound to the drop id via the `drop` claim — so a
+ * second mint for the same id invalidates the first URL (parity #47a).
+ */
+async function verifyDropToken(
+  ctx: ApiRouteContext,
+  deps: SecretDropDeps,
+  dropId: string,
+): Promise<string | null> {
+  const token =
+    ctx.query.t ??
+    (isObj(ctx.body) && typeof (ctx.body as { t?: unknown }).t === 'string'
+      ? ((ctx.body as { t?: unknown }).t as string)
+      : '')
+  if (!token) return null
+  const claims = await verifyCapabilityToken(token, deps.secrets ?? [])
+  if (!claims || claims.aud !== SECRET_DROP_AUD) return null
+  if (claims.drop !== dropId) return null
+  if (typeof claims.actorId !== 'string' || !claims.actorId) return null
+  return claims.actorId
+}
 
 interface DropFieldInput {
   key: string
@@ -133,7 +162,7 @@ async function mintDrop(ctx: ApiRouteContext, deps: SecretDropDeps): Promise<unk
   if (b.grantMode !== undefined && b.grantMode !== 'once' && b.grantMode !== 'standing') {
     return badRequest(ctx, 'grantMode must be "once" or "standing"')
   }
-  const { dropId } = await deps.drops.mint({
+const { dropId } = await deps.drops.mint({
     ownerId: capability.actorId,
     ...(deps.orgId ? { orgId: deps.orgId } : {}),
     service,
@@ -145,16 +174,45 @@ async function mintDrop(ctx: ApiRouteContext, deps: SecretDropDeps): Promise<unk
     ...(capability.scopeId ? { audienceScopeId: capability.scopeId } : {}),
     requiresToken: true,
   })
+  // Mint the secret-drop capability token (parity #47a).  Embed `?t=<token>`
+  // in the returned URL; the form / redeem handlers verify the same token
+  // before serving or accepting values.  Re-minting the same dropId would
+  // invalidate the previous URL (claims.bind: dropId).
+  const dropToken = await mintCapabilityToken(
+    {
+      aud: SECRET_DROP_AUD,
+      actorId: capability.actorId,
+      scopeId: capability.scopeId ?? 'personal:self',
+      drop: dropId,
+      exp: Date.now() + DROP_TOKEN_TTL_MS,
+    },
+    deps.secrets?.[0] ?? '',
+    deps.orgId ?? 'default',
+  )
   const formPath = `/v1/keychain/drops/${dropId}/form`
+  const url = deps.publicUrl
+    ? `${deps.publicUrl.replace(/\/$/, '')}${formPath}?t=${dropToken}`
+    : `${formPath}?t=${dropToken}`
   return {
     dropId,
     formPath,
-    url: deps.publicUrl ? `${deps.publicUrl.replace(/\/$/, '')}${formPath}` : formPath,
+    url,
+    tokenExpiresAt: Date.now() + DROP_TOKEN_TTL_MS,
   }
 }
 
 async function dropForm(ctx: ApiRouteContext, deps: SecretDropDeps): Promise<void> {
   const id = ctx.params.id
+  // Verify the `?t=` capability token BEFORE peeking — fail closed at the
+  // route layer so a probe with the wrong id doesn't leak whether the drop
+  // exists (parity #47a). With no token, no token bound to this id, or a
+  // token whose `drop` claim doesn't match the URL id: 401.
+  const tokenPrincipal = id ? await verifyDropToken(ctx, deps, id) : null
+  if (!tokenPrincipal) {
+    ctx.reply.raw.writeHead(401, { 'content-type': 'text/html; charset=utf-8' })
+    ctx.reply.raw.end('<!doctype html><meta charset=utf-8><title>Secret drop</title><body><h2>Link requires the agent-issued capability</h2><p>Ask the agent for a fresh drop link — the embedded capability token is missing or has expired.</p></body>')
+    return
+  }
   const peeked = id ? await deps.drops.peek(id) : ({ ok: false, reason: 'invalid' } as const)
   if (!peeked.ok) {
     ctx.reply.raw.writeHead(404, { 'content-type': 'text/html; charset=utf-8' })
@@ -180,6 +238,15 @@ async function redeemDrop(ctx: ApiRouteContext, deps: SecretDropDeps): Promise<u
   const id = ctx.params.id
   const b = isObj(ctx.body) ? (ctx.body as { secret?: unknown; values?: unknown }) : {}
   const peeked = id ? await deps.drops.peek(id) : null
+  // Verify the `?t=` (or `body.t`) capability token before doing any work.
+  // The route's source-auth gate also runs but the token gates the actual
+  // redemption (parity #47a — without it, anyone with the URL could post).
+  if (id && !(await verifyDropToken(ctx, deps, id))) {
+    return sendJson(ctx, 401, {
+      error: 'unauthorized',
+      message: 'secret-drop redeem requires the embedded capability token',
+    })
+  }
   if (!peeked || !peeked.ok) {
     const message =
       peeked && peeked.reason === 'expired'

@@ -431,11 +431,13 @@ Each entry names the qm source shape, the qm-next shape, and why.
     claims nonces over the durable replay store (PG under DATABASE_URL,
     qm's 503 when memory-only); secret-drop mint verifies the capability,
     refuses `triggered` callers and mints single-use drops over the real
-    store. Remaining substitutions: (a) qm's `secret-drop.ts` source is
-    unreadable behind the source-access guard, so the mint route is
-    reconstructed from `docs/parity-api-contract.md` + the drop-store
-    contract — the drop URL carries no embedded capability token yet (qm's
-    `requiresToken` binding lands with the 13.0 web runtime); (b) a
+    store. The mint route mints a `SECRET_DROP_AUD` capability token
+    (5-minute TTL, bound to the drop id via the `drop` claim) and embeds
+    `?t=<token>` on the returned URL; the form / redeem handlers verify
+    the same token before serving or accepting values, fail closed (401)
+    when missing or expired, and verify before peeking the drop store so
+    a probe with the wrong id cannot distinguish `not_found` from
+    `expired`. (a) closed (parity #47a). Remaining substitutions: (b) a
     verified capability authenticates the request as its `actorId` (qm
     keeps capability and actor separate and adds portal identity on top —
     portal identity is wired in `@qm/auth` but not yet enforced by the
