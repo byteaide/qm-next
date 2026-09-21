@@ -287,7 +287,23 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
     registerRouteTable(app, opts, deploymentProxyRoutes(deps.deploymentProxy))
   }
   if (deps.deploymentGit) {
-    registerRawRouteTable(app, opts, deploymentGitRoutes({ git: deps.deploymentGit.git, secrets: opts.secrets }))
+    const deploymentStore = deps.deployments?.deployments
+    registerRawRouteTable(
+      app,
+      opts,
+      deploymentGitRoutes({
+        git: deps.deploymentGit.git,
+        secrets: opts.secrets,
+        ...(deploymentStore
+          ? {
+              scopeOf: async (id: string) => {
+                const deployment = await deploymentStore.getByIdOrName(id)
+                return deployment ? { ownerScopeId: deployment.ownerScopeId } : null
+              },
+            }
+          : {}),
+      }),
+    )
   }
   if (deps.deploymentLayer) {
     registerRouteTable(app, opts, deploymentLayerRoutes(deps.deploymentLayer))

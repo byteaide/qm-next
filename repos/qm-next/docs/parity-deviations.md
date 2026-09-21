@@ -447,12 +447,20 @@ Each entry names the qm source shape, the qm-next shape, and why.
     `expired`. (a) closed (parity #47a). Remaining substitutions: (b) a
     verified capability authenticates the request as its `actorId` (qm
     keeps capability and actor separate and adds portal identity on top —
-    portal identity is wired in `@qm/auth` but not yet enforced by the
-    gate); (c) aud routes now demand a capability token qm-verbatim
-    (401 `<aud> capability token required` without one) instead of lane
-    A's bearer-aud fallback; (d) `identity` and capability
-    scope-membership checks (qm `authorizesCapabilityScope`) stay
-    unwired, so revoked-scope 403s cannot fire yet; (e) admin metrics
+    the admin gate now demands a signed `x-portal-identity` matching the
+    `x-admin-actor` principal when `portalIdentitySecret` is configured,
+    the admin-ui proxy forwards the header, and source-verified bearer
+    actors bypass it; production without a secret stays fail-closed via
+    `MissingPortalSecretError` — #47b ✅ 2026-09-21); (c) aud routes now
+    demand a capability token qm-verbatim (401 `<aud> capability token
+    required` without one) instead of lane A's bearer-aud fallback;
+    (d) capability consumption now binds tokens at use time qm-
+    `authorizesCapabilityScope` style: the deployment-git transport
+    re-checks the `deploy-git` audience, the `deployment-git:<id>` grant,
+    and that the token's `scopeId` still equals the live deployment's
+    `ownerScopeId` (transfer/delete invalidates outstanding tokens
+    immediately) — #47d ✅ 2026-09-21 (channel/project-group membership
+    stays out of scope until those lanes exist); (e) admin metrics
     reads the real turn-metrics sink and audit/errors/egress read the
     sinks; runs-based aggregates scope through the `sessionsByThreadRefs`
     SessionStore seam (memory + PG) with real queueWait/runLatency in

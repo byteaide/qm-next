@@ -1330,11 +1330,12 @@ export class ApiService extends Service<ApiConfig> {
         ...(blobTransfer ? { blobs: { blobTransfer } } : {}),
         ...(adminService
           ? {
-              admin: {
-                admin: adminService,
-                orgScope: this.config.scopeId ?? 'org:default',
-                sessions,
-                runs,
+               admin: {
+                 admin: adminService,
+                 orgScope: this.config.scopeId ?? 'org:default',
+                 sessions,
+                 runs,
+                 ...(this.config.portalIdentitySecret ? { portalIdentitySecret: this.config.portalIdentitySecret } : {}),
                 ...(memoryStore ? { memory: memoryStore } : {}),
                 ...(fileStore ? { files: fileStore, blobTransfer: blobTransfer! } : {}),
                 ...(deploymentStore ? { deployments: deploymentStore } : {}),

@@ -173,6 +173,47 @@ test('git transport rejects missing and invalid tokens with the Basic ladder', a
   }
 })
 
+test('git transport binds tokens to the deployment: aud, grant and owner scope (#47d)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'qm-next-git-routes-'))
+  try {
+    const { deps } = gitWiredDeps(join(root, 'repos'))
+    const app = createApiServer(deps, OPTS)
+    const ada = auth(await token('person:ada'))
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/deployments',
+      headers: ada,
+      payload: { ownerScopeId: 'personal:person:ada', createdBy: 'person:ada', entrypoint: 'index.ts', files: [{ path: 'index.ts', content: 'x' }], name: 'bound-app' },
+    })
+    assert.equal(created.statusCode, 200)
+    const id = created.json().deployment.id
+    const url = `/v1/deployments/${id}/git/info/refs?service=git-upload-pack`
+    const mint = (claims: Record<string, unknown>) =>
+      mintCapabilityToken({ actorId: 'person:ada', exp: Date.now() + 600_000, ...claims } as never, SECRET, 'test')
+    const send = (capability: string) =>
+      app.inject({ method: 'GET', url, headers: { authorization: `Basic ${Buffer.from(`git:${capability}`).toString('base64')}` } })
+
+    const foreignAud = await send(await mint({ aud: 'other-aud', scopeId: 'personal:person:ada', grants: [`deployment-git:${id}`] }))
+    assert.equal(foreignAud.statusCode, 401)
+    assert.match(foreignAud.json().message, /not valid for deployment git/)
+
+    const foreignGrant = await send(await mint({ aud: DEPLOY_GIT_AUD, scopeId: 'personal:person:ada', grants: ['deployment-git:other-id'] }))
+    assert.equal(foreignGrant.statusCode, 401)
+    assert.match(foreignGrant.json().message, /not bound to this deployment/)
+
+    const noGrant = await send(await mint({ aud: DEPLOY_GIT_AUD, scopeId: 'personal:person:ada' }))
+    assert.equal(noGrant.statusCode, 401)
+    assert.match(noGrant.json().message, /not bound to this deployment/)
+
+    const foreignScope = await send(await mint({ aud: DEPLOY_GIT_AUD, scopeId: 'personal:person:mallory', grants: [`deployment-git:${id}`] }))
+    assert.equal(foreignScope.statusCode, 401)
+    assert.match(foreignScope.json().message, /no longer matches the deployment owner scope/)
+    await app.close()
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('info/refs advertises upload-pack through the CGI for a committed repo', { skip: !gitOk }, async () => {
   const root = mkdtempSync(join(tmpdir(), 'qm-next-git-routes-'))
   try {

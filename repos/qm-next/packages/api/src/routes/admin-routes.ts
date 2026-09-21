@@ -36,6 +36,7 @@ import type { DeploymentStore } from '../services/deployment-store.ts'
 import type { BlobTransferService } from '../services/blob-transfer.ts'
 import { ByteSourceTooLargeError, type FileStoreService } from '../services/file-store.ts'
 import { badRequest, isObj, notFound, sendJson, type ApiRouteContext, type Route } from './framework.ts'
+import { verifyPortalIdentity } from '@qm/auth'
 
 export interface AdminDeps {
   admin: AdminService
@@ -61,6 +62,16 @@ export interface AdminDeps {
   ackEmojiPicks?: import('@qm/approvals').AckEmojiPickStore
   mcp?: { servers: McpServerStore; toolService: McpToolService }
   monitoring?: import('../server.ts').MonitoringDeps
+  /**
+   * Portal identity secret (parity #47b): when configured, the unauthenticated
+   * `x-admin-actor` header is only trusted together with a matching signed
+   * `x-portal-identity` header — the actor claim must equal the verified
+   * identity's `p`. Bearer-authenticated actors bypass this (they are
+   * already source-verified). Without a secret the dev unsigned-header lane
+   * stays available; production deployments without a secret are failed
+   * closed by the admin-ui surface (MissingPortalSecretError → 503).
+   */
+  portalIdentitySecret?: string
 }
 
 interface Authz {
@@ -82,13 +93,33 @@ async function authorizeAdmin(ctx: ApiRouteContext, deps: AdminDeps, _scope: str
     notFound(ctx)
     return null
   }
-  const actorId = adminActorFrom(ctx)
+  const actorId = ctx.actor?.id ?? adminActorFrom(ctx)
   if (!actorId) {
     sendJson(ctx, 403, { error: 'forbidden', message: 'admin grant required for this scope' })
     return null
   }
-  const status = await deps.admin.adminStatusOf(actorId)
-  if (status.isAdmin) return actorId
+  // Parity #47b: a self-asserted x-admin-actor header is only trusted with a
+  // matching signed portal identity; source-verified bearer actors skip it.
+  // On a match the actor becomes the signed principal (the header carries
+  // `principal@orgId`, the grant ladder keys on the bare principal).
+  let effectiveActor = actorId
+  if (!ctx.actor?.id && deps.portalIdentitySecret) {
+    const header = ctx.req.headers['x-portal-identity']
+    const token = Array.isArray(header) ? header[0] : header
+    const identity = typeof token === 'string' && token ? await verifyPortalIdentity(token, deps.portalIdentitySecret, Date.now()) : null
+    if (!identity) {
+      sendJson(ctx, 403, { error: 'forbidden', message: 'a signed x-portal-identity header is required for x-admin-actor' })
+      return null
+    }
+    const principal = actorId.includes('@') ? actorId.slice(0, actorId.indexOf('@')) : actorId
+    if (identity.p !== principal) {
+      sendJson(ctx, 403, { error: 'forbidden', message: 'x-admin-actor does not match the verified portal identity' })
+      return null
+    }
+    effectiveActor = principal
+  }
+  const status = await deps.admin.adminStatusOf(effectiveActor)
+  if (status.isAdmin) return effectiveActor
   sendJson(ctx, 403, { error: 'forbidden', message: 'admin grant required for this scope' })
   return null
 }

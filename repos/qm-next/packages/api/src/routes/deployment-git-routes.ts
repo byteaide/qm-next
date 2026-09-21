@@ -17,6 +17,7 @@
 import { spawn } from 'node:child_process'
 import type { DeployGitStore } from '@qm/types'
 import { verifyCapabilityToken } from '@qm/auth'
+import { DEPLOY_GIT_AUD } from './deployment-routes.ts'
 import { rawSendJson, type RawRoute, type RawRouteContext } from './raw-framework.ts'
 
 export interface DeploymentGitDeps {
@@ -24,6 +25,13 @@ export interface DeploymentGitDeps {
   secrets: string[]
   /** Org id carried in minted tokens / log context. */
   orgId?: string
+  /**
+   * Live deployment metadata for scope binding (parity #47d): a minted git
+   * token carries the owner scope it was issued for, so a token minted
+   * before a deployment transfer (or for a deleted id) must stop working
+   * even while unexpired. Absent → only the audience + grant binding apply.
+   */
+  scopeOf?: (deploymentId: string) => Promise<{ ownerScopeId: string } | null>
 }
 
 const GIT_BODY_LIMIT_BYTES = 100 * 1024 * 1024
@@ -169,6 +177,19 @@ export function deploymentGitRoutes(deps: DeploymentGitDeps): ReadonlyArray<RawR
     if (!isGitRoute) return rawSendJson(ctx, 404, { error: 'not_found' })
     const service = gitServiceOf(tail, ctx.url)
     if (ctx.req.method === 'POST' && !service) return rawSendJson(ctx, 404, { error: 'not_found' })
+
+    if (capability.aud !== DEPLOY_GIT_AUD) {
+      return rejectGitAuth(ctx, 'this token is not valid for deployment git')
+    }
+    if (capability.grants?.includes(`deployment-git:${id}`) !== true) {
+      return rejectGitAuth(ctx, 'this token is not bound to this deployment')
+    }
+    if (deps.scopeOf) {
+      const meta = await deps.scopeOf(id)
+      if (!meta || capability.scopeId !== meta.ownerScopeId) {
+        return rejectGitAuth(ctx, 'this token no longer matches the deployment owner scope')
+      }
+    }
 
     let repoPath: string
     try {

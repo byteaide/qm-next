@@ -32,7 +32,7 @@ import {
   type ApiDeps,
   type ApiServerOptions,
 } from '../src/index.ts'
-import { mintCapabilityToken, SECRET_DROP_AUD } from '@qm/auth'
+import { mintCapabilityToken, mintPortalIdentity, SECRET_DROP_AUD } from '@qm/auth'
 import { createEmojiUploadService } from '@qm/connectors'
 import { createMemoryByteStore } from '@qm/store'
 
@@ -547,5 +547,52 @@ test('admin: metrics and runs aggregates scope via session thread refs (#47e)', 
   const chanRows = chanRuns.json().runs
   assert.equal(chanRows.length, 1)
   assert.equal(chanRows[0].threadRef, chanThread)
+  await app.close()
+})
+
+test('admin: a bare x-admin-actor needs a matching signed portal identity when configured (#47b)', async () => {
+  const PORTAL_SECRET = 'portal-identity-test-secret'
+  const app = createApiServer(
+    { ...baseDeps(), admin: adminDeps({ portalIdentitySecret: PORTAL_SECRET }) },
+    OPTS,
+  )
+  const url = `/v1/admin/users?scope=${ORG}`
+  const mint = (p: string) => mintPortalIdentity({ p, exp: Date.now() + 60_000 }, PORTAL_SECRET)
+
+  const bearer = await app.inject({ method: 'GET', url, headers: auth(await token('person:ada')) })
+  assert.equal(bearer.statusCode, 200, 'a source-verified bearer actor bypasses the portal ladder')
+
+  const bare = await app.inject({ method: 'GET', url, headers: { 'x-admin-actor': 'person:ada@test' } })
+  assert.equal(bare.statusCode, 403)
+  assert.match(bare.json().message, /signed x-portal-identity header is required/)
+
+  const garbage = await app.inject({
+    method: 'GET',
+    url,
+    headers: { 'x-admin-actor': 'person:ada@test', 'x-portal-identity': 'not-a-token' },
+  })
+  assert.equal(garbage.statusCode, 403)
+
+  const mismatch = await app.inject({
+    method: 'GET',
+    url,
+    headers: { 'x-admin-actor': 'person:ada@test', 'x-portal-identity': await mint('person:mallory') },
+  })
+  assert.equal(mismatch.statusCode, 403)
+  assert.match(mismatch.json().message, /does not match/)
+
+  const ok = await app.inject({
+    method: 'GET',
+    url,
+    headers: { 'x-admin-actor': 'person:ada@test', 'x-portal-identity': await mint('person:ada') },
+  })
+  assert.equal(ok.statusCode, 200)
+
+  const strangerOk = await app.inject({
+    method: 'GET',
+    url,
+    headers: { 'x-admin-actor': 'person:stranger@test', 'x-portal-identity': await mint('person:stranger') },
+  })
+  assert.equal(strangerOk.statusCode, 403, 'identity match alone is not enough — the grant ladder still applies')
   await app.close()
 })

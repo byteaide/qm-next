@@ -185,12 +185,16 @@ async function proxyToAdmin(
   const allowed = method === 'GET' ? READS.includes(first) : (WRITES.get(first)?.includes(method) ?? false)
   if (!allowed) return reply.code(404).send({ error: 'not_found' })
   const url = `/v1/admin/${innerPath}${new URL(req.url, 'http://localhost').search}`
+  const portalIdentity = req.headers['x-portal-identity']
   const res = await app.inject({
     method,
     url,
     headers: {
       'content-type': 'application/json',
       'x-admin-actor': `${principal}@${orgId}`,
+      // Parity #47b: forward the signed identity the /v1/admin gate now
+      // demands when a portal identity secret is configured.
+      ...(typeof portalIdentity === 'string' && portalIdentity ? { 'x-portal-identity': portalIdentity } : {}),
     },
     ...(method === 'GET' || method === 'DELETE' ? {} : { payload: JSON.stringify(req.body ?? {}) }),
   })
