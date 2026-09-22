@@ -123,7 +123,7 @@ qm 参考实现规模：`crons.ts` 489 行、`webhooks.ts` 176 行、`slack/deli
   X3b / X1 / 凭据门控两项（Fly-AWS PRD 已于 2026-09-22 拍板不移植，移除）
 ```
 
-> **2026-09-22 收尾拍板**：第 1-5 批全部完成（含 X3b 4a/4b/4c、5a/5b）。Fly/AWS 不移植；集群 M 暂缓（触发 = 需要多实例部署）。实现面剩余仅 CommandGate 生产 startup 装配（随部署运行时面）。
+> **2026-09-22 收尾拍板**：第 1-5 批全部完成（含 X3b 4a/4b/4c、5a/5b）。Fly/AWS 不移植；集群 M 暂缓（触发 = 需要多实例部署）；X1 挂起（触发 = 第三方 OAuth 服务或 P5 IM providers）；ChatGPT 登录面搁置为有意偏差。第 6 批（最终切片）CommandGate 生产 startup 装配已完成——**实现类工作全部收口**，唯一行动项 = 5.2 飞书真机静默腿（凭据在库，差一次人工发消息）。
 
 **包 ownership 矩阵**（避免并行冲突）：
 - 单元一：`packages/api`（routes）、`packages/triggers`
