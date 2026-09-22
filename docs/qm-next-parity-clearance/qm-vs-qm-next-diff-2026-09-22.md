@@ -1,0 +1,158 @@
+# qm vs qm-next 差异对比（重对版）
+
+**日期**：2026-09-22
+**基线**：qm @ `95b5a6a`（2026-09-05 之后无新提交，基线静止）vs qm-next @ `8419a05`（main，含 tag `soul`）
+**上一份报告**：`qm-next-parity-clearance-2026-09-21.md`（54 项偏差 + qm-soul #55 后续补录）
+**方法**：`aa` 仓库 2026-09-21 以来的 git 增量逐条核对 + 对 `repos/qm-next/packages/` 定向 rg 验证 + `parity-deviations.md`（现 1155 行，含 qm-soul 节）现读。
+
+---
+
+## 1. 自上一份清障报告以来的落地（2026-09-21 批次）
+
+### 1.1 集群 1 — 部署运行时（已关闭，剩未来 PRD）
+
+| 条目 | 状态 | 证据 |
+|---|---|---|
+| Docker provider + `/d/<slug>` 部署代理 | ✅ | `ea6303f` |
+| git smart-HTTP 后端（capability 绑定） | ✅ | `c739c8c`（`deployment-git-routes.ts`）；`404fab5` 修复 `refs/heads/current` 使普通 `git clone` 可用 |
+| Fly / AWS provider | ❌ 未来 PRD | `rg "FlyDeploy\|AwsDeploy" packages` 零命中 |
+
+### 1.2 集群 2 — 生产化（4/5 关闭，剩凭据受限项）
+
+| 条目 | 状态 | 证据 |
+|---|---|---|
+| S3 字节后端 | ✅ | `store/src/s3-byte-store.ts`；`S3_BUCKET` 选择逻辑 `service.ts:941-953` |
+| pg-boss 任务队列 | ✅ | `createPgBossSink`（`@qm/triggers`，可选启用） |
+| MonitorPoller | ✅ | `9df3898`（arm→poll→fire→advance→sweep）；`6faf912` 后台启动进注册表；`service.ts:811` 接线 |
+| emoji-upload | ✅ | `connectors/src/emoji-upload-service.ts`（`6d58dca`） |
+| codex-device-login | ❌ 仍 502 | `user-model-auth-routes.ts:55` 返回 `oauth_start_failed`（"binary is not available in this deployment"）——**依赖 ChatGPT 凭据** |
+
+### 1.3 集群 3 — 小尾巴（6/6 全部关闭）
+
+| 条目 | 状态 | 证据 |
+|---|---|---|
+| #47a secret-drop `requiresToken` fail-closed | ✅ | `2fefa54`；`parity-lanes-routes.ts:77-94,206-247`；测试 `tranche7-routes.test.ts:352` |
+| #47b portal 身份强制（admin 门） | ✅ | `8fd6141`（签名 `x-portal-identity` ↔ `x-admin-actor` 校验） |
+| #47d 吊销范围 403 + capability 用时绑定 | ✅ | `8fd6141`（deployment-git 用时重验 aud + grant + `ownerScopeId`） |
+| #47e runs 聚合按范围过滤 | ✅ | `127d56f`（`sessionsByThreadRefs`，memory + PG `ANY($1)`） |
+| #28 每轮工具台账 + `once()` 重放 | ✅ | `3443671`（`RunStore.ledger` memory + PG `tool_calls`） |
+| #27 沙箱基础镜像 digest 固定 | ✅ | cluster 3 简报（2026-09-21） |
+
+### 1.4 qm-soul 灵魂层（本轮最大差异收口，M-Soul-0..5 已完成，tag `soul`）
+
+qm 的产品灵魂层 = **16 段顺序组装管线 + 三模式协议帧 + soul 联邦**（qm `src/core/orchestrator.ts:857-963`）。此前 qm-next 只有零件（`devResolution` 一行占位 `'You are qm-next.'`）；本批次完成组装：
+
+| 条目 | 状态 | 证据 |
+|---|---|---|
+| ADR-0018（灵魂层=组合协议帧，orchestrator 持有） | ✅ | `docs/adr/0018-soul-layer-is-composed-protocol-frames.md`（accepted） |
+| 协议模板栈：fail-loud 渲染器 + 四模板移植 | ✅ | `packages/orchestrator/src/protocols/`；`{{#if slack}}`→`{{#if imChannel}}`、平台名→`{{imLabel}}`（偏差 #55），其余 byte-identical |
+| golden 字节对拍 | ✅ 12/12 | `packages/orchestrator/tests/golden/`；模板级 + composer 级双对拍；渲染期 `imLabel='Slack'` 时输出与 qm 完全一致 |
+| frame composer（段序 ①-⑥+⑧+⑨+⑬） | ✅ | `frame-composer.ts`：`selectFrameMode`/`deriveSurfaceTools`（qm orchestrator:857-862 语义）、`renderGatewayBlock`、`renderComputerBlock`、`currentTimeBlock`；`stableSystemBytes` 划界（⑬⑭在边界后） |
+| 真 ResolutionService 替换 `devResolution` 占位 | ✅ | `api/src/service.ts`：SoulStore.effectiveSoul（段②，org 权威+下级守卫与 qm 逐字）+ `renderSecurityPolicyPrompt`（段④，`securityPosture` 默认 auto）+ branding；占位串全仓清零 |
+| SoulStore PG twin | ✅ | `soul_configs`/`soul_history`（沿用 qm 表名，`withSchemaLock` 暖建，`ready()` 按 version 重放水合）；`createPostgresSoulStore` |
+| guidance 工具激活（此前死工具） | ✅ | `tool-context.ts:260-262` soulRead/soulWrite 接 SoulStore；org 写拒绝 `soul_update_denied` 阶梯对齐 qm |
+| 模式选择激活 | ✅ | ambient/自动化带目的地→autonomous（沉默默认）；非自动化 dm/web→conversation；否则 fallback；行为测试覆盖（捕获式 harness） |
+| im-bridge 品牌传递 | ✅ | `botHandle`/`surfaceLabels`/`displayLabel` 经部署配置供值——core 源码零平台词（`check:im` 继续覆盖 `protocols/`） |
+| 新门禁 `pnpm check:soul` | ✅ | `scripts/check-soul-placeholder.sh`（占位 prompt 恒零，防回流） |
+
+**qm-soul 登记的偏差与二期（详见 `parity-deviations.md` qm-soul 节）**：
+
+- **#55（源码词汇层）**：模板源码平台词 neutralized；渲染输出在 provider label 等于 qm 字面量时保持字节一致——偏差仅存在于源码词汇层。
+- **#55b（有意行为差异）**：qm 只要有 surface 名就渲染 gateway 行；qm-next 改为**仅在 IM envelope 实际提供事实（`TurnInput.gatewayContext`）时渲染段⑨**，避免与模式帧的 surface 措辞重复。
+- **段⑩⑪⑫⑮ 挂二期**：home channel、cron 多目的地交付菜单、共享文件 ACL（`grantedHandles`）、onboarding 检测——依赖 qm 的 delivery-candidates+signing+apiBaseUrl、ACL grant ledger、onboarding-skill 记忆检测，均未移植。composer 段位槽位已按 ADR-0018 顺序预留。
+- **5.2 飞书 e2e 静默腿待真机**：ambient 群聊未寻址消息→断言零投递（需 FEISHU 凭据 + 人工发消息）。
+
+---
+
+## 2. 全景对比（qm 有 → qm-next 现状）
+
+| 子系统 | qm-next 现状 | 判定 |
+|---|---|---|
+| 灵魂层（协议帧+soul 联邦） | 段①-⑥+⑧+⑨+⑬⑭已组装，12/12 golden 对拍；⑩⑪⑫⑮挂二期 | 🟢 核心已对齐（登记 #55/#55b） |
+| 模式选择（autonomous/conversation/fallback） | 已激活，行为测试覆盖 | 🟢 |
+| P1 契约（tools 可选/安全回调/模型工具/SessionStore/goal hooks） | 类型冻结，双实现 | 🟢（`HarnessSecurityScreenInput` 冻结仍建议抽查） |
+| 存储族（DurableMap/keychain/model/tasks/soul） | `@qm/store`/`@qm/model`/`@qm/tasks` + 新增 soul PG twin | 🟢 |
+| 12.0 控制面（capability/share/blobs/secret-drop/admin UI） | 全部落地，#47a/b/d/e 已关闭 | 🟢 |
+| Admin 控制台 | 字节级移植 + `/admin/ui` | 🟢 |
+| 部署运行时 | Docker + `/d/<slug>` + git HTTP；Fly/AWS 无 | 🟡 剩未来 PRD |
+| 监控/队列/字节存储 | MonitorPoller + pg-boss + S3 全落地 | 🟢 |
+| 运行可观测（runs 台账/聚合/重放） | #28/#47e 落地 | 🟢 |
+| IM 域（飞书） | 14.0b 表情确认、agent-request 卡片、ambient judge（默认 `keyword`，`model` 显式启用） | 🟢（webhook 同意/投递重定向按决策放弃） |
+| 用户模型登录 | codex-device-login 与订阅 OAuth 均 502 桩 | 🔴 依赖 ChatGPT 凭据 |
+| Connectors 核心 | 后台执行/oauth-flow/consent-link/browser-session/secret-envelope/emoji-upload 已上线；**`connectors/oauth.ts`（PROVIDERS+well-known+PKCE+refresh，qm 626 行）仍未移植** | 🟡 |
+| ToolContext 控制面 | background 已真实（进程注册表）；soul 已接线；**publish/playground/MCP/shareArtifact/cron*/webhook* 仍诚实不可用**（`tool-context.ts:173,183,248-259`） | 🟡 |
+| Context-policy 成员检查 | lane-A 接受任意 principalId（偏差 #44 自文档化） | 🟡 刻意简化 |
+| soul 共享 scope 写校验 | `managesScope` 目录检查未接（`soul-routes.ts:1-6` 自文档，随 13.0） | 🟡 |
+| Portal | 包已就绪 + SSO；**impersonation 路由未移植**；playground 匿名会话随 13.0 | 🟡 |
+| Command policy 模拟 | `command-policy-simulate` 仍 501（`admin-routes.ts:238-244`，等策略引擎收敛里程碑） | 🟡 |
+| environments/projects 存储 | 刻意每进程（`@qm/api/src/services/`，见 #816 评论） | 🟡 有意为之 |
+| 多实例心跳 | `instance_heartbeats` 表在；`TRUNCATE_ONLY` 仅 notes——非真正多实例交接 | 🟡 |
+
+---
+
+## 3. 仍然存在的差异清单（全部有归属）
+
+1. **依赖受限（凭据）**：codex-device-login（502 `oauth_start_failed`）、订阅 OAuth（502 `oauth_complete_failed`）——等 ChatGPT 凭据（`user-model-auth-routes.ts:55,83`）。
+2. **未移植模块**：`connectors/oauth.ts`（IM provider OAuth 栈，注释称"待 P5 18.0 IM providers 落地"）、portal impersonation 路由、Fly/AWS 部署 provider（未来 PRD）。
+3. **功能桩**：`command-policy-simulate` 501；ToolContext 的 publish/playground/MCP/shareArtifact/cron/webhook 诚实不可用。
+4. **lane-A 刻意简化**：context-policy 成员检查（#44）、soul `managesScope`、environments/projects 每进程存储。
+5. **qm-soul 二期**：段⑩⑪⑫⑮（依赖 delivery-candidates/signing/apiBaseUrl、ACL grant ledger、onboarding 检测）；登记偏差 #55（源码词汇）、#55b（gateway 块 envelope 门控，有意行为差异）；5.2 飞书真机静默腿。
+
+---
+
+## 4. qm-next 独有（qm 不具备）
+
+- **平台中立架构**：Cordis 全插件化 + `check:im`/`rescope-check`/`check:soul` 三道隔离门禁；core 源码零平台词，渠道词经部署配置注入。
+- **飞书一等渠道**（v1 唯一渠道，2026-09-13 拍板）：WS 长连接、线程回复/编辑/撤回、审批卡片。
+- **capability 令牌控制面**：用时绑定（aud+grant+`ownerScopeId`）、fail-closed drop-token 校验、portal 身份签名互检——qm 无此控制面。
+- **生产化底座**：S3 字节后端、pg-boss 队列、MonitorPoller、PG 孪生族（含新增 `soul_configs`/`soul_history`）、迁移演练 44/44。
+- **部署面**：Docker provider + `/d/<slug>` 代理 + git smart-HTTP（capability 绑定）。
+- **运行可观测**：每轮工具台账 + `once()` 重放、runs 聚合按范围过滤。
+
+---
+
+## 5. 结论
+
+自 2026-09-15 偏差台账开立以来：**12.0 控制面、16.0 长尾、19.0 迁移、20.0 生产化、部署运行时、全部小尾巴（#27/#28/#47a-e）以及灵魂层核心（M-Soul-0..5）均已关闭**。当前 qm 与 qm-next 的全部剩余差异可归为三类：
+
+1. **凭据受限**（ChatGPT：codex-device-login + 订阅 OAuth）——代码就绪，等凭据；
+2. **明确挂起**（connectors/oauth.ts、impersonation、Fly/AWS PRD、段⑩⑪⑫⑮、5.2 真机 e2e）——均有登记与触发条件；
+3. **有意偏差**（#55 源码词汇、#55b gateway 门控、lane-A 简化、每进程存储）——已自文档化，属架构决策而非缺口。
+
+基线侧 qm 自 2026-09-05 起无移动，不产生新差异。下一批自然的对齐工作 = ChatGPT 凭据就位后的登录链路 + 二期四段（依赖 delivery/ACL 车道）。
+
+---
+
+## 附录：本轮运行的验证命令
+
+```
+# 登录链路 502 桩（仍开）
+rg -n "oauth_start_failed|oauth_complete_failed" repos/qm-next/packages
+# → user-model-auth-routes.ts:55,83
+
+# connectors/oauth.ts 是否落地（仍未）
+ls repos/qm-next/packages/connectors/src/
+# → 无 oauth.ts；有 oauth-flow-service/secret-envelope/emoji-upload 等
+
+# Fly/AWS 部署 provider（无）
+rg -ln "FlyDeploy|AwsDeploy" repos/qm-next/packages
+
+# command-policy-simulate（仍 501）
+sed -n '234,248p' repos/qm-next/packages/api/src/routes/admin-routes.ts
+
+# ToolContext 控制面现状
+rg -n "CONTROL_UNAVAILABLE|unavailable" repos/qm-next/packages/orchestrator/src/tool-context.ts
+# → publish/playground/MCP/shareArtifact/cron*/webhook* 不可用；soul 已接线；background 真实
+
+# soul managesScope（仍自文档化）
+sed -n '1,8p' repos/qm-next/packages/api/src/routes/soul-routes.ts
+
+# context-policy 成员检查（仍 lane-A）
+sed -n '1,8p' repos/qm-next/packages/api/src/routes/context-policy-routes.ts
+
+# qm 侧基线是否移动（未动）
+git -C repos/qm log -1 --pretty='%h %ad %s'   # 95b5a6a 2026-09-05
+
+# 本轮批次增量
+git log --since=2026-09-21 -- repos/qm-next/packages repos/qm-next/scripts
+```
