@@ -35,7 +35,7 @@ Phase 3B 修复了 Phase 1-3A 累积的 11 个真实代码缺陷（D1-D11），p
 
 ```sh
 cd repos/qm-next
-SENSENOVA_API_KEY=[redacted-credential] QM_MODEL_ID=sensenova-6.8-flash-lite \
+SENSENOVA_API_KEY="$SENSENOVA_API_KEY" QM_MODEL_ID=sensenova-6.8-flash-lite \
   node --import tsx/esm scripts/qa-smoke.ts
 ```
 

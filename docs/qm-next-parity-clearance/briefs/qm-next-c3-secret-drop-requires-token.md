@@ -5,7 +5,7 @@
 - **Created**: 2026-09-21
 - **Parent task**: parity clearance (cluster 3, item: secret-drop `requiresToken`)
 - **Blocked by**: none (independent small fix)
-- **Conversation context**: `parity-lanes-routes.ts:146` has `requiresToken: [redacted-credential]` as a flag but the drop URL doesn't actually carry the capability token. qm embeds the token in the URL; qm-next doesn't.
+- **Conversation context**: `parity-lanes-routes.ts:146` has `requiresToken: true` as a flag but the drop URL doesn't actually carry the capability token. qm embeds the token in the URL; qm-next doesn't.
 
 ## What
 

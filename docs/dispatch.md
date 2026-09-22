@@ -41,11 +41,12 @@ Three units run in parallel — recommended batch (Plan C from parity clearance)
 | Brief | Blocked by | Resume trigger |
 |---|---|---|
 | `qm-next-c2-codex-device-login.md` | Codex auth credentials (CHATGPT_AUTH or subscription OAuth) | Credentials available + worker has codex binary |
-| `qm-next-c2-monitor-poller.md` | Triggers/runs/identity/delivery/idempotency/sandbox surfaces exposed to `@qm/monitors` | Surfaces injected via composition root |
 | `qm-next-c3-runs-aggregate.md` | Observability convergence seam (`sessionsByThreadRefs`) | Observability slice merged |
 | `qm-next-c3-tool-ledger.md` | Runs/replay lane (`once()` seam) | Replay slice merged |
 
 When a `Blocked by` resolves, edit the brief to remove the `⚠️ BATCH 2 — BLOCKED` banner and move from blocked table to active table.
+
+> 2026-09-22: `qm-next-c2-monitor-poller` resolved — implemented in `packages/monitors` (live per 2a34735); banner and row removed.
 
 ## Verification gate (all units must pass before merge)
 
