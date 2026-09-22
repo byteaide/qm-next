@@ -583,6 +583,35 @@ export function createPiTools(ref: ToolContextRef, opts?: PiToolsOptions): ToolD
         ...(ref.abortSignal ? { signal: ref.abortSignal } : {}),
       }
       const r = await tc.execute(params.command, Object.keys(execOpts).length ? execOpts : undefined)
+      // X3b G8 — policy verdicts travel on the result so the approval
+      // card carries matched + approvalKey (qm NeedsApproval parity).
+      if (r.policyVerdict?.decision === 'require_approval') {
+        const reason = r.policyVerdict.reason ?? 'policy requires approval'
+        ref.pendingApprovals?.push({
+          command: params.command,
+          reason,
+          kind: 'approval',
+          ...(r.policyVerdict.matched !== undefined ? { matched: r.policyVerdict.matched } : {}),
+          ...(params.purpose ? { purpose: params.purpose } : {}),
+          ...(r.policyVerdict.ruleId ? { approvalKey: r.policyVerdict.ruleId } : {}),
+        })
+        ref.pausedOnApproval = true
+        return recordResult(
+          callId,
+          { tool: 'execute', blocked: 'needs_approval', reason },
+          { ...text(`[blocked: needs human approval] ${reason}`), terminate: true },
+          true,
+        )
+      }
+      if (r.policyVerdict?.decision === 'deny') {
+        const reason = r.policyVerdict.reason ?? r.policyVerdict.ruleId ?? 'denied by policy'
+        return recordResult(
+          callId,
+          { tool: 'execute', denied: true, reason },
+          text(`[denied by policy] ${reason}`),
+          true,
+        )
+      }
       const parts = [r.stdout, r.stderr ? `[stderr]\n${r.stderr}` : ''].filter(Boolean).join('\n')
       const reachedPrefix = r.reached ? `[ran on ${r.reached.label}'s computer]\n` : ''
       return recordResult(

@@ -85,7 +85,7 @@ qm 参考实现规模：`crons.ts` 489 行、`webhooks.ts` 176 行、`slack/deli
 | 条目 | 现状 | 触发条件 | 性质 |
 |---|---|---|---|
 | X3a command-policy 引擎差距审计 | ✅ 完成（2026-09-22，`x3a-command-policy-audit-2026-09-22.md`）：双引擎休眠为最高差距；X3b 最小版不被 scannableCommand 阻塞 | 已产出解锁路径 | 审计报告 |
-| X3b command-policy-simulate 501 → 实现 | ✅ 完整（2026-09-22）：最小版（inline policy + 基线回落 + 引擎唤醒 + i 标志/safe-regex）+ 4a `scannableCommand` 全量移植（qm 语料全绿）+ 4b 存储分层（每作用域 store memory/PG 双实现 + admin CRUD + simulate qm 保真 ruleSource 算术 + composePolicy/evaluateCommandWithLayer + 沙箱 per-scope policyFor）；余 G6 收敛 + G8 审批联动（4c） | 移植 |
+| X3b command-policy-simulate 501 → 实现 | ✅ 完成（2026-09-22，4a/4b/4c）：最小版（引擎唤醒 + safe-regex + inline policy）→ scannableCommand 全量移植（qm 语料全绿）→ 每作用域存储/CRUD/分层（simulate qm 保真 + composePolicy/evaluateCommandWithLayer + per-scope policyFor）→ G6 收敛（ADR-0019：规则引擎即 CommandGate 的 rule-engine 策略）+ G8 审批链路（ExecResult.policyVerdict → 审批卡 matched/approvalKey）。X3a 差距 G1-G8 全闭合；CommandGate 生产 startup 装配随部署运行时面 | 移植 |
 | X1 connectors/oauth.ts | 无（626 行：PROVIDERS+well-known+PKCE+refresh） | P5 IM providers 落地，或独立拍板 | 移植 |
 | X2 portal impersonation | 核心语义+审计 ✅（2026-09-22：路由已存，补 `impersonate.start/stop` 审计 + 7 条路由测试）；余 portal 侧 `/auth/impersonate` 密封流（ImpersonationClaims 机制已备） | tier:standard | 移植 |
 

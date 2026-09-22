@@ -17,6 +17,7 @@ import { CommandDenied, NeedsApproval } from '@qm/types'
 import { ephemeralCredLinkPaths, ephemeralCredLinkScript, errMessage, shq, shortHash } from '@qm/credentials'
 import { nonInteractiveShellPrefix } from './sandbox-env.ts'
 import { evaluateCommandPolicy } from './policy.ts'
+import type { PolicyVerdictMetadata } from '@qm/types'
 import { defaultDenylistPolicy } from './default-policy.ts'
 import { createExecProcessSessions, type ExecProcessIo } from './exec-process-session.ts'
 import { materializeRoLayers, type RoLayerData } from './ro-layers.ts'
@@ -133,20 +134,22 @@ export function createLocalSandbox(opts: LocalSandboxOptions = {}): Sandbox {
     return spec === 'default-denylist' ? defaultDenylistPolicy() : spec
   }
 
-  function policyDeniedResult(command: string, reason: string): ExecResult {
+  function policyDeniedResult(command: string, reason: string, verdict?: PolicyVerdictMetadata): ExecResult {
     return {
       code: 1,
       stdout: '',
       stderr: `[policy denied: ${reason}] ${command}`,
       timedOut: false,
+      ...(verdict ? { policyVerdict: verdict } : {}),
     }
   }
-  function policyApprovalRequiredResult(command: string, reason: string): ExecResult {
+  function policyApprovalRequiredResult(command: string, reason: string, verdict?: PolicyVerdictMetadata): ExecResult {
     return {
       code: 2,
       stdout: '',
       stderr: `[policy requires approval: ${reason}] ${command}`,
       timedOut: false,
+      ...(verdict ? { policyVerdict: verdict } : {}),
     }
   }
 
@@ -491,13 +494,21 @@ export function createLocalSandbox(opts: LocalSandboxOptions = {}): Sandbox {
         const verdict = evaluateCommandPolicy(command, handlePolicy)
         if (verdict.decision !== 'allow') {
           const reason = verdict.reason ?? verdict.ruleId ?? 'policy denied'
+          const metadata: PolicyVerdictMetadata = {
+            decision: verdict.decision,
+            ...(verdict.ruleId !== undefined ? { ruleId: verdict.ruleId } : {}),
+            ...(verdict.matched !== undefined ? { matched: verdict.matched } : {}),
+            ...(verdict.reason !== undefined ? { reason: verdict.reason } : {}),
+          }
           if (verdict.decision === 'deny') {
             if (execOpts?.throwOnPolicy) throw new CommandDenied(command, reason)
-            return policyDeniedResult(command, reason)
+            return policyDeniedResult(command, reason, metadata)
           }
-          // require_approval
-          if (execOpts?.throwOnPolicy) throw new NeedsApproval(command, reason)
-          return policyApprovalRequiredResult(command, reason)
+          // require_approval — qm parity: the rule identity travels as
+          // approvalKey so the approval card can carry matched + key.
+          if (execOpts?.throwOnPolicy)
+            throw new NeedsApproval(command, reason, 'approval', verdict.matched, verdict.ruleId)
+          return policyApprovalRequiredResult(command, reason, metadata)
         }
       }
       const timeoutSec = execOpts?.timeoutMs ? Math.ceil(execOpts.timeoutMs / 1000) : defaultTimeoutSec

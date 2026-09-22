@@ -209,7 +209,9 @@ export function assertPolicyAllows(command: string, policy: CommandPolicy): Poli
   if (verdict.decision === 'allow') return null
   const reason = verdict.reason ?? verdict.ruleId ?? 'policy denied'
   if (verdict.decision === 'deny') throw new CommandDenied(command, reason)
-  throw new NeedsApproval(command, reason)
+  // qm parity: the rule identity travels as approvalKey, the trigger
+  // substring as matched, so the approval card is traceable.
+  throw new NeedsApproval(command, reason, 'approval', verdict.matched, verdict.ruleId)
 }
 
 /** Escape a string for safe inclusion in a regex pattern (caller still chooses flags). */
