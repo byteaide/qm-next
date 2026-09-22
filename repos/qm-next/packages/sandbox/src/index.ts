@@ -20,3 +20,4 @@ export {
   type ParseCommandPolicyResult,
 } from './policy.ts'
 export { DEFAULT_DENYLIST_PATTERNS, defaultDenylistPolicy } from './default-policy.ts'
+export { scannableCommand } from './scannable-command.ts'

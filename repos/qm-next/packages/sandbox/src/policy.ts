@@ -11,19 +11,24 @@
  * sits next to the `Sandbox` interface that uses it.
  *
  * Phase 3J caveats:
- *   - Pattern matching is regex against the *literal* command string;
- *     it does NOT parse shell grammar. `rm -rf /tmp/foo` does not match
- *     the `rm -rf\s+/` denylist pattern because the slash is followed by
- *     `tmp`. This is intentional — false positives on legitimate work
- *     are worse than misses on adversarial inputs.
+ *   - Rules run against the *scannable* form of the command (X3b full,
+ *     `scannableCommand` qm parity): quoted data is stripped, bare words
+ *     are unquoted, and payloads the shell would execute (`sh -c`,
+ *     `eval`, pipelines into shells/SQL clients, herestrings, simple
+ *     variables, ...) are appended as extra scan lines. Data that merely
+ *     looks dangerous (heredoc bodies, quoted literals) does not trip
+ *     rules; executed variants cannot hide behind quoting.
  *   - Patterns compile through `compileSafeRegex` (qm parity): length
  *     cap, no backreferences/lookarounds, no nested/ambiguous repetition
  *     (ReDoS surface), and the `i` flag is always applied — operators
  *     must not rely on case sensitivity (`RM -RF /` matches `rm`).
+ *     An invalid stored pattern is skipped (qm firstMatch parity) so one
+ *     stale rule never locks a scope; valid siblings keep binding.
  *   - The matcher is one-shot (first match wins).
  */
 import type { CommandDecisionValue, CommandPolicy, CommandRule } from '@qm/types'
 import { CommandDenied, NeedsApproval } from '@qm/types'
+import { scannableCommand } from './scannable-command.ts'
 
 /**
  * Phase 7 cutover (KV-005): the verdict is shaped like the typed
@@ -36,12 +41,9 @@ export interface PolicyVerdict {
   decision: CommandDecisionValue
   /** Identity of the rule that produced the decision (its pattern). */
   ruleId?: string
+  /** Substring of the scannable text that tripped the rule (qm parity). */
+  matched?: string
   reason?: string
-}
-
-interface CompiledRule {
-  rule: CommandRule
-  regex: RegExp
 }
 
 /** Pattern length ceiling (qm `util/safe-regex.ts` parity). */
@@ -126,25 +128,31 @@ export function compileSafeRegex(pattern: string, flags = ''): RegExp {
   return new RegExp(pattern, flags)
 }
 
-function compileRules(rules: readonly CommandRule[]): CompiledRule[] {
-  return rules.map((rule) => ({ rule, regex: compileSafeRegex(rule.pattern, 'i') }))
-}
-
 /**
- * Evaluate a command string against the policy. Returns the first rule's
- * decision; if no rule matches, returns `allow` in `denylist` mode (open
- * by default) and `deny` in `allowlist` mode (closed by default). The
- * caller decides what to do with `require_approval` — the harness-pi
- * thread catches `NeedsApproval` and produces an approval card; the
- * sandbox layer typically lets it through so the harness can intercept.
+ * Evaluate a command string against the policy. Rules run against the
+ * scannable form of the command (see `scannableCommand`); the first
+ * matching rule's decision wins. If no rule matches, returns `allow` in
+ * `denylist` mode (open by default) and `deny` in `allowlist` mode
+ * (closed by default). An invalid stored pattern is skipped so one
+ * stale rule never locks a scope — `parseCommandPolicy` is the
+ * validate-at-write-time layer, this is runtime defence in depth.
  */
 export function evaluateCommandPolicy(command: string, policy: CommandPolicy): PolicyVerdict {
-  const compiled = compileRules(policy.rules)
-  for (const { rule, regex } of compiled) {
-    if (regex.test(command)) {
-      const verdict: PolicyVerdict = { decision: rule.decision }
+  const scannable = scannableCommand(command)
+  for (const rule of policy.rules) {
+    let regex: RegExp
+    try {
+      regex = compileSafeRegex(rule.pattern, 'i')
+    } catch {
+      console.error(
+        `[command-policy] skipping invalid rule pattern ${JSON.stringify(rule.pattern)} (${rule.decision}) — re-save the policy to migrate`,
+      )
+      continue
+    }
+    const hit = regex.exec(scannable)
+    if (hit) {
+      const verdict: PolicyVerdict = { decision: rule.decision, ruleId: rule.pattern, matched: hit[0] }
       if (rule.reason !== undefined) verdict.reason = rule.reason
-      verdict.ruleId = rule.pattern
       return verdict
     }
   }

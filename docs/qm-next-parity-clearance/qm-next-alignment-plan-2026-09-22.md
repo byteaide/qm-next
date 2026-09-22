@@ -85,7 +85,7 @@ qm 参考实现规模：`crons.ts` 489 行、`webhooks.ts` 176 行、`slack/deli
 | 条目 | 现状 | 触发条件 | 性质 |
 |---|---|---|---|
 | X3a command-policy 引擎差距审计 | ✅ 完成（2026-09-22，`x3a-command-policy-audit-2026-09-22.md`）：双引擎休眠为最高差距；X3b 最小版不被 scannableCommand 阻塞 | 已产出解锁路径 | 审计报告 |
-| X3b command-policy-simulate 501 → 实现 | 最小版 ✅（2026-09-22：inline policy + 基线回落 + 引擎唤醒 + i 标志/safe-regex）；完整版（scannableCommand + 存储/CRUD + 分层）→ 第 4 批 | 移植 |
+| X3b command-policy-simulate 501 → 实现 | 最小版 ✅ + 扫描器 ✅（2026-09-22：inline policy + 基线回落 + 引擎唤醒 + i 标志/safe-regex + `scannableCommand` 全量移植，qm 语料 24 项全绿，`matched`=命中子串/qm firstMatch 语义）；余每作用域存储/CRUD + 分层（4b）、G6 收敛 + G8 审批联动（4c） | 移植 |
 | X1 connectors/oauth.ts | 无（626 行：PROVIDERS+well-known+PKCE+refresh） | P5 IM providers 落地，或独立拍板 | 移植 |
 | X2 portal impersonation | 核心语义+审计 ✅（2026-09-22：路由已存，补 `impersonate.start/stop` 审计 + 7 条路由测试）；余 portal 侧 `/auth/impersonate` 密封流（ImpersonationClaims 机制已备） | tier:standard | 移植 |
 

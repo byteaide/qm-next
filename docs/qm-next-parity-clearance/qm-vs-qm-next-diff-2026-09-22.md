@@ -87,7 +87,7 @@ qm 的产品灵魂层 = **16 段顺序组装管线 + 三模式协议帧 + soul �
 | Context-policy 成员检查 | 目录成员校验已接：directory 在线时 GET/PUT 越权 403（qm `memberScope` 阶梯），离线保持 lane-A 开放 | 🟢 |
 | soul 共享 scope 写校验 | `managesScope` 已接目录（qm `createCanManageScope` 语义：personal=本人、group=成员、channel=私有成员）；未接目录时维持拒绝 | 🟢 |
 | Portal | 包已就绪 + SSO；**impersonation 路由未移植**；playground 匿名会话随 13.0 | 🟡 |
-| Command policy 模拟 | X3b 最小版已落地（2026-09-22）：simulate 接 inline policy + 灾难级基线，求值器与沙箱门共用（`admin-routes.ts` simulateCommandPolicy）；沙箱门已唤醒（默认 `default-denylist`，可配 off）；引擎加 `i` 标志 + safe-regex（qm 对齐）。剩余：scannableCommand 语义归一化 + 存储/CRUD + 分层（第 4 批，见 X3a 审计） | 🟡 |
+| Command policy 模拟 | X3b 完整版扫描器已落地（2026-09-22，4a）：`scannableCommand` 全量移植（`packages/sandbox/src/scannable-command.ts`——heredoc/引号剥离、裸词去引号、`sh -c`/eval/`env -S`/sudo/nice/timeout/xargs/coproc 载荷、管道到 shell/SQL 客户端的 stdin 生产者、herestring、简单变量间接、SQL 客户端载荷，深度帽 8），求值器改为对 scannable 文本匹配（qm firstMatch 语义：无效存量规则跳过不锁域、`matched` 返回命中子串、verdict 加 `matched`）；qm 506 行语料移植 24 项全绿；simulate 响应改 `matched`（子串）+ 新增 `ruleId`（模式）。剩余：每作用域存储/CRUD + 分层（4b）、G6 收敛决策 + G8 审批联动（4c） | 🟡 扫描器🟢，存储/分层余 |
 | environments/projects 存储 | 刻意每进程（`@qm/api/src/services/`，见 #816 评论） | 🟡 有意为之 |
 | 多实例心跳 | `instance_heartbeats` 表在；`TRUNCATE_ONLY` 仅 notes——非真正多实例交接 | 🟡 |
 
@@ -97,7 +97,7 @@ qm 的产品灵魂层 = **16 段顺序组装管线 + 三模式协议帧 + soul �
 
 1. **依赖受限（凭据）**：codex-device-login（502 `oauth_start_failed`）、订阅 OAuth（502 `oauth_complete_failed`）——2026-09-22 拍板：无 ChatGPT 真实凭证，模型面走国产 LLM；两项登记为有意偏差，不再以"等凭据"挂起（代码保持就绪）。
 2. **未移植模块**：`connectors/oauth.ts`（IM provider OAuth 栈，注释称"待 P5 18.0 IM providers 落地"）、portal impersonation 路由、Fly/AWS 部署 provider（2026-09-22 拍板暂缓；publish 随之登记有意偏差）。
-3. **功能桩**：`command-policy-simulate` 最小版已收口（2026-09-22，X3b-min；完整版第 4 批）；createPlayground 存储侧已收口（2026-09-22：文件库直写 + Files 可见可分享；turn-attachment 投递为剩余小项）；ToolContext 的 publish 诚实不可用（有意偏差，见 T5 评估）（cron/webhook/MCP/shareArtifact 已于 2026-09-22 接控制面收口）。
+3. **功能桩**：`command-policy-simulate` 已收口（2026-09-22 X3b-min 起步、同日 4a 补齐 scannableCommand 扫描器，模拟保真=生产保真）；createPlayground 存储侧已收口（2026-09-22：文件库直写 + Files 可见可分享；turn-attachment 投递为剩余小项）；ToolContext 的 publish 诚实不可用（有意偏差，见 T5 评估）（cron/webhook/MCP/shareArtifact 已于 2026-09-22 接控制面收口）。
 4. **lane-A 刻意简化**：environments/projects 每进程存储（context-policy 成员检查 #44 与 soul `managesScope` 已于 2026-09-22 接目录收口）。
 5. **qm-soul 二期**：段⑮ onboarding 已于 2026-09-22 收口（Q4）；段⑩⑪ 随 slack delivery 不移植登记有意偏差；段⑫ grantedHandles 已于 2026-09-22 收口（composer 段位 + 授权句柄 read 阶梯）；登记偏差 #55（源码词汇）、#55b（gateway 块 envelope 门控，有意行为差异）；5.2 飞书真机静默腿。
 
@@ -122,7 +122,7 @@ qm 的产品灵魂层 = **16 段顺序组装管线 + 三模式协议帧 + soul �
 2. **明确挂起**（connectors/oauth.ts、impersonation、Fly/AWS PRD（2026-09-22 拍板暂缓）、5.2 真机 e2e）——均有登记与触发条件；
 3. **有意偏差**（#55 源码词汇、#55b gateway 门控、lane-A 简化、每进程存储、段⑩⑪ slack delivery 不移植、publish 维持诚实不可用）——已自文档化，属架构决策而非缺口。
 
-基线侧 qm 自 2026-09-05 起无移动，不产生新差异。第三批（2026-09-22）已收口：X3b 最小版 + createPlayground 存储侧 + X2 核心审计语义。剩余实现类工作 = createPlayground 投递小项（im-bridge 附件面）+ X2 portal 密封流（ImpersonationClaims 机制已备）+ X3b 完整版/scannableCommand/存储分层（第 4 批）+ Q2（依赖 Q0，随偏差挂起）+ 集群 M 多实例。X3a 审计（2026-09-22）已完成。
+基线侧 qm 自 2026-09-05 起无移动，不产生新差异。第三批（2026-09-22）已收口：X3b 最小版 + createPlayground 存储侧 + X2 核心审计语义。第四批 a 段（2026-09-22）已收口：X3b 完整版 scannableCommand 扫描器（qm 语料 24 项移植全绿，沙箱门闭合 `sh -c`/eval/管道等绕过面）。剩余实现类工作 = createPlayground 投递小项（im-bridge 附件面）+ X2 portal 密封流（ImpersonationClaims 机制已备）+ 每作用域策略存储/CRUD + 分层（4b）+ G6 双引擎收敛决策 + G8 审批联动（4c）+ Q2（依赖 Q0，随偏差挂起）+ 集群 M 多实例。X3a 审计（2026-09-22）已完成。
 
 ---
 
