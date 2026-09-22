@@ -7,7 +7,8 @@
  * results for webhooks/shares, and the plain-tool throw for MCP calls —
  * so harness tools never render a false success.
  */
-import type { CronControlSurface, McpControlSurface, ShareControlSurface, WebhookControlSurface } from '@qm/orchestrator'
+import type { CronControlSurface, McpControlSurface, PlaygroundControlSurface, ShareControlSurface, WebhookControlSurface } from '@qm/orchestrator'
+import { normalizePlaygroundTitle, PLAYGROUND_MIMETYPE, validatePlaygroundHtml } from '@qm/orchestrator'
 import { CONTROL_UNAVAILABLE, type ShareArtifactRequest, type ShareArtifactResult, type Webhook } from '@qm/types'
 import { createCronControl, type CronControlDeps } from './cron-control.ts'
 import { WEBHOOK_SCHEMES, redactWebhook, type CreateWebhookInput, type Webhook as WebhookRecord, type WebhookStore } from './webhook-store.ts'
@@ -183,11 +184,41 @@ export function createToolControlSurfaces(deps: ToolControlDeps): {
   webhooks?: WebhookControlSurface
   mcp?: McpControlSurface
   share?: ShareControlSurface
+  playgrounds?: PlaygroundControlSurface
 } {
   return {
     ...(deps.cron ? { crons: cronControl(deps) } : {}),
     ...(deps.webhooks ? { webhooks: webhookControl(deps) } : {}),
     ...(deps.mcp ? { mcp: mcpControl(deps) } : {}),
     ...(deps.grants ? { share: shareControl(deps) } : {}),
+    ...(deps.files ? { playgrounds: playgroundControl(deps) } : {}),
+  }
+}
+
+/**
+ * T5 storage-side playground creation (qm `playgrounds/playground.ts`
+ * parity): validate + normalize, then write through the viewer file
+ * store. The artifact lands in the actor's Files (list/content/share
+ * faces); turn-attachment delivery converges with the im-bridge
+ * attachment slice.
+ */
+function playgroundControl(deps: ToolControlDeps): PlaygroundControlSurface {
+  return {
+    async createPlayground(input: { title: string; html: string }) {
+      const files = deps.files?.()
+      if (!files || !deps.actorId) {
+        throw new Error('the playground is not available on this deployment')
+      }
+      validatePlaygroundHtml(input.html)
+      const title = normalizePlaygroundTitle(input.title)
+      const stored = await files.uploadForViewer(deps.actorId, {
+        scopeId: `personal:${deps.actorId}`,
+        name: `${title}.html`,
+        mimetype: PLAYGROUND_MIMETYPE,
+        bytes: Buffer.from(input.html, 'utf8'),
+      })
+      if (!stored) throw new Error('playground storage is not available on this deployment')
+      return { kind: 'playground' as const, artifactId: stored.id, title }
+    },
   }
 }

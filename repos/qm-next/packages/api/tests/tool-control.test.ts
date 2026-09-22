@@ -208,3 +208,38 @@ test('unwired stores answer CONTROL_UNAVAILABLE instead of pretending success', 
   if ('crons' in refused) return assert.fail('missing actor must answer control_unavailable')
   assert.equal(refused.code, 'control_unavailable')
 })
+
+test('playground surface: creates through the file store with qm title/validation parity', async () => {
+  const fileStore = createMemoryFileStore({ blobTransfer: createMemoryBlobTransfer(), grants: createMemoryGrantLedger() })
+  const surfaces = createToolControlSurfaces({ actorId: 'feishu:ada', orgScope: 'org:test', files: () => fileStore })
+  assert.ok(surfaces.playgrounds)
+
+  const artifact = await surfaces.playgrounds.createPlayground({ title: '  wave   demo ', html: '<p>hi</p>' })
+  assert.equal(artifact.kind, 'playground')
+  assert.equal(artifact.title, 'wave demo')
+
+  const opened = await fileStore.openForViewer(artifact.artifactId, 'feishu:ada')
+  assert.ok(opened)
+  assert.equal(opened.name, 'wave demo.html')
+  assert.equal(opened.mimetype, 'text/html')
+  assert.equal(opened.bytes.toString('utf8'), '<p>hi</p>')
+  assert.equal(opened.ownerScopeId, 'personal:feishu:ada')
+})
+
+test('playground surface: honest failures for missing store, missing actor, and bad documents', async () => {
+  const unwired = createToolControlSurfaces({ actorId: 'feishu:ada', orgScope: 'org:test' })
+  assert.equal(unwired.playgrounds, undefined)
+
+  const fileStore = createMemoryFileStore({ blobTransfer: createMemoryBlobTransfer(), grants: createMemoryGrantLedger() })
+  const noActor = createToolControlSurfaces({ orgScope: 'org:test', files: () => fileStore })
+  assert.ok(noActor.playgrounds)
+  await assert.rejects(noActor.playgrounds.createPlayground({ title: 't', html: '<p>x</p>' }), /not available/)
+
+  const surfaces = createToolControlSurfaces({ actorId: 'feishu:ada', orgScope: 'org:test', files: () => fileStore })
+  assert.ok(surfaces.playgrounds)
+  await assert.rejects(surfaces.playgrounds.createPlayground({ title: 't', html: '   ' }), /playground HTML is empty/)
+  await assert.rejects(
+    surfaces.playgrounds.createPlayground({ title: 't', html: 'x'.repeat(512_001) }),
+    /keep it under 512000/,
+  )
+})

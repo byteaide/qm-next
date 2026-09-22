@@ -965,7 +965,8 @@ export function createPiTools(ref: ToolContextRef, opts?: PiToolsOptions): ToolD
     description:
       'Create a small interactive playground only when the person asks to see, play with, or step through a mechanism. ' +
       'Provide a self-contained HTML document with inline CSS and JavaScript; the browser runs it in an isolated frame ' +
-      'without network access. The playground is attached to the turn automatically, so do not add a marker or URL to the reply.',
+      'without network access. The playground is saved to Files, where the person can open it; turn-attachment ' +
+      'delivery is not wired yet, so mention where it landed if it matters.',
     parameters: Type.Object({
       title: Type.String({ description: 'Short title shown above the playground.' }),
       html: Type.Optional(Type.String({ description: 'Self-contained HTML document or fragment.' })),

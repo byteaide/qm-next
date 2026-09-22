@@ -47,6 +47,9 @@ export type McpControlSurface = Pick<ToolContext, 'mcpToolDefs' | 'callMcpTool'>
 /** Control-plane port for artifact sharing (T4 wiring). */
 export type ShareControlSurface = Pick<ToolContext, 'shareArtifact'>
 
+/** Control-plane port for playground artifacts (T5 wiring): storage-side creation through the api file store. */
+export type PlaygroundControlSurface = Pick<ToolContext, 'createPlayground'>
+
 export interface SandboxToolContextDeps {
   sandbox: Sandbox
   handle: SandboxHandle
@@ -68,6 +71,8 @@ export interface SandboxToolContextDeps {
   mcp?: McpControlSurface
   /** Artifact sharing (@qm/acl grant ledger behind the adapter). */
   share?: ShareControlSurface
+  /** Playground creation (@qm/api file store behind the adapter). */
+  playgrounds?: PlaygroundControlSurface
   /**
    * Shared-file face (Q3, segment ⑫): granted handles the conversation
    * audience may read through `shared/<name>` paths. read() resolves
@@ -126,6 +131,7 @@ export function createSandboxToolContext(deps: SandboxToolContextDeps): ToolCont
   const webhooks = deps.webhooks
   const mcp = deps.mcp
   const share = deps.share
+  const playgrounds = deps.playgrounds
   const sharedFiles = deps.sharedFiles
 
   /**
@@ -255,7 +261,9 @@ export function createSandboxToolContext(deps: SandboxToolContextDeps): ToolCont
     },
 
     publish: async (_input: PublishInput): Promise<PublishResult> => unavailable('publishing'),
-    createPlayground: async (_input: { title: string; html: string }) => unavailable('the playground'),
+    createPlayground: playgrounds
+      ? (input) => playgrounds.createPlayground(input)
+      : async (_input: { title: string; html: string }) => unavailable('the playground'),
 
     memorySearch: async () => null,
     memoryRead: async () => null,

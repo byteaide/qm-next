@@ -38,8 +38,10 @@ export {
   createSandboxToolContext,
   type CronControlSurface,
   type McpControlSurface,
+  type PlaygroundControlSurface,
   type SandboxToolContextDeps,
   type ShareControlSurface,
   type WebhookControlSurface,
 } from './tool-context.ts'
+export { normalizePlaygroundTitle, validatePlaygroundHtml, PLAYGROUND_MIMETYPE } from './playground.ts'
 export { buildStagePorts, type BuildStagePortsOptions } from './admission-integration.ts'

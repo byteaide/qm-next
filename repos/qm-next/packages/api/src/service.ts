@@ -909,6 +909,7 @@ export class ApiService extends Service<ApiConfig> {
           ...(toolControl.webhooks ? { webhooks: toolControl.webhooks } : {}),
           ...(toolControl.mcp ? { mcp: toolControl.mcp } : {}),
           ...(toolControl.share ? { share: toolControl.share } : {}),
+          ...(toolControl.playgrounds ? { playgrounds: toolControl.playgrounds } : {}),
           ...(sharedFilesDeps()
             ? {
                 sharedFiles: {
