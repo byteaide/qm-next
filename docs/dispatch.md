@@ -46,7 +46,7 @@ Three units run in parallel — recommended batch (Plan C from parity clearance)
 
 When a `Blocked by` resolves, edit the brief to remove the `⚠️ BATCH 2 — BLOCKED` banner and move from blocked table to active table.
 
-> 2026-09-22: `qm-next-c2-monitor-poller` resolved — implemented in `packages/monitors` (live per 2a34735); banner and row removed.
+> 2026-09-22: `qm-next-c2-monitor-poller` resolved — implemented in `packages/monitors` (live per 9df3898, docs sync 2a34735); banner and row removed.
 
 ## Verification gate (all units must pass before merge)
 
