@@ -119,7 +119,7 @@ qm 的产品灵魂层 = **16 段顺序组装管线 + 三模式协议帧 + soul �
 自 2026-09-15 偏差台账开立以来：**12.0 控制面、16.0 长尾、19.0 迁移、20.0 生产化、部署运行时、全部小尾巴（#27/#28/#47a-e）以及灵魂层核心（M-Soul-0..5）均已关闭**。当前 qm 与 qm-next 的全部剩余差异可归为三类：
 
 1. **凭据受限 → 转有意偏差**（2026-09-22：无 ChatGPT 真实凭证，模型面走国产 LLM；codex-device-login + 订阅 OAuth 代码就绪但不再等凭据）；
-2. **明确挂起**（connectors/oauth.ts、impersonation、Fly/AWS PRD（2026-09-22 拍板暂缓）、5.2 真机 e2e）——均有登记与触发条件；
+2. **明确挂起**（connectors/oauth.ts、Fly/AWS PRD（2026-09-22 拍板暂缓）、5.2 真机 e2e）——均有登记与触发条件；
 3. **有意偏差**（#55 源码词汇、#55b gateway 门控、lane-A 简化、每进程存储、段⑩⑪ slack delivery 不移植、publish 维持诚实不可用）——已自文档化，属架构决策而非缺口。
 
 基线侧 qm 自 2026-09-05 起无移动，不产生新差异。第三批（2026-09-22）已收口：X3b 最小版 + createPlayground 存储侧 + X2 核心审计语义。第四批（2026-09-22，同日连续交付）已收口：a 段 scannableCommand 扫描器 + b 段每作用域存储/CRUD/分层 + c 段 G6 收敛决策（ADR-0019）与 G8 审批链路——X3a 审计的差距 G1-G8 至此全部闭合（唯 CommandGate 生产 startup 装配随部署运行时面）。第五批（2026-09-22）已收口：5a createPlayground turn-attachment 投递全链路（含 bridge 空回复不投递的 qm 对齐）+ 5b X2 portal 密封流（/auth/impersonate + stop + 代理身份换面）。剩余实现类工作 = Q2（依赖 Q0，随偏差挂起）+ 集群 M 多实例 + CommandGate 生产 startup 装配（随部署面）。X3a 审计（2026-09-22）已完成。
