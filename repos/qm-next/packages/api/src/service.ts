@@ -62,6 +62,15 @@ import {
 } from '@qm/model'
 import { createMemoryScopeMemory, type ScopeMemory } from '@qm/memory'
 import { renderSecurityPolicyPrompt, resolveSecurityPolicy, type SecurityScreener } from '@qm/security'
+import {
+  configureProductionCommandPolicy,
+  createCommandPolicyRegistry,
+  registerDefaultPolicies,
+  PRODUCTION_DEFAULT_POLICY_ID,
+  QM_COMMAND_POLICY_ENV,
+  type CommandPolicyRegistry,
+} from '@qm/security'
+import type { CommandGate } from '@qm/types'
 import { onboardingBlockFor, renderComputerBlock, renderSharedFilesBlock, type OnboardingTurnDeps } from '@qm/orchestrator'
 import { createMcpServerStore, createMcpToolService, type McpServerStore, type McpToolService } from '@qm/mcp'
 import {
@@ -254,6 +263,19 @@ export interface ApiConfig {
    * floor (composePolicy semantics — the floor evaluates first).
    */
   commandPolicyStore?: CommandPolicyStore
+  /**
+   * Production invariant (ADR-0002, plan §2.2): when true, boot refuses
+   * (CommandPolicyNotConfigured) unless a command policy is selected via
+   * QM_COMMAND_POLICY env or commandPolicyId config. Dev boots default to
+   * PRODUCTION_DEFAULT_POLICY_ID when unset.
+   */
+  production?: boolean
+  /**
+   * Static CommandPolicyRegistry selection (QM_COMMAND_POLICY contract).
+   * Overrides the env var when set; unknown ids fail at boot through
+   * assertProductionConfigured.
+   */
+  commandPolicyId?: string
   /** Dev default system prompt (explicit operator override; empty soul default). */
   systemPrompt?: string
   /** Security posture the rendered policy prompt resolves from (default auto). */
@@ -441,6 +463,8 @@ export const Config = Schema.object({
     defaultTimeoutSec: Schema.number().description('Per-command exec timeout in seconds'),
     defaultTimeoutCeilingSec: Schema.number().description('Hard ceiling for per-command exec timeouts in seconds'),
     commandPolicy: Schema.string().description('Sandbox command gate: default-denylist (default, catastrophic-primitive floor) | off'),
+    production: Schema.boolean().description('Production invariant (ADR-0002): boot refuses unless QM_COMMAND_POLICY (or commandPolicyId) selects a policy'),
+    commandPolicyId: Schema.string().description('Static CommandPolicyRegistry selection; overrides QM_COMMAND_POLICY env (baseline-deny | default-denylist | allowlist | rule-engine)'),
   }).description('Sandbox-backed tool execution; set any field (e.g. defaultTimeoutSec) to give every turn a ToolContext'),
   anthropicApiKey: Schema.string().description('Anthropic key for the pi harness'),
   openaiApiKey: Schema.string().description('OpenAI key for the pi harness'),
@@ -589,6 +613,17 @@ export class ApiService extends Service<ApiConfig> {
 
   /** Sandbox backend when tool execution is configured; torn down on dispose. */
   sandbox?: Sandbox
+
+  /**
+   * Static CommandPolicyRegistry (ADR-0002): assembled at boot via
+   * configureProductionCommandPolicy; the fail-fast guard lives there,
+   * this member exposes the selected gate for future consumers (runs
+   * observability already ticks decision metrics through the gate).
+   */
+  commandGate?: CommandGate
+
+  /** Registry behind `commandGate`; exposed for admin introspection lanes. */
+  commandPolicyRegistry?: CommandPolicyRegistry
 
   /** Monitor poller (cluster 2) when `monitorPoller` is on; stopped on dispose. */
   monitorPoller?: MonitorPoller
@@ -1614,6 +1649,36 @@ export class ApiService extends Service<ApiConfig> {
       { secrets: this.config.secrets },
     )
     this.app = app
+    // ADR-0002 / plan §2.2 — production CommandGate assembly (X3b final
+    // slice): the static registry lane converges on the same rule engine
+    // the sandbox provision uses (ADR-0019). Operator-registered policies
+    // win (defaults never overwrite), so rule-engine goes in first with a
+    // live resolvePolicy hook over the per-scope store; then
+    // configureProductionCommandPolicy registers the built-ins, applies
+    // the QM_COMMAND_POLICY selection, and fail-fasts (listen never
+    // happens without a policy in production). Rollback above closes the
+    // app if this throws.
+    const commandRegistry = createCommandPolicyRegistry()
+    if (commandPolicyStore) {
+      registerDefaultPolicies(commandRegistry, {
+        policies: ['rule-engine'],
+        ruleEngineResolve: async (request) => {
+          const stored = await commandPolicyStore.get(request.context.scopeId)
+          return stored?.policy
+        },
+      })
+    }
+    const commandEnvSource = this.config.commandPolicyId
+      ? { [QM_COMMAND_POLICY_ENV]: this.config.commandPolicyId }
+      : undefined
+    this.commandPolicyRegistry = commandRegistry
+    this.commandGate = configureProductionCommandPolicy(commandRegistry, {
+      production: this.config.production === true,
+      ...(commandEnvSource ? { env: commandEnvSource } : {}),
+    })
+    if (this.config.commandPolicyId && this.config.commandPolicyId !== PRODUCTION_DEFAULT_POLICY_ID) {
+      console.log(`[api] command policy: ${this.config.commandPolicyId} (static registry, ADR-0002)`)
+    }
     try {
       await app.listen({ port: this.config.port ?? 0, host: this.config.host ?? '127.0.0.1' })
     } catch (err) {

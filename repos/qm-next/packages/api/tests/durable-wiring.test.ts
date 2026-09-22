@@ -12,6 +12,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { Pool } from 'pg'
 import { Context, Service } from '@qm/cordis'
+import { createMemoryCommandPolicyStore } from '../src/services/command-policy-store.ts'
 import { ApiService } from '../src/index.ts'
 
 const pgUrl = process.env.QM_NEXT_PG_URL
@@ -78,6 +79,109 @@ test('memory boot: /readyz reports the database disabled and /healthz stays ok',
   } finally {
     await dispose?.()
   }
+})
+
+// ADR-0002 / plan §2.2 — CommandGate production startup assembly (X3b
+// final slice): the composition root assembles the static registry lane
+// via configureProductionCommandPolicy before listen; the fail-fast
+// contract is that a production boot without a selected policy never
+// serves, while dev boots fall back to PRODUCTION_DEFAULT_POLICY_ID.
+test('command gate: dev boot assembles the registry with the default policy', async () => {
+  const svc = new ApiService(new Context(), {
+    port: 0,
+    secrets: ['test-secret-for-command-gate-dev'],
+  })
+  const dispose = await svc[Service.init]()
+  try {
+    assert.ok(svc.commandGate, 'every boot assembles the static gate lane')
+    assert.ok(svc.commandPolicyRegistry, 'registry exposed alongside the gate')
+    assert.equal(
+      svc.commandPolicyRegistry!.activeId(),
+      'baseline-deny',
+      'dev boot falls back to PRODUCTION_DEFAULT_POLICY_ID when QM_COMMAND_POLICY is unset',
+    )
+  } finally {
+    await dispose?.()
+  }
+})
+
+test('command gate: production boot without a policy selection refuses to start', async () => {
+  const svc = new ApiService(new Context(), {
+    port: 0,
+    secrets: ['test-secret-for-command-gate-prod'],
+    production: true,
+  })
+  await assert.rejects(
+    () => svc[Service.init](),
+    /QM_COMMAND_POLICY is not set/,
+    'fail-fast: production must never serve without an explicit command policy (ADR-0002)',
+  )
+  assert.equal(svc.address.host, '', 'listen never happened on the rejected boot (address stays unbound)')
+})
+
+test('command gate: production boot with commandPolicyId serves and the gate converges on per-scope rules', async () => {
+  const store = createMemoryCommandPolicyStore()
+  // Stored scope policy: allowlist mode with a single `ls*` allow — the
+  // same shape the sandbox provision composes over the org floor.
+  await store.set('org:default', { mode: 'allowlist', rules: [{ pattern: 'ls.*', decision: 'allow' }] })
+  const svc = new ApiService(new Context(), {
+    port: 0,
+    secrets: ['test-secret-for-command-gate-select'],
+    production: true,
+    commandPolicyId: 'rule-engine',
+    commandPolicyStore: store,
+  })
+  const dispose = await svc[Service.init]()
+  try {
+    assert.equal(svc.commandPolicyRegistry!.activeId(), 'rule-engine')
+    // ADR-0019 convergence: the rule-engine policy inside the gate
+    // resolves the stored per-scope rules and evaluates them through the
+    // same evaluateCommandPolicy the sandbox provision runs.
+    const allowed = await svc.commandGate!.evaluate(
+      {
+        id: 'req-cmd-gate-1',
+        runId: 'run-1',
+        attemptId: 'attempt-1',
+        class: 'shell',
+        args: { argv: ['ls', '.'] },
+        context: { scopeId: 'org:default', principalId: 'user-1', surface: 'web' },
+        rawText: 'ls .',
+        ts: Date.now(),
+      },
+      'rule-engine',
+    )
+    assert.equal(allowed.decision, 'allow', 'command matching the stored allow rule passes the gate')
+    const denied = await svc.commandGate!.evaluate(
+      {
+        id: 'req-cmd-gate-2',
+        runId: 'run-1',
+        attemptId: 'attempt-2',
+        class: 'shell',
+        args: { argv: ['rm', '-rf', '.'] },
+        context: { scopeId: 'org:default', principalId: 'user-1', surface: 'web' },
+        rawText: 'rm -rf .',
+        ts: Date.now(),
+      },
+      'rule-engine',
+    )
+    assert.equal(denied.decision, 'deny', 'allowlist mode refuses commands outside the stored rules')
+    assert.equal(denied.requestId, 'req-cmd-gate-2')
+  } finally {
+    await dispose?.()
+  }
+})
+
+test('command gate: production boot with an unknown commandPolicyId refuses to start', async () => {
+  const svc = new ApiService(new Context(), {
+    port: 0,
+    secrets: ['test-secret-for-command-gate-unknown'],
+    production: true,
+    commandPolicyId: 'does-not-exist',
+  })
+  await assert.rejects(
+    () => svc[Service.init](),
+    (err: unknown) => err instanceof Error && /unknown CommandPolicy/.test(err.message),
+  )
 })
 
 test('durable boot: every twin table lands at boot; readyz probes up; monitoring summary wired', { skip: pgUrl ? false : 'QM_NEXT_PG_URL not set' }, async (t) => {
