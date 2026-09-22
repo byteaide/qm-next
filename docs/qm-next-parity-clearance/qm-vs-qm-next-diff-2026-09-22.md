@@ -81,8 +81,8 @@ qm 的产品灵魂层 = **16 段顺序组装管线 + 三模式协议帧 + soul �
 | 用户模型登录 | codex-device-login 与订阅 OAuth 均 502 桩 | 🔴 依赖 ChatGPT 凭据 |
 | Connectors 核心 | 后台执行/oauth-flow/consent-link/browser-session/secret-envelope/emoji-upload 已上线；**`connectors/oauth.ts`（PROVIDERS+well-known+PKCE+refresh，qm 626 行）仍未移植** | 🟡 |
 | ToolContext 控制面 | background 已真实（进程注册表）；soul 已接线；**publish/playground/MCP/shareArtifact/cron*/webhook* 仍诚实不可用**（`tool-context.ts:173,183,248-259`） | 🟡 |
-| Context-policy 成员检查 | lane-A 接受任意 principalId（偏差 #44 自文档化） | 🟡 刻意简化 |
-| soul 共享 scope 写校验 | `managesScope` 目录检查未接（`soul-routes.ts:1-6` 自文档，随 13.0） | 🟡 |
+| Context-policy 成员检查 | 目录成员校验已接：directory 在线时 GET/PUT 越权 403（qm `memberScope` 阶梯），离线保持 lane-A 开放 | 🟢 |
+| soul 共享 scope 写校验 | `managesScope` 已接目录（qm `createCanManageScope` 语义：personal=本人、group=成员、channel=私有成员）；未接目录时维持拒绝 | 🟢 |
 | Portal | 包已就绪 + SSO；**impersonation 路由未移植**；playground 匿名会话随 13.0 | 🟡 |
 | Command policy 模拟 | `command-policy-simulate` 仍 501（`admin-routes.ts:238-244`，等策略引擎收敛里程碑） | 🟡 |
 | environments/projects 存储 | 刻意每进程（`@qm/api/src/services/`，见 #816 评论） | 🟡 有意为之 |
@@ -95,7 +95,7 @@ qm 的产品灵魂层 = **16 段顺序组装管线 + 三模式协议帧 + soul �
 1. **依赖受限（凭据）**：codex-device-login（502 `oauth_start_failed`）、订阅 OAuth（502 `oauth_complete_failed`）——等 ChatGPT 凭据（`user-model-auth-routes.ts:55,83`）。
 2. **未移植模块**：`connectors/oauth.ts`（IM provider OAuth 栈，注释称"待 P5 18.0 IM providers 落地"）、portal impersonation 路由、Fly/AWS 部署 provider（未来 PRD）。
 3. **功能桩**：`command-policy-simulate` 501；ToolContext 的 publish/playground/MCP/shareArtifact/cron/webhook 诚实不可用。
-4. **lane-A 刻意简化**：context-policy 成员检查（#44）、soul `managesScope`、environments/projects 每进程存储。
+4. **lane-A 刻意简化**：environments/projects 每进程存储（context-policy 成员检查 #44 与 soul `managesScope` 已于 2026-09-22 接目录收口）。
 5. **qm-soul 二期**：段⑩⑪⑫⑮（依赖 delivery-candidates/signing/apiBaseUrl、ACL grant ledger、onboarding 检测）；登记偏差 #55（源码词汇）、#55b（gateway 块 envelope 门控，有意行为差异）；5.2 飞书真机静默腿。
 
 ---

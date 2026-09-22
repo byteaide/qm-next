@@ -8,6 +8,7 @@
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { createMemoryDirectoryStore } from '@qm/directory'
 import { Context } from '@qm/cordis'
 import { createHarnessRouter, createMockHarness, OrchestratorService } from '@qm/orchestrator'
 import { createMemoryRunStore, createMemorySessionStore } from '@qm/store'
@@ -267,6 +268,51 @@ test('context-policy: defaults, scope validation, bots ledger, optimistic-lock 4
   const missing = await unwired.inject({ method: 'GET', url: '/v1/contexts/policy?principalId=person:ada&scope=channel:C012345', headers: ada })
   assert.equal(missing.statusCode, 404)
   await unwired.close()
+})
+
+test('context-policy: directory member gate returns 403 for principals outside the scope', async () => {
+  const policyStore = createMemoryChannelPolicyStore()
+  const directory = createMemoryDirectoryStore()
+  await directory.apply({
+    provider: 'feishu',
+    instanceId: 'main',
+    people: [
+      { providerUserId: 'ada', type: 'internal' },
+      { providerUserId: 'mallory', type: 'internal' },
+    ],
+    spaces: [
+      { spaceId: 'C012345', kind: 'channel', isPrivate: true },
+      { spaceId: 'G1', kind: 'group' },
+    ],
+    spaceMembers: [
+      { spaceId: 'C012345', providerUserId: 'ada' },
+      { spaceId: 'G1', providerUserId: 'mallory' },
+    ],
+    syncedAt: Date.now(),
+  })
+  const deps = { ...baseDeps(), directory: { directory }, contextPolicy: { channelPolicy: policyStore } }
+  const app = createApiServer(deps, OPTS)
+  const ada = auth(await token('person:ada'))
+
+  const memberGet = await app.inject({ method: 'GET', url: '/v1/contexts/policy?principalId=feishu:ada&scope=channel:C012345', headers: ada })
+  assert.equal(memberGet.statusCode, 200)
+
+  const outsiderGet = await app.inject({ method: 'GET', url: '/v1/contexts/policy?principalId=feishu:mallory&scope=channel:C012345', headers: ada })
+  assert.equal(outsiderGet.statusCode, 403)
+  assert.equal(outsiderGet.json().error, 'forbidden')
+
+  const memberPut = await app.inject({ method: 'PUT', url: '/v1/contexts/policy', headers: ada, payload: { principalId: 'feishu:ada', scope: 'channel:C012345', orders: 'ok' } })
+  assert.equal(memberPut.statusCode, 200)
+
+  const outsiderPut = await app.inject({ method: 'PUT', url: '/v1/contexts/policy', headers: ada, payload: { principalId: 'feishu:mallory', scope: 'channel:C012345', orders: 'ok' } })
+  assert.equal(outsiderPut.statusCode, 403)
+
+  const groupMember = await app.inject({ method: 'PUT', url: '/v1/contexts/policy', headers: ada, payload: { principalId: 'feishu:mallory', scope: 'group:G1', orders: 'group orders' } })
+  assert.equal(groupMember.statusCode, 200)
+
+  const unknownPrincipal = await app.inject({ method: 'PUT', url: '/v1/contexts/policy', headers: ada, payload: { principalId: 'ghost', scope: 'channel:C012345', orders: 'ok' } })
+  assert.equal(unknownPrincipal.statusCode, 403)
+  await app.close()
 })
 
 test('surface-cache: ingest normalization, policy get/set', async () => {
