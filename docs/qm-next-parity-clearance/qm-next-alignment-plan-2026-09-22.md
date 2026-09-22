@@ -2,7 +2,7 @@
 
 **日期**：2026-09-22
 **来源**：`qm-vs-qm-next-diff-2026-09-22.md` 第 3 节剩余差异清单 + 本轮定向侦察
-**范围**：除 codex-device-login / 订阅 OAuth（凭据门控）与 Fly/AWS（未来 PRD）之外的全部剩余差异
+**范围**：除 codex-device-login / 订阅 OAuth（凭据门控）与 Fly/AWS（2026-09-22 拍板不移植）之外的全部剩余差异
 **方法**：对 `repos/qm/src`（参考实现）与 `repos/qm-next/packages`（现有底座）逐项定量核对，确定每项是**接线**（底座已在）、**移植**（需搬参考实现）还是**评估**（前置不明）。
 
 ---
@@ -57,9 +57,9 @@ qm 参考实现规模：`crons.ts` 489 行、`webhooks.ts` 176 行、`slack/deli
 
 | 条目 | qm 参考 | qm-next 底座 | 性质 |
 |---|---|---|---|
-| Q0 delivery-candidates + signing + apiBaseUrl | `slack/delivery.ts` 489 行 | 无移植 | **移植**（平台中立化，`tier:thinking`——本规划唯一需要设计决策的移植） |
-| Q1 段⑩ home channel | composer 段位 | 槽位已按 ADR-0018 预留 | 接线（依赖 Q0） |
-| Q2 段⑪ cron 多目的地交付菜单 | composer 段位 | 槽位预留 | 接线（依赖 **Q0 + T1**） |
+| Q0 delivery-candidates + signing + apiBaseUrl | `slack/delivery.ts` 489 行 | 无移植 | ❌ **不移植**（2026-09-22 拍板：slack delivery 栈不移植；Q1/Q2 槽位按 ADR-0018 预留，段⑩⑪ 随之登记有意偏差——见台账 5.结论） |
+| Q1 段⑩ home channel | composer 段位 | 槽位已按 ADR-0018 预留 | 随 Q0 不移植，登记有意偏差 |
+| Q2 段⑪ cron 多目的地交付菜单 | composer 段位 | 槽位预留 | 随 Q0 不移植，登记有意偏差（原"依赖 Q0 + T1"挂起） |
 | Q3 段⑫ grantedHandles（共享文件 ACL） | `primitives.ts` + `resolution-service.ts` | `@qm/acl` grant store 已在 | **接线**（ACL 侧）+ composer 段位 |
 | Q4 段⑮ onboarding 检测 | `onboarding.ts` 75 行 | 无 | **小移植** |
 
@@ -69,14 +69,16 @@ qm 参考实现规模：`crons.ts` 489 行、`webhooks.ts` 176 行、`slack/deli
 
 ---
 
-## 4. 集群 M — 多实例前置（Fly/AWS 硬前置）
+## 4. 集群 M — 多实例前置（⏸ 暂缓，2026-09-22 拍板）
+
+> **拍板（2026-09-22）**：Fly/AWS 部署 provider **不移植**（原 §6 外部门控行移除）；集群 M 随之与 Fly/AWS 解耦、**暂缓**——独立价值为 qm-next 自身部署运行时面的多实例正确性（当前 Docker 单实例形态够用）。**触发条件 = 生产需要第二实例（扩容/滚动重启/HA）时重启本集群**。
 
 | 条目 | 现状 | 工作 | 验证 |
 |---|---|---|---|
 | M1 environments/projects PG twin | `api/src/services/` 每进程（#816 评论） | 存储族 PG twin 化，沿用 `withSchemaLock` 暖建模式 | 迁移演练 + 双进程读一致测试 |
 | M2 多实例心跳真交接 | `instance_heartbeats` 表在；`TRUNCATE_ONLY` 仅 notes | 租约交接语义：心跳超时 → 任务/部署 reassign | 双进程演练：kill 一实例，另一实例接管 |
 
-**性质**：M1 先行（M2 的 reassign 依赖共享存储视图）。完成后 Fly/AWS PRD 的最大技术不确定项消除。
+**性质**：M1 先行（M2 的 reassign 依赖共享存储视图）。暂缓期间每进程存储与心跳现状（🟡 行）维持"有意为之/挂起"登记，不视为缺口。
 
 ---
 
@@ -87,7 +89,7 @@ qm 参考实现规模：`crons.ts` 489 行、`webhooks.ts` 176 行、`slack/deli
 | X3a command-policy 引擎差距审计 | ✅ 完成（2026-09-22，`x3a-command-policy-audit-2026-09-22.md`）：双引擎休眠为最高差距；X3b 最小版不被 scannableCommand 阻塞 | 已产出解锁路径 | 审计报告 |
 | X3b command-policy-simulate 501 → 实现 | ✅ 完成（2026-09-22，4a/4b/4c）：最小版（引擎唤醒 + safe-regex + inline policy）→ scannableCommand 全量移植（qm 语料全绿）→ 每作用域存储/CRUD/分层（simulate qm 保真 + composePolicy/evaluateCommandWithLayer + per-scope policyFor）→ G6 收敛（ADR-0019：规则引擎即 CommandGate 的 rule-engine 策略）+ G8 审批链路（ExecResult.policyVerdict → 审批卡 matched/approvalKey）。X3a 差距 G1-G8 全闭合；CommandGate 生产 startup 装配随部署运行时面 | 移植 |
 | X1 connectors/oauth.ts | 无（626 行：PROVIDERS+well-known+PKCE+refresh） | P5 IM providers 落地，或独立拍板 | 移植 |
-| X2 portal impersonation | 核心语义+审计 ✅（2026-09-22：路由已存，补 `impersonate.start/stop` 审计 + 7 条路由测试）；余 portal 侧 `/auth/impersonate` 密封流（ImpersonationClaims 机制已备） | tier:standard | 移植 |
+| X2 portal impersonation | ✅ 完成（2026-09-22 第 5 批 5b）：核心语义+审计（`impersonate.start/stop` 审计 + 7 条路由测试）→ portal 侧 `/auth/impersonate` 密封流（门 + core 审计 + cookie 封装 + stop + 代理 principal 换面 `imp` 声明，逐请求 admin 复核；e2e 过真实 api+web-ui+portal） | 移植 |
 
 ---
 
@@ -97,7 +99,8 @@ qm 参考实现规模：`crons.ts` 489 行、`webhooks.ts` 176 行、`slack/deli
 |---|---|---|
 | codex-device-login + 订阅 OAuth | ChatGPT 凭据 | 代码就绪，凭据到位即验证 `user-model-auth-routes.ts:55,83` 链路 |
 | 5.2 飞书真机静默腿 | FEISHU 凭据 + 人工发消息 | 断言 ambient 群聊未寻址消息零投递 |
-| Fly/AWS provider | 集群 M 完成 | 开 PRD |
+
+> Fly/AWS provider 已于 2026-09-22 拍板**不移植**（原门控行移除，见 §4 拍板注记）。
 
 ---
 
@@ -113,12 +116,14 @@ qm 参考实现规模：`crons.ts` 489 行、`webhooks.ts` 176 行、`slack/deli
   T5 评估（独立，报告产出）
 
 第 3 批:
-  Q2 (依赖 Q0+T1) → X2 → M1 → M2
+  Q2 (依赖 Q0+T1，随偏差挂起) → X2 → M1 → M2（集群 M 2026-09-22 拍板暂缓）
   X3a 审计建议随第 1 批并行派出（只读，不占包 ownership）
 
 第 4 批（条件触发）:
-  X3b / X1 / Fly-AWS PRD / 凭据门控三项
+  X3b / X1 / 凭据门控两项（Fly-AWS PRD 已于 2026-09-22 拍板不移植，移除）
 ```
+
+> **2026-09-22 收尾拍板**：第 1-5 批全部完成（含 X3b 4a/4b/4c、5a/5b）。Fly/AWS 不移植；集群 M 暂缓（触发 = 需要多实例部署）。实现面剩余仅 CommandGate 生产 startup 装配（随部署运行时面）。
 
 **包 ownership 矩阵**（避免并行冲突）：
 - 单元一：`packages/api`（routes）、`packages/triggers`
