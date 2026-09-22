@@ -88,6 +88,8 @@ export {
   createMemoryConnectorSurface,
   createMemoryWebhookStore,
   createMemoryBlobTransfer,
+  createCronControl,
+  createToolControlSurfaces,
   deploymentView,
   parseBotLedger,
   THINKING_LEVELS,

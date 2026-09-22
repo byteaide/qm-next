@@ -22,5 +22,12 @@ export {
   type RuntimeRouteTarget,
 } from './runtime-choice.ts'
 export { createMockHarness, mockProfile, type MockHarness, type MockHarnessOptions, type MockTurnStep } from './mock-harness.ts'
-export { createSandboxToolContext, type SandboxToolContextDeps } from './tool-context.ts'
+export {
+  createSandboxToolContext,
+  type CronControlSurface,
+  type McpControlSurface,
+  type SandboxToolContextDeps,
+  type ShareControlSurface,
+  type WebhookControlSurface,
+} from './tool-context.ts'
 export { buildStagePorts, type BuildStagePortsOptions } from './admission-integration.ts'

@@ -1,9 +1,11 @@
 /**
  * P1 ToolContext assembly over a Sandbox: execute/read/write/computer status
- * and background process sessions are real; every M3 surface (publish,
- * memory, skills, crons, webhooks, soul, playground, MCP) answers with its
- * graceful-unavailable value so harness tools render honest messages.
- * Parity source: qm src/tools/primitives.ts createToolContext (P1 face).
+ * and background process sessions are real; memory surfaces answer their
+ * graceful-unavailable values so harness tools render honest messages. The
+ * control-plane faces (cron×9, webhook×3, MCP, shareArtifact) delegate to
+ * the optional composition ports below and keep CONTROL_UNAVAILABLE when a
+ * port is not wired. Parity source: qm src/tools/primitives.ts
+ * createToolContext (P1 face + control ops).
  */
 import {
   CONTROL_UNAVAILABLE,
@@ -11,6 +13,7 @@ import {
   hasParentPathSegment,
   supportsProcessSessions,
   type ComputerStatus,
+  type ControlUnavailable,
   type ExecResult,
   type McpToolDescriptor,
   type ProcessSandbox,
@@ -28,10 +31,27 @@ import {
 } from '@qm/types'
 import { createNullLedger, type ToolLedger } from '@qm/runs'
 
+/** Control-plane port for the cron tool surface (T1 wiring): full results, never CONTROL_UNAVAILABLE — adapters answer it themselves when their store is missing. */
+export type CronControlSurface = Pick<
+  ToolContext,
+  'cronCreate' | 'cronList' | 'cronGet' | 'cronRuns' | 'cronPatch' | 'cronDelete' | 'cronSetEnabled' | 'cronRun' | 'cronRetarget'
+>
+
+/** Control-plane port for the webhook tool surface (T2 wiring). */
+export type WebhookControlSurface = Pick<ToolContext, 'webhookCreate' | 'webhookList' | 'webhookDisable'>
+
+/** Control-plane port for the MCP tool surface (T3 wiring). */
+export type McpControlSurface = Pick<ToolContext, 'mcpToolDefs' | 'callMcpTool'>
+
+/** Control-plane port for artifact sharing (T4 wiring). */
+export type ShareControlSurface = Pick<ToolContext, 'shareArtifact'>
+
 export interface SandboxToolContextDeps {
   sandbox: Sandbox
   handle: SandboxHandle
   scopeId: ScopeId
+  /** Turn actor principal id; control surfaces own resources under it when the composition binds one. */
+  actorId?: string
   execTimeoutMs?: number
   execTimeoutCeilingMs?: number
   processRegistrar?: ProcessRegistrar
@@ -39,6 +59,14 @@ export interface SandboxToolContextDeps {
   runId?: string
   attempt?: number
   ledger?: ToolLedger
+  /** Cron control plane (@qm/triggers store + scheduler behind the api adapter). */
+  crons?: CronControlSurface
+  /** Webhook control plane (@qm/api webhook store behind the adapter). */
+  webhooks?: WebhookControlSurface
+  /** MCP connector service (@qm/mcp tool service). */
+  mcp?: McpControlSurface
+  /** Artifact sharing (@qm/acl grant ledger behind the adapter). */
+  share?: ShareControlSurface
   /**
    * ADR-0018 guidance seam (M-Soul-2.4): conversation-scope standing
    * instructions. Read returns the effective soul (org federation composed);
@@ -83,6 +111,10 @@ function unavailable(method: string): never {
 
 export function createSandboxToolContext(deps: SandboxToolContextDeps): ToolContext {
   const { sandbox, handle, scopeId, processRegistrar } = deps
+  const crons = deps.crons
+  const webhooks = deps.webhooks
+  const mcp = deps.mcp
+  const share = deps.share
   const ceiling = deps.execTimeoutCeilingMs ?? DEFAULT_EXEC_TIMEOUT_CEILING_MS
   const processes: ProcessSandbox | null = supportsProcessSessions(sandbox) ? sandbox : null
 
@@ -179,8 +211,8 @@ export function createSandboxToolContext(deps: SandboxToolContextDeps): ToolCont
     memoryRewrite: async () => null,
     history: async () => [],
 
-    mcpToolDefs: (): McpToolDescriptor[] => [],
-    callMcpTool: async () => unavailable('MCP tools'),
+    mcpToolDefs: mcp ? () => mcp.mcpToolDefs() : (): McpToolDescriptor[] => [],
+    callMcpTool: mcp ? (name, args) => mcp.callMcpTool(name, args) : async () => unavailable('MCP tools'),
 
     async backgroundStart(command: string) {
       if (!processes) throw new CapabilityUnsupportedError(sandbox.profile.backend, 'background processes')
@@ -245,18 +277,18 @@ export function createSandboxToolContext(deps: SandboxToolContextDeps): ToolCont
       throw new CapabilityUnsupportedError(sandbox.profile.backend, 'background watch')
     },
 
-    cronCreate: async () => CONTROL_UNAVAILABLE,
-    cronList: async () => CONTROL_UNAVAILABLE,
-    cronGet: async () => CONTROL_UNAVAILABLE,
-    cronRuns: async () => CONTROL_UNAVAILABLE,
-    cronPatch: async () => CONTROL_UNAVAILABLE,
-    cronDelete: async () => CONTROL_UNAVAILABLE,
-    cronSetEnabled: async () => CONTROL_UNAVAILABLE,
-    cronRun: async () => CONTROL_UNAVAILABLE,
-    cronRetarget: async () => CONTROL_UNAVAILABLE,
-    webhookCreate: async () => CONTROL_UNAVAILABLE,
-    webhookList: async () => CONTROL_UNAVAILABLE,
-    webhookDisable: async () => CONTROL_UNAVAILABLE,
+    cronCreate: crons ? (req) => crons.cronCreate(req) : async () => CONTROL_UNAVAILABLE,
+    cronList: crons ? () => crons.cronList() : async () => CONTROL_UNAVAILABLE,
+    cronGet: crons ? (id) => crons.cronGet(id) : async () => CONTROL_UNAVAILABLE,
+    cronRuns: crons ? (id, req) => crons.cronRuns(id, req) : async () => CONTROL_UNAVAILABLE,
+    cronPatch: crons ? (id, req) => crons.cronPatch(id, req) : async () => CONTROL_UNAVAILABLE,
+    cronDelete: crons ? (id) => crons.cronDelete(id) : async () => CONTROL_UNAVAILABLE,
+    cronSetEnabled: crons ? (id, enabled) => crons.cronSetEnabled(id, enabled) : async () => CONTROL_UNAVAILABLE,
+    cronRun: crons ? (id) => crons.cronRun(id) : async () => CONTROL_UNAVAILABLE,
+    cronRetarget: crons ? (id, destinationKey) => crons.cronRetarget(id, destinationKey) : async () => CONTROL_UNAVAILABLE,
+    webhookCreate: webhooks ? (req) => webhooks.webhookCreate(req) : async () => CONTROL_UNAVAILABLE,
+    webhookList: webhooks ? () => webhooks.webhookList() : async () => CONTROL_UNAVAILABLE,
+    webhookDisable: webhooks ? (id) => webhooks.webhookDisable(id) : async () => CONTROL_UNAVAILABLE,
     soulRead: () => deps.soul?.read() ?? CONTROL_UNAVAILABLE,
     soulWrite: async (content) => {
       if (!deps.soul) return CONTROL_UNAVAILABLE
@@ -265,6 +297,8 @@ export function createSandboxToolContext(deps: SandboxToolContextDeps): ToolCont
       }
       return deps.soul.write(content)
     },
-    shareArtifact: async (_req: ShareArtifactRequest): Promise<ShareArtifactResult> => unavailable('artifact sharing'),
+    shareArtifact: share
+      ? (req: ShareArtifactRequest): Promise<ShareArtifactResult | ControlUnavailable> => share.shareArtifact(req)
+      : async (_req: ShareArtifactRequest): Promise<ShareArtifactResult> => unavailable('artifact sharing'),
   }
 }

@@ -323,3 +323,62 @@ test('guidance: soulWrite denies org scopes (admin surface owns org policy) and 
   assert.deepEqual(allowed, { ok: true, version: 1 })
   assert.deepEqual(writes, ['my voice'])
 })
+
+test('control surfaces: ports execute, absent ports keep the honest unavailable answers', async () => {
+  const created: unknown[] = []
+  const ctx = createSandboxToolContext({
+    sandbox: fakeSandbox(),
+    handle: fakeHandle(),
+    scopeId: 'org:test',
+    actorId: 'person:ada',
+    crons: {
+      cronCreate: async (req) => {
+        created.push(req)
+        return { ok: true, cron: { id: 'cron-1', ownerScopeId: 'org:test', owner: 'person:ada', createdBy: 'person:ada', enabled: true, createdAt: 1, schedule: {} } as never }
+      },
+      cronList: async () => ({ ok: true, crons: [], visible: [] }),
+      cronGet: async () => ({ ok: false, code: 'not_found', message: 'no cron x' }),
+      cronRuns: async () => ({ ok: false, code: 'not_found', message: 'no cron x' }),
+      cronPatch: async () => ({ ok: false, code: 'forbidden', message: 'not your cron' }),
+      cronDelete: async () => ({ ok: true }),
+      cronSetEnabled: async () => ({ ok: false, code: 'forbidden', message: 'not your cron' }),
+      cronRun: async () => ({ ok: true }),
+      cronRetarget: async () => ({ ok: false, code: 'unknown_destination', message: 'nope' }),
+    },
+    webhooks: {
+      webhookCreate: async () => ({ ok: true, webhook: { id: 'wh-1' } as never, url: '/v1/webhooks/incoming/wh-1' }),
+      webhookList: async () => [],
+      webhookDisable: async () => ({ ok: true }),
+    },
+    mcp: {
+      mcpToolDefs: () => [{ name: 'srv1_search', serverId: 'srv1', remoteName: 'search', description: '', inputSchema: {}, readOnly: true }],
+      callMcpTool: async (name) => `called ${name}`,
+    },
+    share: {
+      shareArtifact: async () => ({ ok: true, verb: 'share', type: 'file', id: 'f1', target: { scope: 'org:test', label: 'org' }, permission: 'read' }),
+    },
+  })
+
+  const made = await ctx.cronCreate({ schedule: { everyMs: 1000 }, action: 'ping' })
+  assert.equal(made.ok, true)
+  assert.deepEqual(created, [{ schedule: { everyMs: 1000 }, action: 'ping' }])
+  assert.equal((await ctx.cronList()).ok, true)
+  assert.equal((await ctx.cronGet('x')).ok, false)
+  assert.equal((await ctx.cronRun('cron-1')).ok, true)
+  const webhook = await ctx.webhookCreate({ action: 'relay', verification: { scheme: 'github', secret: 'k' } })
+  assert.equal(webhook.ok, true)
+  assert.deepEqual(ctx.mcpToolDefs().map((t) => t.name), ['srv1_search'])
+  assert.equal(await ctx.callMcpTool('srv1_search', {}), 'called srv1_search')
+  const shared = await ctx.shareArtifact({ type: 'file', id: 'f1', scope: 'org' })
+  assert.equal(shared.ok, true)
+
+  const bare = createSandboxToolContext({ sandbox: fakeSandbox(), handle: fakeHandle(), scopeId: 'org:test' })
+  const unavailable = await bare.cronList()
+  assert.equal(unavailable.ok, false)
+  if (!unavailable.ok) assert.equal(unavailable.code, 'control_unavailable')
+  const bareWebhooks = await bare.webhookList()
+  assert.equal(bareWebhooks.ok, false)
+  assert.deepEqual(bare.mcpToolDefs(), [])
+  await assert.rejects(bare.callMcpTool('x', {}), /MCP tools is not available/)
+  await assert.rejects(bare.shareArtifact({ type: 'file', id: 'f1' }), /artifact sharing is not available/)
+})

@@ -149,3 +149,5 @@ export {
   type UserModelCredentialsStore,
   type UserModelProvider,
 } from './user-model-auth-store.ts'
+export { createCronControl, type CronControlDeps } from './cron-control.ts'
+export { createToolControlSurfaces, type ToolControlDeps } from './tool-control.ts'

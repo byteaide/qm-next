@@ -135,6 +135,7 @@ export class OrchestratorService extends Service implements Orchestrator {
         ? await deps.tools({
             scopeId,
             sessionId: session.id,
+            ...(input.actor?.id ? { actorId: input.actor.id } : {}),
             ...(input.runId ? { runId: input.runId } : {}),
             ...(input.runId ? { attempt: input.attempt ?? 1 } : {}),
           })

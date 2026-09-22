@@ -98,6 +98,8 @@ export interface OrchestratorDeps {
   tools?: (input: {
     scopeId: ScopeId
     sessionId: string
+    /** Turn actor principal id — control-plane tool ops (crons, shares) own resources under it. */
+    actorId?: string
     runId?: string
     attempt?: number
   }) => ToolContext | null | Promise<ToolContext | null>

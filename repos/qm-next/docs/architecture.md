@@ -269,7 +269,7 @@ M0-M2 单进程（in-process 插件，一 profile 一进程）。M3 视资源隔
 | 门禁 | 内容 |
 |------|------|
 | `pnpm check:im` | grep core 服务 src/（api/approvals/boot/directory/im-bridge/im-core/memory/orchestrator/reach/skills/store/triggers/types/web-ui）无 `slack\|feishu\|lark\|wecom\|dingtalk` 符号（M4 21.1） |
-| `pnpm check:soul` | 全仓 grep `'You are qm-next.'` dev 占位提示恒零（ADR-0018，防占位回流） |
+| `pnpm check:soul` | 全仓 grep "You are qm" + "-next." 拼接串恒零：dev 占位提示防回流（ADR-0018），文档与 fixture 均不得字面出现该串 |
 | `pnpm rescope-check` | vendor 无 `@deepseek-ai` 残留 |
 | `pnpm typecheck` | strict TS 全仓 |
 | `pnpm test` / `pnpm test:pg` | 单测 + e2e（无 PG / 一次性 PG 容器全量对拍） |

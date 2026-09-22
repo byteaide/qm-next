@@ -127,6 +127,7 @@ import {
   createSurfaceContextQueue,
   createWebhookStore,
 } from './services/index.ts'
+import { createToolControlSurfaces } from './services/tool-control.ts'
 import { createAmbientCursorStore, createPostgresAckEmojiPickStore, createPostgresAgentRequestStore, createPostgresAmbientJudgmentStore } from './services/ambient-stores.ts'
 import type { ChannelPolicyStore as ApiChannelPolicyStore } from './services/channel-policy-store.ts'
 import type { SoulStore } from './services/soul-store.ts'
@@ -831,12 +832,31 @@ export class ApiService extends Service<ApiConfig> {
         ? (databaseUrl ? createPostgresProcessRegistry(databaseUrl) : createMemoryProcessRegistry())
         : undefined
       if (processRegistry) this.processRegistry = processRegistry
-      toolFactory = async ({ scopeId, runId, attempt }) => {
+      toolFactory = async ({ scopeId, runId, attempt, actorId }) => {
         let handle = sandboxHandles.get(scopeId)
         if (!handle) {
           handle = await sandbox.provision([{ scopeId, mountPath: 'global', mode: 'rw' }])
           sandboxHandles.set(scopeId, handle)
         }
+        const toolControl = createToolControlSurfaces({
+          ...(actorId ? { actorId } : {}),
+          cron: () => {
+            const view = this.triggerRuntimeView()
+            if (!view) return undefined
+            return {
+              crons: view.crons,
+              ...(view.scheduler ? { scheduler: view.scheduler } : {}),
+              ...(directoryStore ? { reach: reachDirectory(directoryStore), directory: directoryStore } : {}),
+              deliveries: () => view.deliveries,
+              scopeFor: () => this.config.scopeId ?? 'org:default',
+            }
+          },
+          ...(webhookStore ? { webhooks: () => webhookStore, ...(this.config.publicUrl ? { webhookPublicUrl: this.config.publicUrl } : {}) } : {}),
+          ...(this.mcpToolService ? { mcp: () => this.mcpToolService } : {}),
+          orgScope: this.config.scopeId ?? 'org:default',
+          ...(grantLedger ? { grants: () => grantLedger } : {}),
+          ...(fileStore ? { files: () => fileStore } : {}),
+        })
         return createSandboxToolContext({
           sandbox,
           handle,
@@ -848,6 +868,10 @@ export class ApiService extends Service<ApiConfig> {
             : {}),
           ...(runId ? { runId, attempt: attempt ?? 1 } : {}),
           ...(runs.ledger ? { ledger: runs.ledger } : {}),
+          ...(toolControl.crons ? { crons: toolControl.crons } : {}),
+          ...(toolControl.webhooks ? { webhooks: toolControl.webhooks } : {}),
+          ...(toolControl.mcp ? { mcp: toolControl.mcp } : {}),
+          ...(toolControl.share ? { share: toolControl.share } : {}),
           ...(soulStore
             ? {
                 soul: {
