@@ -224,6 +224,20 @@ test('playground surface: creates through the file store with qm title/validatio
   assert.equal(opened.mimetype, 'text/html')
   assert.equal(opened.bytes.toString('utf8'), '<p>hi</p>')
   assert.equal(opened.ownerScopeId, 'personal:feishu:ada')
+
+  assert.ok(artifact.attachment, 'the delivery face rides the artifact (turn-attachment slice)')
+  assert.deepEqual(
+    { ...artifact.attachment, blobId: undefined },
+    {
+      name: 'wave demo.html',
+      mimetype: 'text/html',
+      sizeBytes: opened.sizeBytes,
+      blobId: undefined,
+      artifactId: artifact.artifactId,
+      artifactViewerId: 'feishu:ada',
+    },
+  )
+  assert.equal(artifact.attachment.blobId, opened.blobId, 'providers dereference the stored blob')
 })
 
 test('playground surface: honest failures for missing store, missing actor, and bad documents', async () => {

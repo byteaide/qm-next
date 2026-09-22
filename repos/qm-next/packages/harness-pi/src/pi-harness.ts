@@ -1940,9 +1940,11 @@ export function createPiHarness(opts?: PiHarnessOptions): Harness {
             })
             await checkpointSubturn(finalEntry.seq)
             const cacheUsage = sumCacheUsage(callStats)
+            const stopAttachments = entry.ref.turnAttachments ?? []
             const base = {
               reply,
               stopped: true as const,
+              ...(stopAttachments.length ? { attachments: stopAttachments } : {}),
               modelCalls: entry.ref.modelCalls ?? 0,
               compileMs,
               ...(tapeWriteFailed ? { tapeWriteFailed: true } : {}),
@@ -1959,6 +1961,7 @@ export function createPiHarness(opts?: PiHarnessOptions): Harness {
           })
           await checkpointSubturn(finalEntry.seq)
           const pendingApprovals = entry.ref.pendingApprovals ?? []
+          const turnAttachments = entry.ref.turnAttachments ?? []
           const modelCalls = entry.ref.modelCalls ?? 0
           const cacheUsage = sumCacheUsage(callStats)
           const silent = entry.ref.silentRequested ? { silent: true as const } : {}
@@ -1966,13 +1969,21 @@ export function createPiHarness(opts?: PiHarnessOptions): Harness {
             ? {
                 reply,
                 pendingApprovals,
+                ...(turnAttachments.length ? { attachments: turnAttachments } : {}),
                 ...(tapeWriteFailed ? { tapeWriteFailed: true } : {}),
                 ...(entry.ref.pausedOnApproval ? { pausedOnApproval: true as const } : {}),
                 modelCalls,
                 ...silent,
                 compileMs,
               }
-            : { reply, ...(tapeWriteFailed ? { tapeWriteFailed: true } : {}), modelCalls, ...silent, compileMs }
+            : {
+                reply,
+                ...(turnAttachments.length ? { attachments: turnAttachments } : {}),
+                ...(tapeWriteFailed ? { tapeWriteFailed: true } : {}),
+                modelCalls,
+                ...silent,
+                compileMs,
+              }
           return cacheUsage ? { ...base, cacheUsage } : base
         } finally {
           removeIsolatedDirs(entry)

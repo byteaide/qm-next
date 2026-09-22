@@ -27,7 +27,8 @@ import { createImRegistry } from '@qm/im-core/runtime'
 import { createHarnessRouter, createMockHarness, OrchestratorService, type MockTurnStep } from '@qm/orchestrator'
 import { createMemoryRunStore, createMemorySessionStore } from '@qm/store'
 import type { IdentityService, KeychainAsk, ResolutionService } from '@qm/types'
-import { APPROVAL_VALUE_KIND, approvalRequestNotice, createImTurnBridge, DEFAULT_ACK_REACTIONS, parseApprovalValue, type ApprovalActionValue, type ApprovalCardRenderer, type ImTurnBridge, type ImTurnBridgeAck, type ImTurnBridgeAgentRequests, type ImTurnBridgeAmbient, type ImTurnBridgeAskResolutions } from '../src/index.ts'
+import { APPROVAL_VALUE_KIND, approvalRequestNotice, createImTurnBridge, DEFAULT_ACK_REACTIONS, imRunResultDelivery, parseApprovalValue, type ApprovalActionValue, type ApprovalCardRenderer, type ImReplyRoute, type ImTurnBridge, type ImTurnBridgeAck, type ImTurnBridgeAgentRequests, type ImTurnBridgeAmbient, type ImTurnBridgeAskResolutions } from '../src/index.ts'
+import type { Run } from '@qm/types'
 
 function devResolution(): ResolutionService {
   return {
@@ -797,7 +798,7 @@ test('agent request: decline posts the notice to the origin thread and no person
   })
   try {
     await t.cells.ctx!.emit(messageEvent({ eventId: 'ar-2', replyToMessageId: 'om_origin' }))
-    assert.ok(await waitFor(() => t.sent.length >= 2))
+    assert.ok(await waitFor(() => t.sent.length >= 1))
     const runs = await t.runs.list()
     const requestId = `${runs[0]!.id}:ar0`
     await t.cells.ctx!.emit({
@@ -811,7 +812,7 @@ test('agent request: decline posts the notice to the origin thread and no person
       actor: { providerUserId: 'ou_target' },
       action: { value: encodeAgentRequestValue({ kind: AGENT_REQUEST_VALUE_KIND, requestId, decision: 'reject' }) },
     } as InboundInteractionEvent)
-    assert.ok(await waitFor(() => t.sent.length >= 3))
+    assert.ok(await waitFor(() => t.sent.length >= 2))
     await new Promise((resolve) => setTimeout(resolve, 50))
     assert.equal((await t.runs.list()).length, 1, 'no personal turn after a decline')
     const notice = t.sent[t.sent.length - 1] as SendOperation
@@ -830,7 +831,7 @@ test('agent request: a click by anyone but the target is refused and the request
   })
   try {
     await t.cells.ctx!.emit(messageEvent({ eventId: 'ar-3', replyToMessageId: 'om_origin' }))
-    assert.ok(await waitFor(() => t.sent.length >= 2))
+    assert.ok(await waitFor(() => t.sent.length >= 1))
     const runs = await t.runs.list()
     const requestId = `${runs[0]!.id}:ar0`
     await t.cells.ctx!.emit({
@@ -844,7 +845,7 @@ test('agent request: a click by anyone but the target is refused and the request
       actor: { providerUserId: 'ou_stranger' },
       action: { value: encodeAgentRequestValue({ kind: AGENT_REQUEST_VALUE_KIND, requestId, decision: 'approve' }) },
     } as InboundInteractionEvent)
-    assert.ok(await waitFor(() => t.sent.length >= 3))
+    assert.ok(await waitFor(() => t.sent.length >= 2))
     await new Promise((resolve) => setTimeout(resolve, 50))
     const refusal = t.sent[t.sent.length - 1] as SendOperation
     assert.match(refusal.body.text ?? '', /Only the person who was asked/)
@@ -863,9 +864,8 @@ test('agent request: an unresolvable DM destination leaves the request pending w
   })
   try {
     await t.cells.ctx!.emit(messageEvent({ eventId: 'ar-4', replyToMessageId: 'om_origin' }))
-    assert.ok(await waitFor(() => t.sent.length >= 1))
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    assert.equal(t.sent.length, 1, 'only the cleaned reply delivered — no DM')
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    assert.equal(t.sent.length, 0, 'the cleaned reply is empty (qm drops it) and no DM resolves')
     const runs = await t.runs.list()
     const record = await store.get(`${runs[0]!.id}:ar0`)
     assert.equal(record?.status, 'pending')
@@ -944,4 +944,52 @@ test('keychain-ask sweep: an unresolvable DM is marked notified with no run and 
   } finally {
     await t.dispose()
   }
+})
+
+function deliveryRun(result: Record<string, unknown>): Run {
+  return {
+    id: 'run-1',
+    sessionId: 'session-1',
+    status: 'done',
+    targetState: 'succeeded',
+    runSource: 'legacy',
+    request: { surface: 'feishu', actor: { id: 'u1', type: 'internal' }, conversation: {} as never, origin: { kind: 'ambient' } as never, text: 'hi' },
+    result: result as never,
+    deliveryState: null,
+    dedupKey: null,
+    attempts: 1,
+    errorAttempts: 0,
+  } as unknown as Run
+}
+
+const replyRoute: ImReplyRoute = { destination: { type: 'feishu', target: 'oc_1' }, conversation: { kind: 'channel' } as never }
+
+test('run-result delivery: turn attachments ride the reply body (playground slice)', () => {
+  const attachments = [{ name: 'demo.html', mimetype: 'text/html', sizeBytes: 10, blobId: 'blob_1' }]
+  const delivered = imRunResultDelivery(deliveryRun({ status: 'ok', reply: 'made it', attachments }), replyRoute)
+  assert.ok(delivered)
+  assert.deepEqual((delivered.op as SendOperation).body, { markdown: 'made it', attachments })
+})
+
+test('run-result delivery: an attachments-only turn still delivers, with no empty text', () => {
+  const attachments = [{ name: 'demo.html', mimetype: 'text/html', sizeBytes: 10, blobId: 'blob_1' }]
+  const delivered = imRunResultDelivery(deliveryRun({ status: 'ok', reply: '', attachments }), replyRoute, 'text')
+  assert.ok(delivered)
+  assert.deepEqual((delivered.op as SendOperation).body, { attachments })
+})
+
+test('run-result delivery: an empty ok turn with no files sends nothing', () => {
+  assert.equal(imRunResultDelivery(deliveryRun({ status: 'ok', reply: '' }), replyRoute), null)
+  assert.equal(imRunResultDelivery(deliveryRun({ status: 'ok' }), replyRoute), null)
+})
+
+test('run-result delivery: approvals keep the card precedence over attachments (qm parity)', () => {
+  const attachments = [{ name: 'demo.html', mimetype: 'text/html', sizeBytes: 10, blobId: 'blob_1' }]
+  const delivered = imRunResultDelivery(
+    deliveryRun({ status: 'ok', reply: 'made it', pendingApprovals: [{ requestId: 'r1', command: 'rm', reason: 'destructive' }], attachments }),
+    replyRoute,
+  )
+  assert.ok(delivered)
+  assert.equal(((delivered.op as SendOperation).body as { text?: string }).text, approvalRequestNotice([{ requestId: 'r1', command: 'rm', reason: 'destructive' }]))
+  assert.equal(((delivered.op as SendOperation).body as { attachments?: unknown }).attachments, undefined)
 })

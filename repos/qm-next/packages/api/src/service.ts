@@ -108,6 +108,7 @@ import {
   createMemoryBlobTransfer,
   createMemoryChannelPolicyStore,
   createMemoryDeploymentLayerStore,
+  type BlobTransferService,
   type ConnectorTokenStore,
   createMemoryDeploymentStore,
   createMemoryEnvironmentRegistry,
@@ -594,6 +595,13 @@ export class ApiService extends Service<ApiConfig> {
 
   /** Process registry for background jobs; exposed for the background-tool writer seam. */
   processRegistry?: ProcessRegistry
+
+  /**
+   * Blob transfer port (11.0) when the files/blobs surfaces are on.
+   * Exposed for the IM providers' outbound attachment reads — the feishu
+   * provider uploads turn files by dereferencing their blobId through it.
+   */
+  blobTransfer?: BlobTransferService
 
   /**
    * Target Run event log (Phase 7 / KV-006): producers publish typed
@@ -1096,6 +1104,7 @@ export class ApiService extends Service<ApiConfig> {
     const sessionStateBus = this.config.sessionState ? createMemorySessionStateBus() : undefined
     const grantLedger = this.config.grants || this.config.files || this.config.deployments ? createMemoryGrantLedger() : undefined
     const blobTransfer = this.config.blobs || this.config.files ? createMemoryBlobTransfer() : undefined
+    if (blobTransfer) this.blobTransfer = blobTransfer
     // Files (20.0 twin lane): with databaseUrl the metadata lands in the
     // qm-shaped `file_artifacts` table and bytes go through the
     // content-addressed byte store (`filesDir` for the FS backend; without

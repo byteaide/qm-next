@@ -218,7 +218,19 @@ function playgroundControl(deps: ToolControlDeps): PlaygroundControlSurface {
         bytes: Buffer.from(input.html, 'utf8'),
       })
       if (!stored) throw new Error('playground storage is not available on this deployment')
-      return { kind: 'playground' as const, artifactId: stored.id, title }
+      return {
+        kind: 'playground' as const,
+        artifactId: stored.id,
+        title,
+        attachment: {
+          name: stored.name,
+          mimetype: stored.mimetype ?? PLAYGROUND_MIMETYPE,
+          sizeBytes: stored.sizeBytes,
+          blobId: stored.blobId,
+          artifactId: stored.id,
+          artifactViewerId: deps.actorId,
+        },
+      }
     },
   }
 }

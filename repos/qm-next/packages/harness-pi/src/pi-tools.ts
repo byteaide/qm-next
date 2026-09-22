@@ -3,6 +3,7 @@ import { Type } from 'typebox'
 import type { CronFireLogEntry, ScopeId } from '@qm/types'
 import type { EntryType } from '@qm/types'
 import type { ToolContext, PublishInput, PublishAudienceDescriptor, ShareDirective } from '@qm/types'
+import type { OutgoingAttachment } from '@qm/types'
 import type { GapWork, McpToolDescriptor } from '@qm/types'
 import { NeedsApproval, CommandDenied } from '@qm/types'
 import { parseScopeId } from '@qm/types'
@@ -52,6 +53,8 @@ export interface ToolContextRef {
     approvalKey?: string
   }>
   pausedOnApproval?: boolean | undefined
+  /** Outbound files produced this turn (playground artifacts) — drained into the turn result. */
+  turnAttachments?: OutgoingAttachment[]
   emit?: (entry: { type: EntryType; payload: unknown; scopeLabel: ScopeId }) => void | Promise<unknown>
   scopeLabel?: ScopeId
   orgScopeId?: ScopeId
@@ -1011,6 +1014,7 @@ export function createPiTools(ref: ToolContextRef, opts?: PiToolsOptions): ToolD
         const html = params.file !== undefined ? (await tc.read(params.file)).content : params.html
         if (html == null) throw new Error(`no such file: ${params.file}`)
         const artifact = await tc.createPlayground({ title: params.title, html })
+        if (artifact.attachment) (ref.turnAttachments ??= []).push(artifact.attachment)
         return recordResult(
           callId,
           { tool: 'miniapp' },

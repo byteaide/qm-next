@@ -244,7 +244,7 @@ export class OrchestratorService extends Service implements Orchestrator {
           command: pa.command,
           reason: pa.reason,
           ...(pa.kind ? { kind: 'approval' as const } : {}),
-        })) }
+        })), ...(result.attachments?.length ? { attachments: result.attachments } : {}) }
       } else if (result.silent) {
         finalResult = { status: 'silent', sessionId: session.id, ...(result.stopped ? { stopped: true } : {}) }
       } else {
@@ -253,6 +253,7 @@ export class OrchestratorService extends Service implements Orchestrator {
           sessionId: session.id,
           reply: result.reply,
           ...(result.stopped ? { stopped: true } : {}),
+          ...(result.attachments?.length ? { attachments: result.attachments } : {}),
           sourceUserSeq: userEntry.seq,
           ...(sourceAssistantEntrySeq !== undefined ? { sourceAssistantEntrySeq } : {}),
         }

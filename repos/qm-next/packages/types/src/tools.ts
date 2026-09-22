@@ -9,7 +9,7 @@
  * against the full surface. `ToolContextDeps` (the assembly side) is
  * deliberately absent until the profile-assembly contract lands.
  */
-import type { Destination } from './destination.ts'
+import type { Destination, OutgoingAttachment } from './destination.ts'
 import type { ScopeId } from './identity.ts'
 import type { ComputerStatus, ExecResult, ProcessState } from './sandbox.ts'
 
@@ -323,6 +323,12 @@ export interface PlaygroundArtifact {
   kind: 'playground'
   artifactId: string
   title: string
+  /**
+   * Delivery face (qm "attached to the turn automatically"): provider-ready
+   * metadata for the stored artifact. Harnesses push it onto the turn
+   * result; the IM bridge maps it onto the outbound body.
+   */
+  attachment?: OutgoingAttachment
 }
 
 export type ArtifactType = 'file' | 'skill' | 'deploy' | 'cron'
