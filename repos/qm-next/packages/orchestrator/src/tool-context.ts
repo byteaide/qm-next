@@ -15,6 +15,7 @@ import {
   type ComputerStatus,
   type ControlUnavailable,
   type ExecResult,
+  type GrantedHandle,
   type McpToolDescriptor,
   type ProcessSandbox,
   type ProcessState,
@@ -68,6 +69,16 @@ export interface SandboxToolContextDeps {
   /** Artifact sharing (@qm/acl grant ledger behind the adapter). */
   share?: ShareControlSurface
   /**
+   * Shared-file face (Q3, segment ⑫): granted handles the conversation
+   * audience may read through `shared/<name>` paths. read() resolves
+   * handles first; text answers inline, binaries materialize into the
+   * sandbox workspace (qm primitives.read ladder).
+   */
+  sharedFiles?: {
+    handles(): Promise<GrantedHandle[]>
+    readBytes(ref: string): Promise<Uint8Array | null>
+  }
+  /**
    * ADR-0018 guidance seam (M-Soul-2.4): conversation-scope standing
    * instructions. Read returns the effective soul (org federation composed);
    * writes are rejected for org scopes (the admin surface owns org policy),
@@ -115,6 +126,43 @@ export function createSandboxToolContext(deps: SandboxToolContextDeps): ToolCont
   const webhooks = deps.webhooks
   const mcp = deps.mcp
   const share = deps.share
+  const sharedFiles = deps.sharedFiles
+
+  /**
+   * qm primitives.read shared-handle ladder: exact handlePath match;
+   * multiple distinct owners answer an ambiguity error; text answers
+   * inline with the owner scope; binaries materialize into the workspace.
+   */
+  async function readSharedHandle(path: string): Promise<ReadResult | null> {
+    if (!sharedFiles) return null
+    const handles = await sharedFiles.handles()
+    const matches = handles.filter((h) => h.handlePath === path)
+    if (matches.length === 0) return null
+    const distinct = new Set(matches.map((h) => `${h.ownerScopeId}\0${h.ownerPath}`))
+    if (distinct.size > 1) {
+      return {
+        content: `ERROR: ambiguous shared handle "${path}" maps to ${distinct.size} different files`,
+        sourceScopeId: null,
+      }
+    }
+    const granted = matches[0]!
+    const bytes = await sharedFiles.readBytes(granted.ownerPath)
+    if (bytes === null) return { content: null, sourceScopeId: granted.ownerScopeId }
+    let asText: string
+    try {
+      asText = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    } catch {
+      const name = granted.handlePath.split(/[\\/]/).pop() ?? granted.handlePath
+      await sandbox.writeFileBytes(handle, name, bytes)
+      return {
+        content:
+          `[binary file materialized into the sandbox at ${name} (${bytes.length} bytes) — ` +
+          `to send it, attach it to a message: name \`${name}\` in the surface \`post\` action's \`files\`]`,
+        sourceScopeId: granted.ownerScopeId,
+      }
+    }
+    return { content: asText, sourceScopeId: granted.ownerScopeId }
+  }
   const ceiling = deps.execTimeoutCeilingMs ?? DEFAULT_EXEC_TIMEOUT_CEILING_MS
   const processes: ProcessSandbox | null = supportsProcessSessions(sandbox) ? sandbox : null
 
@@ -189,6 +237,10 @@ export function createSandboxToolContext(deps: SandboxToolContextDeps): ToolCont
       guardPath(path)
       return once(
         async () => {
+          if (sharedFiles && path.startsWith('shared/')) {
+            const shared = await readSharedHandle(path)
+            if (shared) return shared
+          }
           const content = await sandbox.readFile(handle, path)
           return { content, sourceScopeId: content === null ? null : scopeId }
         },

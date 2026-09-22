@@ -62,7 +62,7 @@ import {
 } from '@qm/model'
 import { createMemoryScopeMemory, type ScopeMemory } from '@qm/memory'
 import { renderSecurityPolicyPrompt, resolveSecurityPolicy, type SecurityScreener } from '@qm/security'
-import { renderComputerBlock } from '@qm/orchestrator'
+import { renderComputerBlock, renderSharedFilesBlock } from '@qm/orchestrator'
 import { createMcpServerStore, createMcpToolService, type McpServerStore, type McpToolService } from '@qm/mcp'
 import {
   createBrowserSessionStore,
@@ -128,6 +128,7 @@ import {
   createWebhookStore,
 } from './services/index.ts'
 import { createToolControlSurfaces } from './services/tool-control.ts'
+import { sharedFileHandles, type SharedFilesDeps } from './services/shared-files.ts'
 import { createAmbientCursorStore, createPostgresAckEmojiPickStore, createPostgresAgentRequestStore, createPostgresAmbientJudgmentStore } from './services/ambient-stores.ts'
 import type { ChannelPolicyStore as ApiChannelPolicyStore } from './services/channel-policy-store.ts'
 import type { SoulStore } from './services/soul-store.ts'
@@ -811,10 +812,27 @@ export class ApiService extends Service<ApiConfig> {
       : undefined
     if (soulStore && 'ready' in soulStore) await (soulStore as { ready(): Promise<void> }).ready()
     const surfaceBranding = this.config.surfaceConfig?.branding
-    const resolution = createSoulResolution(this.config, soulStore, surfaceBranding, () => {
-      const spec = this.sandbox?.profile.spec
-      return spec ? renderComputerBlock(spec, { hasGlobal: true }) : undefined
-    })
+    // Q3 segment ⑫ — shared-files manifest: when a grant ledger + file
+    // store exist, every turn's stable prefix lists the granted handles
+    // (qm sharedFilesSystemSection inside the cache boundary).
+    const sharedFilesDeps = (): SharedFilesDeps | undefined =>
+      grantLedger && fileStore ? { grants: grantLedger, files: fileStore } : undefined
+    const resolution: ResolutionService = (() => {
+      const inner = createSoulResolution(this.config, soulStore, surfaceBranding, () => {
+        const spec = this.sandbox?.profile.spec
+        return spec ? renderComputerBlock(spec, { hasGlobal: true }) : undefined
+      })
+      return {
+        resolve: async (conversation, actor) => {
+          const base = await inner.resolve(conversation, actor)
+          const deps = sharedFilesDeps()
+          if (!deps) return base
+          const handles = await sharedFileHandles(deps, conversation.audience)
+          return { ...base, ...(handles.length ? { sharedFilesBlock: renderSharedFilesBlock(handles) } : {}) }
+        },
+        scopeFor: (conversation, actor) => inner.scopeFor(conversation, actor),
+      }
+    })()
     let toolFactory: OrchestratorDeps['tools'] | undefined
     const sandboxHandles = new Map<ScopeId, SandboxHandle>()
     const sandboxConfig = this.config.sandbox
@@ -872,6 +890,17 @@ export class ApiService extends Service<ApiConfig> {
           ...(toolControl.webhooks ? { webhooks: toolControl.webhooks } : {}),
           ...(toolControl.mcp ? { mcp: toolControl.mcp } : {}),
           ...(toolControl.share ? { share: toolControl.share } : {}),
+          ...(sharedFilesDeps()
+            ? {
+                sharedFiles: {
+                  handles: () => sharedFileHandles(sharedFilesDeps()!),
+                  readBytes: async (ref: string) => {
+                    const file = await fileStore!.openForViewer(ref, actorId ?? '')
+                    return file?.bytes ?? null
+                  },
+                },
+              }
+            : {}),
           ...(soulStore
             ? {
                 soul: {

@@ -336,7 +336,7 @@ test('control surfaces: ports execute, absent ports keep the honest unavailable 
         created.push(req)
         return { ok: true, cron: { id: 'cron-1', ownerScopeId: 'org:test', owner: 'person:ada', createdBy: 'person:ada', enabled: true, createdAt: 1, schedule: {} } as never }
       },
-      cronList: async () => ({ ok: true, crons: [], visible: [] }),
+      cronList: async () => ({ crons: [], visible: [] }),
       cronGet: async () => ({ ok: false, code: 'not_found', message: 'no cron x' }),
       cronRuns: async () => ({ ok: false, code: 'not_found', message: 'no cron x' }),
       cronPatch: async () => ({ ok: false, code: 'forbidden', message: 'not your cron' }),
@@ -362,7 +362,9 @@ test('control surfaces: ports execute, absent ports keep the honest unavailable 
   const made = await ctx.cronCreate({ schedule: { everyMs: 1000 }, action: 'ping' })
   assert.equal(made.ok, true)
   assert.deepEqual(created, [{ schedule: { everyMs: 1000 }, action: 'ping' }])
-  assert.equal((await ctx.cronList()).ok, true)
+  const listed = await ctx.cronList()
+  assert.equal('crons' in listed, true, 'wired port answers the list, not CONTROL_UNAVAILABLE')
+  if ('crons' in listed) assert.deepEqual(listed.crons, [])
   assert.equal((await ctx.cronGet('x')).ok, false)
   assert.equal((await ctx.cronRun('cron-1')).ok, true)
   const webhook = await ctx.webhookCreate({ action: 'relay', verification: { scheme: 'github', secret: 'k' } })
@@ -373,12 +375,67 @@ test('control surfaces: ports execute, absent ports keep the honest unavailable 
   assert.equal(shared.ok, true)
 
   const bare = createSandboxToolContext({ sandbox: fakeSandbox(), handle: fakeHandle(), scopeId: 'org:test' })
-  const unavailable = await bare.cronList()
-  assert.equal(unavailable.ok, false)
-  if (!unavailable.ok) assert.equal(unavailable.code, 'control_unavailable')
+  const unavailableList = await bare.cronList()
+  assert.equal('ok' in unavailableList, true)
+  if ('ok' in unavailableList) assert.equal(unavailableList.code, 'control_unavailable')
   const bareWebhooks = await bare.webhookList()
-  assert.equal(bareWebhooks.ok, false)
+  assert.equal('ok' in bareWebhooks, true)
   assert.deepEqual(bare.mcpToolDefs(), [])
   await assert.rejects(bare.callMcpTool('x', {}), /MCP tools is not available/)
   await assert.rejects(bare.shareArtifact({ type: 'file', id: 'f1' }), /artifact sharing is not available/)
+})
+
+test('shared files: read resolves granted handles — text inline, ambiguous refused, missing falls through', async () => {
+  const materialized: Record<string, Uint8Array> = {}
+  const sandbox = fakeSandbox({
+    readFile: async (_handle, path) => (path === 'workspace-local.md' ? 'from the sandbox' : null),
+    writeFileBytes: async (_handle, path, data) => {
+      materialized[path] = data
+    },
+  })
+  const handles = [
+    { handlePath: 'shared/report.md', ownerScopeId: 'personal:ada', ownerPath: 'f1', permission: 'read' as const },
+    { handlePath: 'shared/dup.md', ownerScopeId: 'personal:ada', ownerPath: 'dup-a', permission: 'read' as const },
+    { handlePath: 'shared/dup.md', ownerScopeId: 'personal:bob', ownerPath: 'dup-b', permission: 'read' as const },
+  ]
+  const ctx = createSandboxToolContext({
+    sandbox,
+    handle: fakeHandle(),
+    scopeId: 'org:test',
+    sharedFiles: {
+      handles: async () => handles,
+      readBytes: async (ref) => Buffer.from(`bytes of ${ref}`, 'utf8'),
+    },
+  })
+
+  const text = await ctx.read('shared/report.md')
+  assert.deepEqual(text, { content: 'bytes of f1', sourceScopeId: 'personal:ada' })
+
+  const ambiguous = await ctx.read('shared/dup.md')
+  assert.match(String(ambiguous.content), /ambiguous shared handle/)
+  assert.equal(ambiguous.sourceScopeId, null)
+
+  const missing = await ctx.read('shared/nope.md')
+  assert.deepEqual(missing, { content: null, sourceScopeId: null }, 'unmatched shared/ paths fall through to the sandbox')
+
+  const local = await ctx.read('workspace-local.md')
+  assert.deepEqual(local, { content: 'from the sandbox', sourceScopeId: 'org:test' })
+
+  const binaryCtx = createSandboxToolContext({
+    sandbox: fakeSandbox({
+      writeFileBytes: async (_handle, path, data) => {
+        materialized[path] = data
+      },
+    }),
+    handle: fakeHandle(),
+    scopeId: 'org:test',
+    sharedFiles: {
+      handles: async () => [{ handlePath: 'shared/blob.bin', ownerScopeId: 'personal:ada', ownerPath: 'binary', permission: 'read' }],
+      readBytes: async () => new Uint8Array([0xff, 0xfe, 0x00, 0x01]),
+    },
+  })
+  const binary = await binaryCtx.read('shared/blob.bin')
+  assert.match(String(binary.content), /binary file materialized into the sandbox at blob\.bin/)
+  assert.equal(binary.sourceScopeId, 'personal:ada')
+  assert.ok(materialized['blob.bin'])
 })

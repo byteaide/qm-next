@@ -50,6 +50,12 @@ export interface TurnResolution {
    */
   skillsBlock?: string
   /**
+   * Segment ⑫ — the shared-files manifest (qm sharedFilesSystemSection):
+   * granted handles the conversation audience may read on demand. Inside
+   * the stable prefix, after the gateway block (qm segment order).
+   */
+  sharedFilesBlock?: string
+  /**
    * Segment ⑭ — the memory recall block. Appended AFTER the prompt-cache
    * boundary, never inside the stable prefix (qm parity).
    */

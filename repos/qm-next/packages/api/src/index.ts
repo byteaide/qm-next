@@ -90,6 +90,7 @@ export {
   createMemoryBlobTransfer,
   createCronControl,
   createToolControlSurfaces,
+  sharedFileHandles,
   deploymentView,
   parseBotLedger,
   THINKING_LEVELS,

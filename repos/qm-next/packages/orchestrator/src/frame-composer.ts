@@ -9,7 +9,7 @@
  * variables (parity deviation #55).
  */
 import { applyPromptVars, loadProtocolFile, type PromptVars } from './protocols/prompt-vars.ts'
-import type { Conversation, GatewayContext, Principal, TurnOrigin, TurnResolution } from '@qm/types'
+import type { Conversation, GatewayContext, GrantedHandle, Principal, TurnOrigin, TurnResolution } from '@qm/types'
 
 export type FrameMode = 'autonomous' | 'conversation' | 'fallback'
 
@@ -63,7 +63,7 @@ export function cleanLabel(value: string | undefined, cap: number): string | und
 export interface ComposeFrameOptions extends TurnFrameContext {
   /** Segment ② — the scope's effective soul (possibly empty). */
   soul: string
-  resolution?: Pick<TurnResolution, 'securityPrompt' | 'branding' | 'skillsBlock' | 'computerBlock'>
+  resolution?: Pick<TurnResolution, 'securityPrompt' | 'branding' | 'skillsBlock' | 'computerBlock' | 'sharedFilesBlock'>
   /** Provider display name injected into platform-wording slots (deviation #55). */
   imLabel?: string
   /** Surface-tool name rendered into the mode frames (pi default: 'surface'). */
@@ -138,9 +138,10 @@ function frameVars(
 }
 
 /**
- * Compose the stable prefix (segments ①-⑤ + ⑧ + ⑨ where present) and record
- * the cache boundary. Segment order is qm-exact: mode frame, soul, shared
- * core, security policy, skills block, gateway block, proactive opener line.
+ * Compose the stable prefix (segments ①-⑤ + ⑧ + ⑨ + ⑫ where present) and
+ * record the cache boundary. Segment order is qm-exact: mode frame, soul,
+ * shared core, security policy, skills block, gateway block, shared-files
+ * manifest.
  */
 export function composeFrame(opts: ComposeFrameOptions): ComposedFrame {
   const imLabel = opts.gatewayContext?.displayLabel ?? opts.imLabel ?? 'the IM platform'
@@ -170,9 +171,43 @@ export function composeFrame(opts: ComposeFrameOptions): ComposedFrame {
     ...(opts.resolution?.computerBlock ? [opts.resolution.computerBlock] : []),
     ...(opts.resolution?.skillsBlock ? [opts.resolution.skillsBlock] : []),
     ...(gatewayBlock ? [gatewayBlock] : []),
+    ...(opts.resolution?.sharedFilesBlock ? [opts.resolution.sharedFilesBlock] : []),
   ]
   const systemPrompt = segments.join('\n\n')
   return { systemPrompt, stableSystemBytes: systemPrompt.length, mode }
+}
+
+/**
+ * qm attachments.ts sharedManifest (segment ⑫): the granted-handle manifest
+ * listing `shared/<name>` paths the audience may read on demand, capped at
+ * 25 entries like qm.
+ */
+export const MAX_SHARED_FILES_LISTED = 25
+
+export function renderSharedFilesBlock(handles: readonly GrantedHandle[] | undefined): string {
+  if (!handles?.length) return ''
+  const seen = new Set<string>()
+  const lines: string[] = []
+  for (const h of handles) {
+    if (!h.handlePath.startsWith('shared/')) continue
+    if (seen.has(h.handlePath)) continue
+    seen.add(h.handlePath)
+    lines.push(`- ${h.handlePath}${h.permission === 'write' ? ' (writable)' : ''}`)
+  }
+  if (!lines.length) return ''
+  const total = lines.length
+  const shown = lines.slice(0, MAX_SHARED_FILES_LISTED)
+  const omitted = total - shown.length
+  if (omitted > 0) {
+    shown.push(`…and ${omitted} more (read shared/<name> to fetch)`)
+  }
+  const noun = total === 1 ? 'file' : 'files'
+  return (
+    `## Files shared with you\n` +
+    `${total} ${noun} shared with you — read a path below to fetch that file on demand, ` +
+    `then attach it to a message to pass it on (name its path in the surface \`post\` action's \`files\`):\n` +
+    shown.join('\n')
+  )
 }
 
 /**

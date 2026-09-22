@@ -7,6 +7,7 @@ export {
   currentTimeBlock,
   deriveSurfaceTools,
   renderComputerBlock,
+  renderSharedFilesBlock,
   renderGatewayBlock,
   selectFrameMode,
   type ComposeFrameOptions,

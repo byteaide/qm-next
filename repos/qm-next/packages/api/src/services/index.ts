@@ -151,3 +151,4 @@ export {
 } from './user-model-auth-store.ts'
 export { createCronControl, type CronControlDeps } from './cron-control.ts'
 export { createToolControlSurfaces, type ToolControlDeps } from './tool-control.ts'
+export { sharedFileHandles, type SharedFilesDeps } from './shared-files.ts'
