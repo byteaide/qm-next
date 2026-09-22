@@ -171,3 +171,39 @@ test('admin command-policy-simulate: non-admin gets the guard ladder 403', async
   assert.equal(res.statusCode, 403)
   await app.close()
 })
+
+test('admin impersonate: start audits and answers displayName; stop audits the lifecycle end (X2, qm parity)', async () => {
+  const { app, auditLog } = rig()
+  const ada = auth(await token('person:ada'))
+
+  const noTarget = await app.inject({ method: 'POST', url: '/v1/admin/impersonate', headers: ada, payload: {} })
+  assert.equal(noTarget.statusCode, 400)
+  assert.equal(noTarget.json().message, 'target principal required')
+
+  const self = await app.inject({ method: 'POST', url: '/v1/admin/impersonate', headers: ada, payload: { target: 'person:ada' } })
+  assert.equal(self.statusCode, 400)
+  assert.equal(self.json().message, 'cannot impersonate yourself')
+
+  const stranger = auth(await token('person:stranger'))
+  const forbidden = await app.inject({ method: 'POST', url: '/v1/admin/impersonate', headers: stranger, payload: { target: 'person:ada' } })
+  assert.equal(forbidden.statusCode, 403)
+
+  const started = await app.inject({ method: 'POST', url: '/v1/admin/impersonate', headers: ada, payload: { target: 'feishu:gang' } })
+  assert.equal(started.statusCode, 200)
+  assert.deepEqual(started.json(), { ok: true, target: 'feishu:gang', displayName: 'feishu:gang' })
+
+  const stopped = await app.inject({ method: 'POST', url: '/v1/admin/impersonate/stop', headers: ada, payload: { target: 'feishu:gang' } })
+  assert.equal(stopped.statusCode, 200)
+  assert.deepEqual(stopped.json(), { ok: true })
+
+  const events = await auditLog.tail({ limit: 10 })
+  const startEvent = events.find((e) => e.action === 'impersonate.start')
+  const stopEvent = events.find((e) => e.action === 'impersonate.stop')
+  assert.ok(startEvent)
+  assert.equal(startEvent.principalId, 'person:ada')
+  assert.equal(startEvent.resource, 'feishu:gang')
+  assert.equal(startEvent.scopeLabel, ORG)
+  assert.ok(stopEvent)
+  assert.equal(stopEvent.resource, 'feishu:gang')
+  await app.close()
+})

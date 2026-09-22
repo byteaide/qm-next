@@ -1458,12 +1458,30 @@ async function startImpersonation(ctx: ApiRouteContext, deps: AdminDeps): Promis
   if (!target) return badRequest(ctx, 'target principal required')
   if (target === actorId) return badRequest(ctx, 'cannot impersonate yourself')
   const member = (await deps.directory?.listPeople())?.find((m) => m.principalId === target) ?? null
+  // X2 qm parity (admin/users.ts:435-447): the support flow is asserted by
+  // an audit event, not by acting as the target — the portal seals the
+  // session; the core only records who assumed whom.
+  deps.auditLog?.record({
+    at: Date.now(),
+    principalId: actorId,
+    action: 'impersonate.start',
+    resource: target,
+    scopeLabel: deps.orgScope,
+  })
   return { ok: true, target, displayName: member?.displayName ?? target }
 }
 
 async function stopImpersonation(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const actorId = await authorizeAdmin(ctx, deps, deps.orgScope)
   if (!actorId) return undefined
+  const target = String((ctx.body as { target?: string } | null)?.target ?? '').trim()
+  deps.auditLog?.record({
+    at: Date.now(),
+    principalId: actorId,
+    action: 'impersonate.stop',
+    resource: target || '-',
+    scopeLabel: deps.orgScope,
+  })
   return { ok: true }
 }
 
