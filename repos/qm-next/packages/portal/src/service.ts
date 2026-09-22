@@ -16,6 +16,7 @@ import Schema from '@qm/schemastery'
 import fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
 import { Readable } from 'node:stream'
 import { createPortalState, portalBootProblems, registerPortal, renewSessionCookies, currentSession, type PortalDeps } from './portal-routes.ts'
+import { openImpersonation, readCookie } from './session.ts'
 
 const IDENTITY_TTL_MS = 60_000
 const ADMIN_CACHE_TTL_MS = 60_000
@@ -27,9 +28,9 @@ const ADMIN_CACHE_TTL_MS = 60_000
  */
 export interface PortalCoreApi {
   app: {
-    inject(req: { method: 'GET'; url: string; headers: Record<string, string> }): Promise<{ statusCode: number; body: string; json(): unknown }>
+    inject(req: { method: 'GET' | 'POST'; url: string; headers?: Record<string, string>; payload?: string }): Promise<{ statusCode: number; body: string; json(): unknown }>
   }
-  config: { secrets?: string[] }
+  config: { secrets?: string[]; portalIdentitySecret?: string }
 }
 
 export interface PortalWebUi {
@@ -86,11 +87,27 @@ export function createPortalServer(deps: PortalServerDeps, opts: PortalServerOpt
       if (typeof v === 'string') headers[key] = v
     }
     if (session) {
-      headers.cookie = `webuiuser=${encodeURIComponent(session.sub)}${session.name ? `; webuiuser_name=${encodeURIComponent(session.name)}` : ''}`
+      // X2 qm parity (plugins/portal/src/index.ts:1117-1125): a valid
+      // impersonation cookie swaps the proxied principal — the target acts
+      // as the session while the admin identity rides the `imp` claim. The
+      // admin gate is re-checked per request so a revoked admin cannot keep
+      // an old cookie alive.
+      let principal = session.sub
+      let impersonator: string | undefined
+      const imp = openImpersonation(readCookie(req.headers.cookie, 'portal_impersonate'), state.impersonateKey, deps.now?.() ?? Date.now())
+      if (imp && imp.actor === session.sub && imp.org === session.org) {
+        const stillAdmin = deps.adminStatusOf ? await deps.adminStatusOf(session.sub) : false
+        if (stillAdmin) {
+          principal = imp.target
+          impersonator = session.sub
+        }
+      }
+      headers.cookie = `webuiuser=${encodeURIComponent(principal)}${session.name && !impersonator ? `; webuiuser_name=${encodeURIComponent(session.name)}` : ''}`
       headers[PORTAL_IDENTITY_HEADER] = mintPortalIdentity(
         {
-          p: session.sub,
-          ...(session.name ? { n: session.name } : {}),
+          p: principal,
+          ...(session.name && !impersonator ? { n: session.name } : {}),
+          ...(impersonator ? { imp: impersonator } : {}),
           exp: (deps.now?.() ?? Date.now()) + IDENTITY_TTL_MS,
         },
         state.identitySecret,
@@ -153,6 +170,40 @@ export function createCoreAdminProbe(api: PortalCoreApi): (principalId: string) 
   }
 }
 
+/**
+ * X2 qm parity (`coreImpersonate`): the impersonation routes ride the core
+ * admin lane so the start/stop assumption is audited where the grants live.
+ * The signed portal identity authenticates the admin actor; the x-admin-actor
+ * header carries the bare principal.
+ */
+export function createImpersonateAudit(api: PortalCoreApi): NonNullable<PortalDeps['impersonateAudit']> {
+  return async (action, adminId, target) => {
+    const secret = api.config.portalIdentitySecret ?? ''
+    const res = await api.app.inject({
+      method: 'POST',
+      url: action === 'start' ? '/v1/admin/impersonate' : '/v1/admin/impersonate/stop',
+      headers: {
+        'content-type': 'application/json',
+        // qm-next principals are bare (email-shaped) — appending the org
+        // would truncate at the first '@' in the admin actor ladder.
+        'x-admin-actor': adminId,
+        ...(secret ? { [PORTAL_IDENTITY_HEADER]: mintPortalIdentity({ p: adminId, exp: Date.now() + 60_000 }, secret) } : {}),
+      },
+      payload: JSON.stringify({ target }),
+    })
+    let body: { displayName?: string; message?: string } = {}
+    try {
+      body = res.json() as { displayName?: string; message?: string }
+    } catch {}
+    return {
+      ok: res.statusCode >= 200 && res.statusCode < 300,
+      status: res.statusCode,
+      ...(body.displayName !== undefined ? { displayName: body.displayName } : {}),
+      ...(body.message !== undefined ? { message: body.message } : {}),
+    }
+  }
+}
+
 export interface PortalConfig {
   /** Listen port. */
   port?: number
@@ -172,6 +223,8 @@ export interface PortalConfig {
   devPrincipal?: string
   /** Parent domain for cross-subdomain session cookies. */
   appsDomain?: string
+  /** Impersonation cookie lifetime (qm `PORTAL_IMPERSONATE_TTL_S`, default 3600). */
+  impersonateTtlS?: number
 }
 
 export const Config = Schema.object({
@@ -184,6 +237,7 @@ export const Config = Schema.object({
   localAuthBypass: Schema.boolean().default(true).description('Loopback dev sign-in without an OIDC round trip'),
   devPrincipal: Schema.string().description('Principal for the local dev bypass lane'),
   appsDomain: Schema.string().description('Parent domain for cross-subdomain session cookies'),
+  impersonateTtlS: Schema.number().description('Impersonation cookie lifetime in seconds (default 3600)'),
 })
 
 export class PortalService extends Service<PortalConfig> {
@@ -224,6 +278,8 @@ export class PortalService extends Service<PortalConfig> {
       localAuthBypass: this.config.localAuthBypass ?? true,
       ...(this.config.devPrincipal ? { devPrincipal: this.config.devPrincipal } : {}),
       adminStatusOf: createCoreAdminProbe(api),
+      impersonateAudit: createImpersonateAudit(api),
+      ...(this.config.impersonateTtlS ? { impersonateTtlS: this.config.impersonateTtlS } : {}),
     }
     const app = createPortalServer(deps, {
       host,
