@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { supportsProcessSessions, type ProcessSandbox } from '@qm/types'
+import { supportsProcessSessions, NeedsApproval, type ProcessSandbox } from '@qm/types'
 import {
   createLocalSandbox,
   forceThroughProxyEnv,
@@ -220,6 +220,62 @@ test('run: wraps commands with the noninteractive prefix, env exports and abort 
   assert.ok(main.includes('setsid'))
   assert.ok(cmds.at(-1)!.includes('kill -KILL'))
   assert.ok(cmds.at(-1)!.includes('.pgid'))
+})
+
+test('policy: policyFor binds a per-scope policy to the handle, construction policy is the fallback', async () => {
+  const b = createBackend()
+  const sandbox = createLocalSandbox({
+    dockerExec: b.dockerExec,
+    fetchImpl: b.fetchImpl,
+    repoRoot: '/x',
+    policy: 'default-denylist',
+    policyFor: (scopeId) =>
+      scopeId === 's-scoped'
+        ? { mode: 'denylist', rules: [{ pattern: '\\becho\\s+blocked\\b', decision: 'deny', reason: 'blocked echo' }] }
+        : undefined,
+  })
+  const handle = await sandbox.provision([rw('s-scoped')])
+  const denied = await sandbox.run(handle, 'echo blocked')
+  assert.equal(denied.code, 1)
+  assert.match(denied.stderr, /policy denied: blocked echo/)
+  assert.ok(!b.execCmds().some((c) => c.includes('echo blocked')), 'denied command never reaches docker')
+  assert.equal((await sandbox.run(handle, 'echo fine')).code, 0)
+
+  const plain = await sandbox.provision([rw('s-plain')])
+  assert.equal((await sandbox.run(plain, 'mkfs.ext4 /dev/sda')).code, 1, 'construction fallback still gates')
+  assert.equal((await sandbox.run(plain, 'echo fine')).code, 0)
+})
+
+test('policy: require_approval results carry the verdict and the throw path carries matched/approvalKey (G8)', async () => {
+  const b = createBackend()
+  const sandbox = createLocalSandbox({
+    dockerExec: b.dockerExec,
+    fetchImpl: b.fetchImpl,
+    repoRoot: '/x',
+    policy: {
+      mode: 'denylist',
+      rules: [{ pattern: '\\bgit\\s+push\\s+--force\\b', decision: 'require_approval', reason: 'force push' }],
+    },
+  })
+  const handle = await sandbox.provision([rw('s-approval')])
+
+  const approval = await sandbox.run(handle, 'git push --force origin main')
+  assert.equal(approval.code, 2)
+  assert.equal(approval.policyVerdict?.decision, 'require_approval')
+  assert.equal(approval.policyVerdict?.matched, 'git push --force')
+  assert.equal(approval.policyVerdict?.ruleId, '\\bgit\\s+push\\s+--force\\b')
+  assert.equal(approval.policyVerdict?.reason, 'force push')
+  assert.ok(!b.execCmds().some((c) => c.includes('git push')), 'gated command never reaches docker')
+
+  await assert.rejects(
+    sandbox.run(handle, 'git push --force origin main', { throwOnPolicy: true }),
+    (e: unknown) => {
+      assert.ok(e instanceof NeedsApproval)
+      assert.equal((e as NeedsApproval).matched, 'git push --force')
+      assert.equal((e as NeedsApproval).approvalKey, '\\bgit\\s+push\\s+--force\\b')
+      return true
+    },
+  )
 })
 
 test('file ops: write/read bytes, listDir via find, extractFiles via tar', async () => {

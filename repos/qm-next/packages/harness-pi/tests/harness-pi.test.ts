@@ -426,3 +426,88 @@ test('pi-tools: approval flows record pending approvals and pause the turn', asy
   assert.equal(ref.pendingApprovals!.length, 1)
   assert.equal(ref.pendingApprovals![0]!.command, 'rm -rf /')
 })
+
+test('pi-tools: a result-borne policy verdict records the approval card with matched + approvalKey (G8)', async () => {
+  const ref = fakeRef({
+    current: fakeToolContext({
+      execute: async () => ({
+        code: 2,
+        stdout: '',
+        stderr: '[policy requires approval: force push] git push --force origin main',
+        timedOut: false,
+        policyVerdict: {
+          decision: 'require_approval',
+          ruleId: '\\bgit\\s+push\\b.*force',
+          matched: 'git push --force',
+          reason: 'force push',
+        },
+      }),
+    }),
+    pendingApprovals: [],
+  })
+  const tools = createPiTools(ref, {})
+  const execute = tools.find((t) => t.name === 'execute')!
+  const result = (await execute.execute(
+    'call-1',
+    { command: 'git push --force origin main', purpose: 'deploy' },
+    undefined,
+    undefined,
+    {} as never,
+  )) as { content: Array<{ text: string }> }
+  assert.ok(result.content[0]!.text.includes('[blocked: needs human approval] force push'))
+  assert.equal(ref.pausedOnApproval, true)
+  assert.deepEqual(ref.pendingApprovals![0], {
+    command: 'git push --force origin main',
+    reason: 'force push',
+    kind: 'approval',
+    matched: 'git push --force',
+    purpose: 'deploy',
+    approvalKey: '\\bgit\\s+push\\b.*force',
+  })
+})
+
+test('pi-tools: a result-borne deny verdict renders the denied branch (G8)', async () => {
+  const ref = fakeRef({
+    current: fakeToolContext({
+      execute: async () => ({
+        code: 1,
+        stdout: '',
+        stderr: '[policy denied: root wipe] rm -rf /',
+        timedOut: false,
+        policyVerdict: { decision: 'deny', ruleId: '\\brm\\b.* /', matched: 'rm -rf /', reason: 'root wipe' },
+      }),
+    }),
+    pendingApprovals: [],
+  })
+  const tools = createPiTools(ref, {})
+  const execute = tools.find((t) => t.name === 'execute')!
+  const result = (await execute.execute('call-1', { command: 'rm -rf /' }, undefined, undefined, {} as never)) as {
+    content: Array<{ text: string }>
+  }
+  assert.ok(result.content[0]!.text.includes('[denied by policy] root wipe'))
+  assert.equal(ref.pendingApprovals!.length, 0, 'denials never open an approval card')
+})
+
+test('pi-tools: a created playground rides the turn attachments (delivery face)', async () => {
+  const attachment = {
+    name: 'demo.html',
+    mimetype: 'text/html',
+    sizeBytes: 10,
+    blobId: 'blob_1',
+    artifactId: 'file_1',
+    artifactViewerId: 'feishu:ada',
+  }
+  const ref = fakeRef({
+    current: fakeToolContext({
+      createPlayground: async () => ({ kind: 'playground', artifactId: 'file_1', title: 'demo', attachment }),
+    }),
+    turnAttachments: [],
+  })
+  const tools = createPiTools(ref, { surfaceName: 'web' })
+  const miniapp = tools.find((t) => t.name === 'miniapp')!
+  const result = (await miniapp.execute('call-1', { title: 'demo', html: '<p>hi</p>' }, undefined, undefined, {} as never)) as {
+    content: Array<{ text: string }>
+  }
+  assert.ok(result.content[0]!.text.includes('Created playground "demo"'))
+  assert.deepEqual(ref.turnAttachments, [attachment])
+})

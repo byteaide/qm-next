@@ -77,6 +77,12 @@ export {
   type AllowlistPolicyOptions,
   type AllowlistRule,
 } from './policies/allowlist.ts'
+export {
+  RULE_ENGINE_POLICY_ID,
+  commandTextOf,
+  createRuleEnginePolicy,
+  type CreateRuleEnginePolicyOptions,
+} from './policies/rule-engine.ts'
 
 /**
  * Slice 3.2 — Security Screen Adapter (off/shadow/enforce modes) + the

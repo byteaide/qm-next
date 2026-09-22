@@ -30,6 +30,7 @@ import { createMemoryAdmissionRecordStore, runAdmissionWaterfall } from '@qm/adm
 import type { AdmissionRecordStore } from '@qm/admission'
 import { buildStagePorts } from './admission-integration.ts'
 import { composeFrame, currentTimeBlock } from './frame-composer.ts'
+import { PROACTIVE_OPENER_PROMPT } from './onboarding.ts'
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -135,6 +136,7 @@ export class OrchestratorService extends Service implements Orchestrator {
         ? await deps.tools({
             scopeId,
             sessionId: session.id,
+            ...(input.actor?.id ? { actorId: input.actor.id } : {}),
             ...(input.runId ? { runId: input.runId } : {}),
             ...(input.runId ? { attempt: input.attempt ?? 1 } : {}),
           })
@@ -156,17 +158,23 @@ export class OrchestratorService extends Service implements Orchestrator {
         resolution,
         ...(input.gatewayContext ? { gatewayContext: input.gatewayContext } : {}),
       })
-      // Post-boundary blocks (⑬⑭): the timezone block rides the user's IANA
-      // zone; the memory block comes from the resolution decorator. Neither
-      // enters the recorded cache boundary.
+      // Post-boundary blocks (⑬⑭⑮): the timezone block rides the user's
+      // IANA zone; the memory and pending-onboarding blocks come from the
+      // resolution decorators (qm appends onboarding right after memory,
+      // orchestrator.ts:1650). None enter the recorded cache boundary.
       const timeBlock = input.timezone ? currentTimeBlock(input.timezone, Date.now()) : ''
-      const postBoundary = `${timeBlock ? `\n\n${timeBlock}` : ''}${resolution.memoryBlock ?? ''}`
+      const postBoundary = `${timeBlock ? `\n\n${timeBlock}` : ''}${resolution.memoryBlock ?? ''}${
+        resolution.onboardingBlock ? `\n\n${resolution.onboardingBlock}` : ''
+      }`
       const turnSystemPrompt = `${composed.systemPrompt}${postBoundary}`
       const result = await harness.turns.runTurn({
         session,
         ...(input.runId ? { runId: input.runId } : {}),
         ...(input.cancel ? { cancel: input.cancel } : {}),
-        input: input.text,
+        // qm orchestrator.ts:2253 — a proactive opener with no user text
+        // feeds the opener prompt to the harness; the session entry keeps
+        // the raw (empty) inbound text.
+        ...(input.proactiveOpener && !input.text.trim() ? { input: PROACTIVE_OPENER_PROMPT } : { input: input.text }),
         ...(input.priorTurns?.length ? { priorTurns: input.priorTurns } : {}),
         ...(input.attachments?.length ? { attachments: input.attachments } : {}),
         ...(input.model || choiceModel ? { model: input.model ?? choiceModel! } : {}),
@@ -236,7 +244,7 @@ export class OrchestratorService extends Service implements Orchestrator {
           command: pa.command,
           reason: pa.reason,
           ...(pa.kind ? { kind: 'approval' as const } : {}),
-        })) }
+        })), ...(result.attachments?.length ? { attachments: result.attachments } : {}) }
       } else if (result.silent) {
         finalResult = { status: 'silent', sessionId: session.id, ...(result.stopped ? { stopped: true } : {}) }
       } else {
@@ -245,6 +253,7 @@ export class OrchestratorService extends Service implements Orchestrator {
           sessionId: session.id,
           reply: result.reply,
           ...(result.stopped ? { stopped: true } : {}),
+          ...(result.attachments?.length ? { attachments: result.attachments } : {}),
           sourceUserSeq: userEntry.seq,
           ...(sourceAssistantEntrySeq !== undefined ? { sourceAssistantEntrySeq } : {}),
         }

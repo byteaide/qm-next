@@ -11,6 +11,7 @@
 import assert from 'node:assert/strict'
 import { createHash, createHmac } from 'node:crypto'
 import test from 'node:test'
+import { createMemoryDirectoryStore } from '@qm/directory'
 import { Context } from '@qm/cordis'
 import { createHarnessRouter, createMockHarness, OrchestratorService } from '@qm/orchestrator'
 import { createMemoryRunStore, createMemorySessionStore } from '@qm/store'
@@ -223,6 +224,54 @@ test('soul: org composition, personal write versions, foreign scope 403', async 
   assert.equal(foreign.statusCode, 403)
   assert.equal(foreign.json().error, 'soul_update_denied')
   await app.close()
+})
+
+test('soul: shared-scope writes follow the directory managesScope gate', async () => {
+  const soul = createMemorySoulStore('default')
+  const directory = createMemoryDirectoryStore()
+  await directory.apply({
+    provider: 'feishu',
+    instanceId: 'main',
+    people: [
+      { providerUserId: 'ada', type: 'internal' },
+      { providerUserId: 'mallory', type: 'internal' },
+    ],
+    spaces: [
+      { spaceId: 'C777', kind: 'channel', isPrivate: true },
+      { spaceId: 'C888', kind: 'channel', isPrivate: false },
+      { spaceId: 'G9', kind: 'group' },
+    ],
+    spaceMembers: [
+      { spaceId: 'C777', providerUserId: 'ada' },
+      { spaceId: 'C888', providerUserId: 'ada' },
+      { spaceId: 'G9', providerUserId: 'mallory' },
+    ],
+    syncedAt: Date.now(),
+  })
+  const app = createApiServer({ ...baseDeps(), directory: { directory }, soul: { soul } }, OPTS)
+  const ada = auth(await token('person:ada'))
+
+  const privateChannelMember = await app.inject({ method: 'POST', url: '/v1/soul', headers: ada, payload: { scopeId: 'channel:C777', content: 'Private channel voice.', actorId: 'feishu:ada' } })
+  assert.equal(privateChannelMember.statusCode, 200)
+
+  const publicChannelMember = await app.inject({ method: 'POST', url: '/v1/soul', headers: ada, payload: { scopeId: 'channel:C888', content: 'nope', actorId: 'feishu:ada' } })
+  assert.equal(publicChannelMember.statusCode, 403)
+  assert.equal(publicChannelMember.json().error, 'soul_update_denied')
+
+  const groupOutsider = await app.inject({ method: 'POST', url: '/v1/soul', headers: ada, payload: { scopeId: 'group:G9', content: 'nope', actorId: 'feishu:ada' } })
+  assert.equal(groupOutsider.statusCode, 403)
+
+  const groupMember = await app.inject({ method: 'POST', url: '/v1/soul', headers: ada, payload: { scopeId: 'group:G9', content: 'Group voice.', actorId: 'feishu:mallory' } })
+  assert.equal(groupMember.statusCode, 200)
+
+  const foreignPersonal = await app.inject({ method: 'POST', url: '/v1/soul', headers: ada, payload: { scopeId: 'personal:person:ada', content: 'nope', actorId: 'person:mallory' } })
+  assert.equal(foreignPersonal.statusCode, 403)
+
+  const ungated = createApiServer({ ...baseDeps(), soul: { soul: createMemorySoulStore('default') } }, OPTS)
+  const stillDenied = await ungated.inject({ method: 'POST', url: '/v1/soul', headers: ada, payload: { scopeId: 'channel:C777', content: 'nope', actorId: 'feishu:ada' } })
+  assert.equal(stillDenied.statusCode, 403)
+  await app.close()
+  await ungated.close()
 })
 
 test('config: surface-config defaults, runtime-config ladder, channel-header-pin', async () => {

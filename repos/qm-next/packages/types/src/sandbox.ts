@@ -7,6 +7,7 @@
  * Implementations live in @qm/sandbox; tools and harnesses consume the port.
  */
 import type { ScopeId } from './identity.ts'
+import type { CommandDecisionValue } from './command-gate.ts'
 
 export type LayerMode = 'ro' | 'rw'
 
@@ -92,11 +93,25 @@ export interface ProvisionOptions {
   onStatus?: (text: string) => void
 }
 
+/**
+ * The command-policy verdict behind a policy-shaped ExecResult (X3b G8,
+ * qm NeedsApproval parity): the rule identity travels with the result so
+ * the approval card can carry `matched` + `approvalKey` without re-running
+ * the policy. Present only when a rule fired (`deny` / `require_approval`).
+ */
+export interface PolicyVerdictMetadata {
+  decision: CommandDecisionValue
+  ruleId?: string
+  matched?: string
+  reason?: string
+}
+
 export interface ExecResult {
   stdout: string
   stderr: string
   code: number
   timedOut: boolean
+  policyVerdict?: PolicyVerdictMetadata
 }
 
 export interface ExecOptions {

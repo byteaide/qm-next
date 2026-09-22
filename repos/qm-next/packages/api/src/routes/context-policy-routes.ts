@@ -1,19 +1,23 @@
 /**
  * Parity context-policy routes (11.0 tranche 5, contract "context-policy"):
  * per-channel standing orders / bot ledger / ambient opt-in with qm's exact
- * validation ladder and the optimistic-lock 409. The qm member check
- * (`listContexts` must contain the scope) needs the context registry — lane A
- * accepts any principalId and answers the policy (deviation #44).
+ * validation ladder and the optimistic-lock 409. When `memberScope` is wired
+ * (server.ts derives it from the directory), both verbs return 403 for
+ * principals outside the scope — qm's `memberScope` ladder (deviation #44
+ * closed); without it the lane-A open behavior answers the policy.
  */
 import type { ApiRouteContext, Route } from './framework.ts'
 import { isObj, notFound, sendJson } from './framework.ts'
 import { parseScopeId } from '@qm/types'
+import type { ScopeAccessCheck } from './scope-access.ts'
 import { parseBotLedger, type ChannelPolicyStore } from '../services/channel-policy-store.ts'
 
 const MAX_ORDERS_CHARS = 20_000
 
 export interface ContextPolicyRoutesDeps {
   channelPolicy?: ChannelPolicyStore
+  /** Directory-backed member gate; open lane when absent. */
+  memberScope?: ScopeAccessCheck
 }
 
 function channelContainer(scope: string): string | undefined {
@@ -48,6 +52,9 @@ export function contextPolicyRoutes(deps: ContextPolicyRoutesDeps): ReadonlyArra
           })
         }
         if (!deps.channelPolicy) return notFound(ctx)
+        if (deps.memberScope && !(await deps.memberScope(principalId, scope))) {
+          return sendJson(ctx, 403, { error: 'forbidden' })
+        }
         const p = await deps.channelPolicy.get(container)
         return sendJson(ctx, 200, { policy: policyView(p) })
       },
@@ -69,6 +76,9 @@ export function contextPolicyRoutes(deps: ContextPolicyRoutesDeps): ReadonlyArra
           })
         }
         if (!deps.channelPolicy) return notFound(ctx)
+        if (deps.memberScope && !(await deps.memberScope(principalId, scope))) {
+          return sendJson(ctx, 403, { error: 'forbidden' })
+        }
         if (typeof body.orders !== 'string') return sendJson(ctx, 400, { error: 'bad_request', message: 'orders (string) required' })
         if (body.orders.length > MAX_ORDERS_CHARS) {
           return sendJson(ctx, 400, {

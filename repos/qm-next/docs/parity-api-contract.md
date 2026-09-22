@@ -38,6 +38,8 @@
 | POST `/v1/runs/:id/signal` | `{ kind:"abort"\|"steer", text? }`（steer 缺 text → `400 {error:"bad_request", message:"text required", …outcome}`） | `200 outcome` / `400` / `404` / `409` | 兼容（契约已在 @qm/types） |
 | POST `/v1/runs/:id/withdraw` | — | `200 {withdrawn:true,…}` / `404` / `409` | 兼容 |
 | GET `/v1/runs/:id` | — | `200 Run` / `404` | 兼容 |
+
+> **字段语义（Phase 7+，2026-09-20 cutover 起）**：响应里 `Run` 对象的 `status` 字段对 `runSource='target'` 的行**不再推进**到 `'done'`，永远停留在 `'pending'` 或 `'running'`。观测端做终态判定**必须**读 `targetState ∈ {succeeded, failed, cancelled}`。legacy `runSource='legacy'` 行（迁移脚本未跑过）仍可能含 `status='done'`，向后兼容两套字段都查。详见 `CONTEXT.md` Run State 词条。根因：`packages/store/src/memory-run-store.ts:179-195` 的 `complete()` 实现只写 `targetState`、不再设 `status`。
 | GET `/v1/runs?threadRef=` | — | `200 {runId:string\|null, queued?}` | 兼容 |
 | GET `/v1/deliveries?type=&claimMs=` | — | `200 {deliveries:[]}` | 兼容 |
 | POST `/v1/deliveries/:id/ack` | `{ recipientThreadRef?, slackApiMs?^≥0 }` | `200 {ok:true}` | 兼容 |

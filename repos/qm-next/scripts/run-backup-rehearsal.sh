@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 
 IMAGE="postgres:16-alpine"
 USER_="qm"
-PASSWORD="[redacted-credential]"
+PASSWORD="rehearsal-$(openssl rand -hex 16)"
 NAME="qm-backup-pg-$(date +%s)-$$"
 READY_TIMEOUT_SECONDS=30
 

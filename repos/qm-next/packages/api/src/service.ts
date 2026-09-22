@@ -62,7 +62,16 @@ import {
 } from '@qm/model'
 import { createMemoryScopeMemory, type ScopeMemory } from '@qm/memory'
 import { renderSecurityPolicyPrompt, resolveSecurityPolicy, type SecurityScreener } from '@qm/security'
-import { renderComputerBlock } from '@qm/orchestrator'
+import {
+  configureProductionCommandPolicy,
+  createCommandPolicyRegistry,
+  registerDefaultPolicies,
+  PRODUCTION_DEFAULT_POLICY_ID,
+  QM_COMMAND_POLICY_ENV,
+  type CommandPolicyRegistry,
+} from '@qm/security'
+import type { CommandGate } from '@qm/types'
+import { onboardingBlockFor, renderComputerBlock, renderSharedFilesBlock, type OnboardingTurnDeps } from '@qm/orchestrator'
 import { createMcpServerStore, createMcpToolService, type McpServerStore, type McpToolService } from '@qm/mcp'
 import {
   createBrowserSessionStore,
@@ -83,7 +92,8 @@ import { createMemorySkillStore, type SkillStore } from '@qm/skills'
 import type { RuntimeRouteConfig } from '@qm/orchestrator'
 import { createHarnessRouter, createMockHarness, createSandboxToolContext, OrchestratorService } from '@qm/orchestrator'
 import Schema from '@qm/schemastery'
-import { createLocalSandbox } from '@qm/sandbox'
+import { composePolicy, createLocalSandbox, defaultDenylistPolicy } from '@qm/sandbox'
+import type { CommandPolicyStore } from './services/command-policy-store.ts'
 import {
   createMemoryMap,
   createMemoryRunStore,
@@ -107,6 +117,7 @@ import {
   createMemoryBlobTransfer,
   createMemoryChannelPolicyStore,
   createMemoryDeploymentLayerStore,
+  type BlobTransferService,
   type ConnectorTokenStore,
   createMemoryDeploymentStore,
   createMemoryEnvironmentRegistry,
@@ -127,6 +138,8 @@ import {
   createSurfaceContextQueue,
   createWebhookStore,
 } from './services/index.ts'
+import { createToolControlSurfaces } from './services/tool-control.ts'
+import { sharedFileHandles, type SharedFilesDeps } from './services/shared-files.ts'
 import { createAmbientCursorStore, createPostgresAckEmojiPickStore, createPostgresAgentRequestStore, createPostgresAmbientJudgmentStore } from './services/ambient-stores.ts'
 import type { ChannelPolicyStore as ApiChannelPolicyStore } from './services/channel-policy-store.ts'
 import type { SoulStore } from './services/soul-store.ts'
@@ -235,7 +248,34 @@ export interface ApiConfig {
     defaultTimeoutSec?: number
     /** Hard ceiling for per-command exec timeouts in seconds. */
     defaultTimeoutCeilingSec?: number
+    /**
+     * Command policy for the Phase 3J sandbox gate. Defaults to
+     * `'default-denylist'` — the catastrophic-primitive floor evaluates
+     * before every docker exec. `'off'` disables the gate (not
+     * recommended; ADR-0002 keeps a policy between agents and shells).
+     */
+    commandPolicy?: 'default-denylist' | 'off'
   }
+  /**
+   * X3b per-scope command-policy storage (qm config-store parity): read
+   * by the admin command-policy CRUD + simulate routes and resolved once
+   * per sandbox provision, composed over the catastrophic-primitive
+   * floor (composePolicy semantics — the floor evaluates first).
+   */
+  commandPolicyStore?: CommandPolicyStore
+  /**
+   * Production invariant (ADR-0002, plan §2.2): when true, boot refuses
+   * (CommandPolicyNotConfigured) unless a command policy is selected via
+   * QM_COMMAND_POLICY env or commandPolicyId config. Dev boots default to
+   * PRODUCTION_DEFAULT_POLICY_ID when unset.
+   */
+  production?: boolean
+  /**
+   * Static CommandPolicyRegistry selection (QM_COMMAND_POLICY contract).
+   * Overrides the env var when set; unknown ids fail at boot through
+   * assertProductionConfigured.
+   */
+  commandPolicyId?: string
   /** Dev default system prompt (explicit operator override; empty soul default). */
   systemPrompt?: string
   /** Security posture the rendered policy prompt resolves from (default auto). */
@@ -422,6 +462,9 @@ export const Config = Schema.object({
     memoryMb: Schema.number().description('Memory cap (MB) per sandbox container'),
     defaultTimeoutSec: Schema.number().description('Per-command exec timeout in seconds'),
     defaultTimeoutCeilingSec: Schema.number().description('Hard ceiling for per-command exec timeouts in seconds'),
+    commandPolicy: Schema.string().description('Sandbox command gate: default-denylist (default, catastrophic-primitive floor) | off'),
+    production: Schema.boolean().description('Production invariant (ADR-0002): boot refuses unless QM_COMMAND_POLICY (or commandPolicyId) selects a policy'),
+    commandPolicyId: Schema.string().description('Static CommandPolicyRegistry selection; overrides QM_COMMAND_POLICY env (baseline-deny | default-denylist | allowlist | rule-engine)'),
   }).description('Sandbox-backed tool execution; set any field (e.g. defaultTimeoutSec) to give every turn a ToolContext'),
   anthropicApiKey: Schema.string().description('Anthropic key for the pi harness'),
   openaiApiKey: Schema.string().description('OpenAI key for the pi harness'),
@@ -571,11 +614,29 @@ export class ApiService extends Service<ApiConfig> {
   /** Sandbox backend when tool execution is configured; torn down on dispose. */
   sandbox?: Sandbox
 
+  /**
+   * Static CommandPolicyRegistry (ADR-0002): assembled at boot via
+   * configureProductionCommandPolicy; the fail-fast guard lives there,
+   * this member exposes the selected gate for future consumers (runs
+   * observability already ticks decision metrics through the gate).
+   */
+  commandGate?: CommandGate
+
+  /** Registry behind `commandGate`; exposed for admin introspection lanes. */
+  commandPolicyRegistry?: CommandPolicyRegistry
+
   /** Monitor poller (cluster 2) when `monitorPoller` is on; stopped on dispose. */
   monitorPoller?: MonitorPoller
 
   /** Process registry for background jobs; exposed for the background-tool writer seam. */
   processRegistry?: ProcessRegistry
+
+  /**
+   * Blob transfer port (11.0) when the files/blobs surfaces are on.
+   * Exposed for the IM providers' outbound attachment reads — the feishu
+   * provider uploads turn files by dereferencing their blobId through it.
+   */
+  blobTransfer?: BlobTransferService
 
   /**
    * Target Run event log (Phase 7 / KV-006): producers publish typed
@@ -810,33 +871,99 @@ export class ApiService extends Service<ApiConfig> {
       : undefined
     if (soulStore && 'ready' in soulStore) await (soulStore as { ready(): Promise<void> }).ready()
     const surfaceBranding = this.config.surfaceConfig?.branding
-    const resolution = createSoulResolution(this.config, soulStore, surfaceBranding, () => {
-      const spec = this.sandbox?.profile.spec
-      return spec ? renderComputerBlock(spec, { hasGlobal: true }) : undefined
-    })
+    // X3b — per-scope command policies: admin CRUD/simulate reads them and
+    // every sandbox provision composes the stored scope policy over the
+    // catastrophic-primitive floor (composePolicy semantics).
+    const commandPolicyStore = this.config.commandPolicyStore
+    // Q3 segment ⑫ — shared-files manifest: when a grant ledger + file
+    // store exist, every turn's stable prefix lists the granted handles
+    // (qm sharedFilesSystemSection inside the cache boundary).
+    const sharedFilesDeps = (): SharedFilesDeps | undefined =>
+      grantLedger && fileStore ? { grants: grantLedger, files: fileStore } : undefined
+    // Q4 segment ⑮ — pending-onboarding detection (qm orchestrator.ts:966):
+    // DMs with the onboarding skill resolved and no completion marker in
+    // the scope notebook render the block after the memory segment.
+    const onboardingDeps = (): OnboardingTurnDeps | undefined =>
+      memoryStore && skillStore ? { memory: memoryStore, skills: skillStore } : undefined
+    const resolution: ResolutionService = (() => {
+      const inner = createSoulResolution(this.config, soulStore, surfaceBranding, () => {
+        const spec = this.sandbox?.profile.spec
+        return spec ? renderComputerBlock(spec, { hasGlobal: true }) : undefined
+      })
+      return {
+        resolve: async (conversation, actor) => {
+          const base = await inner.resolve(conversation, actor)
+          const deps = sharedFilesDeps()
+          const handles = deps ? await sharedFileHandles(deps, conversation.audience) : []
+          const ob = onboardingDeps()
+          const onboarding = ob ? await onboardingBlockFor(ob, conversation, base.orgScopeId) : undefined
+          return {
+            ...base,
+            ...(handles.length ? { sharedFilesBlock: renderSharedFilesBlock(handles) } : {}),
+            ...(onboarding ? { onboardingBlock: onboarding } : {}),
+          }
+        },
+        scopeFor: (conversation, actor) => inner.scopeFor(conversation, actor),
+      }
+    })()
     let toolFactory: OrchestratorDeps['tools'] | undefined
     const sandboxHandles = new Map<ScopeId, SandboxHandle>()
     const sandboxConfig = this.config.sandbox
     if (sandboxConfig && Object.keys(sandboxConfig).length > 0) {
       const sc = sandboxConfig
+      const orgScopeId = this.config.scopeId ?? 'org:default'
       const sandbox = createLocalSandbox({
         ...(sc.image ? { image: sc.image } : {}),
         ...(sc.dockerBin ? { dockerBin: sc.dockerBin } : {}),
         ...(sc.cpus !== undefined ? { cpus: sc.cpus } : {}),
         ...(sc.memoryMb !== undefined ? { memoryMb: sc.memoryMb } : {}),
         ...(sc.defaultTimeoutSec !== undefined ? { defaultTimeoutSec: sc.defaultTimeoutSec } : {}),
+        ...(sc.commandPolicy === 'off' ? {} : { policy: 'default-denylist' as const }),
+        // X3b: per-scope policies compose over the floor exactly like the
+        // admin simulate view evaluates them (qm resolution-service parity:
+        // composePolicy(orgFloor, scopePolicy), floor first). Gate off
+        // means no policy at all, per-scope or otherwise.
+        ...(sc.commandPolicy === 'off' || !commandPolicyStore
+          ? {}
+          : {
+              policyFor: async (scopeId: string) => {
+                const stored = await commandPolicyStore.get(scopeId)
+                if (!stored) return 'default-denylist' as const
+                const orgStored = orgScopeId !== scopeId ? await commandPolicyStore.get(orgScopeId) : undefined
+                return composePolicy(orgStored?.policy ?? defaultDenylistPolicy(), stored.policy)
+              },
+            }),
       })
       this.sandbox = sandbox
       const processRegistry = sandbox.readProcess
         ? (databaseUrl ? createPostgresProcessRegistry(databaseUrl) : createMemoryProcessRegistry())
         : undefined
       if (processRegistry) this.processRegistry = processRegistry
-      toolFactory = async ({ scopeId, runId, attempt }) => {
+      toolFactory = async ({ scopeId, runId, attempt, actorId }) => {
         let handle = sandboxHandles.get(scopeId)
         if (!handle) {
           handle = await sandbox.provision([{ scopeId, mountPath: 'global', mode: 'rw' }])
           sandboxHandles.set(scopeId, handle)
         }
+        const toolControl = createToolControlSurfaces({
+          ...(actorId ? { actorId } : {}),
+          cron: () => {
+            const view = this.triggerRuntimeView()
+            if (!view) return undefined
+            return {
+              crons: view.crons,
+              ...(view.scheduler ? { scheduler: view.scheduler } : {}),
+              ...(directoryStore ? { reach: reachDirectory(directoryStore), directory: directoryStore } : {}),
+              deliveries: () => view.deliveries,
+              scopeFor: () => this.config.scopeId ?? 'org:default',
+            }
+          },
+          ...(webhookStore ? { webhooks: () => webhookStore, ...(this.config.publicUrl ? { webhookPublicUrl: this.config.publicUrl } : {}) } : {}),
+          ...(this.mcpToolService ? { mcp: () => this.mcpToolService } : {}),
+          orgScope: this.config.scopeId ?? 'org:default',
+          ...(grantLedger ? { grants: () => grantLedger } : {}),
+          ...(fileStore ? { files: () => fileStore } : {}),
+        })
         return createSandboxToolContext({
           sandbox,
           handle,
@@ -848,6 +975,22 @@ export class ApiService extends Service<ApiConfig> {
             : {}),
           ...(runId ? { runId, attempt: attempt ?? 1 } : {}),
           ...(runs.ledger ? { ledger: runs.ledger } : {}),
+          ...(toolControl.crons ? { crons: toolControl.crons } : {}),
+          ...(toolControl.webhooks ? { webhooks: toolControl.webhooks } : {}),
+          ...(toolControl.mcp ? { mcp: toolControl.mcp } : {}),
+          ...(toolControl.share ? { share: toolControl.share } : {}),
+          ...(toolControl.playgrounds ? { playgrounds: toolControl.playgrounds } : {}),
+          ...(sharedFilesDeps()
+            ? {
+                sharedFiles: {
+                  handles: () => sharedFileHandles(sharedFilesDeps()!),
+                  readBytes: async (ref: string) => {
+                    const file = await fileStore!.openForViewer(ref, actorId ?? '')
+                    return file?.bytes ?? null
+                  },
+                },
+              }
+            : {}),
           ...(soulStore
             ? {
                 soul: {
@@ -996,6 +1139,7 @@ export class ApiService extends Service<ApiConfig> {
     const sessionStateBus = this.config.sessionState ? createMemorySessionStateBus() : undefined
     const grantLedger = this.config.grants || this.config.files || this.config.deployments ? createMemoryGrantLedger() : undefined
     const blobTransfer = this.config.blobs || this.config.files ? createMemoryBlobTransfer() : undefined
+    if (blobTransfer) this.blobTransfer = blobTransfer
     // Files (20.0 twin lane): with databaseUrl the metadata lands in the
     // qm-shaped `file_artifacts` table and bytes go through the
     // content-addressed byte store (`filesDir` for the FS backend; without
@@ -1401,7 +1545,8 @@ export class ApiService extends Service<ApiConfig> {
                  runs,
                  ...(this.config.portalIdentitySecret ? { portalIdentitySecret: this.config.portalIdentitySecret } : {}),
                 ...(memoryStore ? { memory: memoryStore } : {}),
-                ...(fileStore ? { files: fileStore, blobTransfer: blobTransfer! } : {}),
+                 ...(fileStore ? { files: fileStore, blobTransfer: blobTransfer! } : {}),
+                 ...(commandPolicyStore ? { commandPolicies: commandPolicyStore } : {}),
                 ...(deploymentStore ? { deployments: deploymentStore } : {}),
                 ...(skillStore ? { skills: skillStore } : {}),
                 ...(skillPackStore ? { skillPacks: skillPackStore } : {}),
@@ -1504,6 +1649,36 @@ export class ApiService extends Service<ApiConfig> {
       { secrets: this.config.secrets },
     )
     this.app = app
+    // ADR-0002 / plan §2.2 — production CommandGate assembly (X3b final
+    // slice): the static registry lane converges on the same rule engine
+    // the sandbox provision uses (ADR-0019). Operator-registered policies
+    // win (defaults never overwrite), so rule-engine goes in first with a
+    // live resolvePolicy hook over the per-scope store; then
+    // configureProductionCommandPolicy registers the built-ins, applies
+    // the QM_COMMAND_POLICY selection, and fail-fasts (listen never
+    // happens without a policy in production). Rollback above closes the
+    // app if this throws.
+    const commandRegistry = createCommandPolicyRegistry()
+    if (commandPolicyStore) {
+      registerDefaultPolicies(commandRegistry, {
+        policies: ['rule-engine'],
+        ruleEngineResolve: async (request) => {
+          const stored = await commandPolicyStore.get(request.context.scopeId)
+          return stored?.policy
+        },
+      })
+    }
+    const commandEnvSource = this.config.commandPolicyId
+      ? { [QM_COMMAND_POLICY_ENV]: this.config.commandPolicyId }
+      : undefined
+    this.commandPolicyRegistry = commandRegistry
+    this.commandGate = configureProductionCommandPolicy(commandRegistry, {
+      production: this.config.production === true,
+      ...(commandEnvSource ? { env: commandEnvSource } : {}),
+    })
+    if (this.config.commandPolicyId && this.config.commandPolicyId !== PRODUCTION_DEFAULT_POLICY_ID) {
+      console.log(`[api] command policy: ${this.config.commandPolicyId} (static registry, ADR-0002)`)
+    }
     try {
       await app.listen({ port: this.config.port ?? 0, host: this.config.host ?? '127.0.0.1' })
     } catch (err) {

@@ -1,7 +1,7 @@
 # qm-next Architecture
 
-中文为主（英文版后补）。状态：**Current — 2026-09-20 Phase 7 cutover 后**。本文描述当前运行时行为（legacy 路径已于 Phase 7 切除）；ADR 记录决策原因。
-配套：PRD 与任务分解见 `aa` 仓 `todo/tasks/`（prd-qm-next.md / tasks-qm-next.md）。
+中文为主（英文版后补）。状态：**Current — 2026-09-21 qm-soul 灵魂层（tag `soul`）后**。本文描述当前运行时行为（legacy 路径已于 Phase 7 切除）；ADR 记录决策原因。
+配套：PRD 与任务分解见 `aa` 仓 `todo/tasks/`（prd-qm-next.md / tasks-qm-next.md / tasks-qm-soul.md）。
 
 ## 0. 架构决定与当前行为
 
@@ -17,6 +17,7 @@
 | IM intake | durable Inbox + independent subscriber cursors + retry/dead-letter；进程内 dedup 已删除，durable accept（provider + eventId）是唯一去重权威 | 0008, 0015 |
 | Trigger | `packages/types` 中最小 `TriggerRuntime` contract；composition 注入；`api.cronsRuntime` 兼容字段已删除 | 0003 |
 | Connector OAuth | Connector context owns lifecycle；durable `oauth_flows`/`consent_links` store；HTTP 只是 adapter | 0009, 0016 |
+| Soul 层（协议帧） | system prompt 是 orchestrator 每回合组装的定序协议帧（`composeFrame`）：modeFrame → effectiveSoul（org 权威，低 scope 声明不可覆盖）→ sharedCore → securityPrompt → computerBlock/skillsBlock → gatewayBlock；模式按回合来源选择（ambient/自动化带目的地→autonomous、非自动化 dm/web→conversation、否则 fallback）；渲染 fail-loud（未解析 token 中止组装）；`stableSystemBytes` 记录稳定段边界喂 harness prompt-cache（time/memory 块在边界后追加）；平台词汇经 `imChannel`/`imLabel` 变量注入，core 协议文本零平台符号；soul 经 SoulStore 联邦（PG twin `soul_configs`/`soul_history`），guidance 工具 soulRead/soulWrite 读写个人 scope | 0018 |
 
 ## 1. 设计原则
 
@@ -268,6 +269,7 @@ M0-M2 单进程（in-process 插件，一 profile 一进程）。M3 视资源隔
 | 门禁 | 内容 |
 |------|------|
 | `pnpm check:im` | grep core 服务 src/（api/approvals/boot/directory/im-bridge/im-core/memory/orchestrator/reach/skills/store/triggers/types/web-ui）无 `slack\|feishu\|lark\|wecom\|dingtalk` 符号（M4 21.1） |
+| `pnpm check:soul` | 全仓 grep "You are qm" + "-next." 拼接串恒零：dev 占位提示防回流（ADR-0018），文档与 fixture 均不得字面出现该串 |
 | `pnpm rescope-check` | vendor 无 `@deepseek-ai` 残留 |
 | `pnpm typecheck` | strict TS 全仓 |
 | `pnpm test` / `pnpm test:pg` | 单测 + e2e（无 PG / 一次性 PG 容器全量对拍） |

@@ -7,7 +7,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { TurnResolution } from '@qm/types'
-import { composeFrame, currentTimeBlock, deriveSurfaceTools, renderComputerBlock, renderGatewayBlock, selectFrameMode } from '@qm/orchestrator'
+import { composeFrame, currentTimeBlock, deriveSurfaceTools, renderComputerBlock, renderGatewayBlock, renderSharedFilesBlock, selectFrameMode } from '@qm/orchestrator'
 import { renderSecurityPolicyPrompt, resolveSecurityPolicy } from '@qm/security'
 import { orgSoul, readGolden, renderSharedCore, soulPrompt } from './soul-fixtures.ts'
 
@@ -147,4 +147,42 @@ test('gateway block: renders location and identifiers, neutralized cron warning 
   assert.match(web, /create the cron with a real platform destination: use `recipient` for a Slack DM/)
   assert.equal(renderGatewayBlock('im', undefined, 'Slack'), '## Where you are\nYou are talking with the user over im.')
   assert.equal(renderGatewayBlock(undefined, undefined, 'Slack'), '')
+})
+
+test('shared-files block: manifest lists granted handles inside the stable prefix (segment ⑫)', () => {
+  const handles = [
+    { handlePath: 'shared/report.md', ownerScopeId: 'personal:ada', ownerPath: 'f1', permission: 'read' as const },
+    { handlePath: 'shared/drop.xlsx', ownerScopeId: 'personal:ada', ownerPath: 'f2', permission: 'write' as const },
+  ]
+  const block = renderSharedFilesBlock(handles)
+  assert.match(block, /^## Files shared with you\n/)
+  assert.match(block, /2 files shared with you/)
+  assert.match(block, /- shared\/report\.md\n/)
+  assert.match(block, /- shared\/drop\.xlsx \(writable\)/)
+  assert.equal(renderSharedFilesBlock([]), '')
+  assert.equal(renderSharedFilesBlock(undefined), '')
+  assert.equal(
+    renderSharedFilesBlock([{ handlePath: 'workspace/x.md', ownerScopeId: 'org:test', ownerPath: 'x', permission: 'read' }]),
+    '',
+    'only shared/ handles manifest',
+  )
+
+  const many = Array.from({ length: 30 }, (_, i) => ({
+    handlePath: `shared/f${i}.md`,
+    ownerScopeId: 'org:test',
+    ownerPath: `f${i}`,
+    permission: 'read' as const,
+  }))
+  assert.match(renderSharedFilesBlock(many), /…and 5 more \(read shared\/<name> to fetch\)/)
+
+  const composed = composeFrame({
+    ...composerInput({ mode: 'autonomous', im: true }, false),
+    resolution: {
+      branding: { botName: 'QM', orgName: 'Acme Inc' },
+      sharedFilesBlock: block,
+    },
+    imLabel: 'Slack',
+  })
+  const stable = composed.systemPrompt.slice(0, composed.stableSystemBytes)
+  assert.ok(stable.includes('## Files shared with you'), 'segment ⑫ rides inside the prompt-cache boundary')
 })

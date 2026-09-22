@@ -37,6 +37,28 @@ export class FeishuProviderService extends Service {
     const deps: FeishuProviderDeps = this.config.channelFactory
       ? { channelFactory: this.config.channelFactory }
       : {}
+    // Outbound turn attachments (playground delivery): dereference blobIds
+    // through the api's blob transfer when the composition runs one.
+    const api = this.ctx.reflect.get('api', false) as { blobTransfer?: { open(id: string): Promise<{ bytes: Buffer } | null>; put(bytes: Buffer): Promise<{ blobId: string; sizeBytes: number }> } } | undefined
+    if (api?.blobTransfer) {
+      const blobs = api.blobTransfer
+      deps.blobs = {
+        read: async (blobId) => {
+          const opened = await blobs.open(blobId)
+          if (!opened) throw new Error(`blob not found: ${blobId}`)
+          return opened.bytes
+        },
+        stage: async (content, meta) => {
+          const staged = await blobs.put(Buffer.from(content))
+          return {
+            name: meta?.name ?? 'file',
+            mimetype: meta?.mimetype ?? 'application/octet-stream',
+            sizeBytes: staged.sizeBytes,
+            blobId: staged.blobId,
+          }
+        },
+      }
+    }
     const provider: ImProvider = createFeishuProvider(this.config, deps)
     const dispose = await this.ctx.im.register(provider)
     return async () => {

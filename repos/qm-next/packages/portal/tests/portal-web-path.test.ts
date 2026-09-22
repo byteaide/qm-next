@@ -33,7 +33,7 @@ import {
 } from '@qm/api'
 import type { ResolutionService, ScopeId } from '@qm/types'
 import { createApiRelay, createWebUiServer } from '@qm/web-ui'
-import { createCoreAdminProbe, createPortalServer, seal, deriveKey } from '../src/index.ts'
+import { createCoreAdminProbe, createImpersonateAudit, createPortalServer, seal, deriveKey } from '../src/index.ts'
 
 const SCOPE: ScopeId = 'org:default'
 const SECRET = 'dev-m1-secret-0000000000000000000000000000'
@@ -134,7 +134,10 @@ async function buildRig(): Promise<Rig> {
   return { api, web, webPort, runner, runs, adminStatusOf: createCoreAdminProbe(coreApi) }
 }
 
-async function startPortal(rig: Rig): Promise<{ base: string; close: () => Promise<void> }> {
+async function startPortal(
+  rig: Rig,
+  extra?: { impersonateAudit?: (action: 'start' | 'stop', adminId: string, target: string) => Promise<{ ok: boolean; status?: number; displayName?: string; message?: string }> },
+): Promise<{ base: string; close: () => Promise<void> }> {
   const portal = createPortalServer(
     {
       orgId: 'dev',
@@ -144,6 +147,7 @@ async function startPortal(rig: Rig): Promise<{ base: string; close: () => Promi
       devPrincipal: 'dev@example.com',
       adminStatusOf: rig.adminStatusOf,
       replayDedupe: createMemoryReplayDedupe(),
+      ...(extra?.impersonateAudit ? { impersonateAudit: extra.impersonateAudit } : {}),
     },
     { host: '127.0.0.1', port: 0, webUiOrigin: `http://127.0.0.1:${rig.webPort}` },
   )
@@ -273,6 +277,131 @@ test('admin-login link: single-use token → boss session admitted through the c
       redirect: 'manual',
     })
     assert.equal(replay.status, 400)
+  } finally {
+    await portal?.close()
+    await rig.web.close()
+    await rig.api.close()
+    await rig.runner.stop()
+  }
+})
+
+const TARGET = 'intern@example.com'
+
+async function bossSession(portal: { base: string }): Promise<string> {
+  const now = Math.floor(Date.now() / 1000)
+  const jti = randomBytes(18).toString('base64url')
+  const token = seal(
+    { k: 'admin-login', sub: BOSS, aud: PUBLIC_URL, iat: now, exp: now + 240, jti },
+    deriveKey(PORTAL_SECRET, 'portal.admin-login.v1'),
+  )
+  const confirm = await fetch(`${portal.base}/auth/admin-login`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      origin: PUBLIC_URL,
+      'sec-fetch-site': 'same-origin',
+    },
+    body: new URLSearchParams({ token }).toString(),
+    redirect: 'manual',
+  })
+  assert.equal(confirm.status, 303)
+  return sessionCookieOf(confirm)
+}
+
+test('portal impersonation: gates, sealed cookie, proxied principal swap, stop (X2)', async () => {
+  const rig = await buildRig()
+  let portal: Awaited<ReturnType<typeof startPortal>> | undefined
+  try {
+    portal = await startPortal(rig, {
+      impersonateAudit: createImpersonateAudit({ app: rig.api, config: {} }),
+    })
+    const sameOrigin = { origin: PUBLIC_URL, 'sec-fetch-site': 'same-origin' }
+
+    // Anonymous: no session, no seal (the local-logout cookie opts out of
+    // the loopback bypass lane so the request is genuinely anonymous).
+    const anonymous = await fetch(`${portal.base}/auth/impersonate?target=${encodeURIComponent(TARGET)}`, {
+      method: 'POST',
+      headers: { ...sameOrigin, cookie: 'portal_local_logout=1' },
+      redirect: 'manual',
+    })
+    assert.equal(anonymous.status, 401)
+
+    // Sign in as the boss through the admin-login lane.
+    const cookie = await bossSession(portal)
+
+    // Missing target and self-target are refused; no cookie is sealed.
+    const missing = await fetch(`${portal.base}/auth/impersonate`, {
+      method: 'POST',
+      headers: { ...sameOrigin, cookie },
+      redirect: 'manual',
+    })
+    assert.equal(missing.status, 400)
+    const self = await fetch(`${portal.base}/auth/impersonate?target=${encodeURIComponent(BOSS)}`, {
+      method: 'POST',
+      headers: { ...sameOrigin, cookie },
+      redirect: 'manual',
+    })
+    assert.equal(self.status, 400)
+
+    // Cross-origin posts are refused before anything else.
+    const crossOrigin = await fetch(`${portal.base}/auth/impersonate?target=${encodeURIComponent(TARGET)}`, {
+      method: 'POST',
+      headers: { cookie, origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' },
+      redirect: 'manual',
+    })
+    assert.equal(crossOrigin.status, 403)
+
+    // A non-admin session is refused.
+    const devLogin = await fetch(`${portal.base}/auth/login?returnTo=/`, { redirect: 'manual' })
+    assert.equal(devLogin.status, 302)
+    const devCookie = sessionCookieOf(devLogin)
+    const nonAdmin = await fetch(`${portal.base}/auth/impersonate?target=${encodeURIComponent(TARGET)}`, {
+      method: 'POST',
+      headers: { ...sameOrigin, cookie: devCookie },
+      redirect: 'manual',
+    })
+    assert.equal(nonAdmin.status, 403)
+
+    // The admin seal: the start assumption is audited through the core
+    // admin lane and the cookie comes back sealed.
+    const start = await fetch(`${portal.base}/auth/impersonate?target=${encodeURIComponent(TARGET)}`, {
+      method: 'POST',
+      headers: { ...sameOrigin, cookie },
+      redirect: 'manual',
+    })
+    assert.equal(start.status, 200)
+    const startBody = (await start.json()) as { ok?: boolean; target?: string }
+    assert.equal(startBody.ok, true)
+    assert.equal(startBody.target, TARGET)
+    const impCookie = start.headers
+      .getSetCookie()
+      .find((c) => c.startsWith('portal_impersonate='))
+    assert.ok(impCookie, 'the impersonation cookie is sealed')
+
+    // The proxy acts as the target while the boss identity rides `imp`.
+    const swapped = await fetch(`${portal.base}/me`, { headers: { cookie: `${cookie}; ${impCookie!.split(';')[0] ?? ''}` } })
+    assert.equal(swapped.status, 200)
+    const who = (await swapped.json()) as { user?: string; impersonatedBy?: string | null }
+    assert.equal(who.user, TARGET)
+    assert.equal(who.impersonatedBy, BOSS)
+
+    // The session cookie alone never impersonates.
+    const unswapped = await fetch(`${portal.base}/me`, { headers: { cookie } })
+    assert.equal(((await unswapped.json()) as { user?: string; impersonatedBy?: string | null }).user, BOSS)
+
+    // Stop clears the cookie and audits the stop against the same lane.
+    const stop = await fetch(`${portal.base}/auth/impersonate/stop`, {
+      method: 'POST',
+      headers: { ...sameOrigin, cookie: `${cookie}; ${impCookie!.split(';')[0] ?? ''}` },
+      redirect: 'manual',
+    })
+    assert.equal(stop.status, 200)
+    assert.ok(stop.headers.getSetCookie().some((c) => c.startsWith('portal_impersonate=')), 'the cookie is cleared')
+
+    const afterStop = await fetch(`${portal.base}/me`, { headers: { cookie } })
+    const after = (await afterStop.json()) as { user?: string; impersonatedBy?: string | null }
+    assert.equal(after.user, BOSS)
+    assert.equal(after.impersonatedBy, null)
   } finally {
     await portal?.close()
     await rig.web.close()

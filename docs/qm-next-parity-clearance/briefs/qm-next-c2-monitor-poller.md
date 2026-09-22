@@ -1,6 +1,5 @@
 # qm-next-c2-monitor-poller
 
-> ⚠️ **BATCH 2 — BLOCKED.** Do not dispatch until triggers/runs surfaces are exposed to `@qm/monitors`.
 
 ## Origin
 

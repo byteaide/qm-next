@@ -50,10 +50,24 @@ export interface TurnResolution {
    */
   skillsBlock?: string
   /**
+   * Segment ⑫ — the shared-files manifest (qm sharedFilesSystemSection):
+   * granted handles the conversation audience may read on demand. Inside
+   * the stable prefix, after the gateway block (qm segment order).
+   */
+  sharedFilesBlock?: string
+  /**
    * Segment ⑭ — the memory recall block. Appended AFTER the prompt-cache
    * boundary, never inside the stable prefix (qm parity).
    */
   memoryBlock?: string
+  /**
+   * Segment ⑮ — the pending-onboarding block (qm renderPendingOnboarding-
+   * Prompt). Appends after the memory block, outside the cache boundary
+   * (qm orchestrator.ts:1650); the resolution emits it only for DMs whose
+   * skill store resolves the onboarding skill and whose notebook lacks a
+   * completion marker.
+   */
+  onboardingBlock?: string
   /**
    * Resolution-side assertion that the turn carries the surface tool set;
    * the orchestrator merges it with the caller-supplied TurnInput flag and
@@ -98,6 +112,8 @@ export interface OrchestratorDeps {
   tools?: (input: {
     scopeId: ScopeId
     sessionId: string
+    /** Turn actor principal id — control-plane tool ops (crons, shares) own resources under it. */
+    actorId?: string
     runId?: string
     attempt?: number
   }) => ToolContext | null | Promise<ToolContext | null>

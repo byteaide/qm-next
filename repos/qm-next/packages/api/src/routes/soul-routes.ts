@@ -1,15 +1,18 @@
 /**
  * /v1/soul — qm soul surface: read composes the org policy with the scope
- * soul (qm getSoul shape); writes enforce the personal-scope ownership
- * rule (shared-scope writes need managesScope — a real directory check
- * that lands with 13.0).
+ * soul (qm getSoul shape); writes enforce the personal-scope ownership rule
+ * and allow shared-scope writes only through `managesScope` (server.ts
+ * derives it from the directory — qm `createCanManageScope` semantics).
  */
 import { parseScopeId } from '@qm/types'
 import type { SoulStore } from '../services/soul-store.ts'
+import type { ScopeAccessCheck } from './scope-access.ts'
 import { badRequest, isObj, sendJson, type ApiRouteContext, type Route } from './framework.ts'
 
 export interface SoulDeps {
   soul: SoulStore
+  /** Directory-backed shared-scope write gate; deny-all for shared scopes when absent. */
+  managesScope?: ScopeAccessCheck
 }
 
 function getSoul(ctx: ApiRouteContext, deps: SoulDeps): unknown {
@@ -28,7 +31,9 @@ async function postSoul(ctx: ApiRouteContext, deps: SoulDeps): Promise<unknown> 
   }
   const parsed = parseScopeId(scopeIdVal)
   const allowedPersonal = parsed.kind === 'personal' && parsed.ref === actorId
-  if (!allowedPersonal) {
+  const allowedShared =
+    !allowedPersonal && Boolean(deps.managesScope && (await deps.managesScope(actorId, scopeIdVal)))
+  if (!allowedPersonal && !allowedShared) {
     return sendJson(ctx, 403, { error: 'soul_update_denied', message: 'not authorized to update SOUL for this scope' })
   }
   try {

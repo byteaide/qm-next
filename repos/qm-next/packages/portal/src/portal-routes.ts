@@ -14,6 +14,7 @@ import { portalLang, portalText, resolvePortalLocale, type PortalLocale } from '
 import {
   clearCookie,
   deriveKey,
+  openImpersonation,
   openSession,
   randomToken,
   readCookie,
@@ -22,6 +23,7 @@ import {
   seal,
   setCookie,
   openTmp,
+  type ImpersonationClaims,
   type SessionClaims,
   type TmpClaims,
 } from './session.ts'
@@ -32,6 +34,7 @@ const TMP_TTL_S = 600
 const LOCAL_LOGOUT_COOKIE = 'portal_local_logout'
 const CONSUMED_STATES_MAX = 10_000
 const DEFAULT_SESSION_TTL_S = 28_800
+const DEFAULT_IMPERSONATE_TTL_S = 3600
 const DEV_FALLBACK_SECRET = 'qm-next-dev-portal-secret-change-me!!'
 
 export interface PortalDeps {
@@ -44,6 +47,14 @@ export interface PortalDeps {
   cookieDomain?: string
   appsDomain?: string
   adminStatusOf?: (principalId: string) => Promise<boolean>
+  /**
+   * X2 support flow: records `impersonate.start` / `impersonate.stop` with
+   * the core admin lane (qm `coreImpersonate`). The portal only seals the
+   * cookie; the core records who assumed whom. Absent in dev rigs.
+   */
+  impersonateAudit?: (action: 'start' | 'stop', adminId: string, target: string) => Promise<{ ok: boolean; status?: number; displayName?: string; message?: string }>
+  /** Impersonation cookie lifetime (qm `PORTAL_IMPERSONATE_TTL_S`, default 3600). */
+  impersonateTtlS?: number
   replayDedupe?: ReplayDedupe
   oidc?: OidcConfig
   principalRule?: PrincipalRule
@@ -63,6 +74,8 @@ export interface PortalState {
   sessionMaxTtlS: number
   sessionKey: Buffer
   tmpKey: Buffer
+  impersonateKey: Buffer
+  impersonateTtlS: number
   identitySecret: string
   cookieDomain: string | undefined
   consumedStates: LRUCache<string, number>
@@ -152,6 +165,8 @@ export function createPortalState(deps: PortalDeps): PortalState {
     sessionMaxTtlS: deps.sessionMaxTtlS ?? Math.max(86_400, sessionTtlS),
     sessionKey: deriveKey(secret, 'portal.session.v1'),
     tmpKey: deriveKey(secret, 'portal.tmp.v1'),
+    impersonateKey: deriveKey(secret, 'portal.impersonate.v1'),
+    impersonateTtlS: deps.impersonateTtlS ?? DEFAULT_IMPERSONATE_TTL_S,
     identitySecret: deps.identitySecret ?? secret,
     cookieDomain: deps.cookieDomain ?? (deps.appsDomain ? derivedCookieDomain(hostOf(deps.publicUrl), deps.appsDomain) : undefined),
     consumedStates: new LRUCache<string, number>({ max: CONSUMED_STATES_MAX, ttl: 2 * TMP_TTL_S * 1000 }),
@@ -536,6 +551,41 @@ export function registerPortal(app: FastifyInstance, deps: PortalDeps): void {
       setAuthenticatedSession(state, reply, claims.email)
       return reply.code(303).header('location', '/admin/ui/').header('cache-control', 'no-store').send()
     },
+  })
+
+  app.post('/auth/impersonate', async (req, reply) => {
+    const session = currentSession(state, req)
+    if (!session) return reply.code(401).send({ error: 'sign_in' })
+    if (!sameOriginRequest(req, state.origin)) return reply.code(403).send({ error: 'forbidden' })
+    if (!deps.adminStatusOf) return reply.code(404).send({ error: 'not_found' })
+    if (!(await deps.adminStatusOf(session.sub))) return reply.code(403).send({ error: 'forbidden', message: 'admin access required' })
+    const target = ((req.query as Record<string, string | undefined>).target ?? '').trim()
+    if (!target) return reply.code(400).send({ error: 'bad_request', message: 'target principal required' })
+    if (target === session.sub) return reply.code(400).send({ error: 'bad_request', message: 'cannot impersonate yourself' })
+    // X2 qm parity (admin/users.ts:428-439): the core records the assumption
+    // of the support flow; refusal (unknown target, revoked admin) surfaces
+    // without any cookie being sealed.
+    const audit = await deps.impersonateAudit?.('start', session.sub, target)
+    if (audit && !audit.ok) {
+      const status = audit.status === 403 || audit.status === 400 ? audit.status : 502
+      return reply.code(status).send({ error: 'impersonate_failed', message: audit.message ?? 'core refused impersonation' })
+    }
+    const now = Math.floor(nowMs() / 1000)
+    const imp: ImpersonationClaims = { k: 'impersonate', actor: session.sub, target, org: session.org, iat: now, exp: now + state.impersonateTtlS }
+    setSessionCookies(reply, [
+      setCookie('portal_impersonate', seal(imp, state.impersonateKey), { path: '/', maxAge: state.impersonateTtlS, secure: state.secureCookies }),
+    ])
+    return reply.code(200).send({ ok: true, target, displayName: audit?.displayName ?? target })
+  })
+
+  app.post('/auth/impersonate/stop', async (req, reply) => {
+    if (!sameOriginRequest(req, state.origin)) return reply.code(403).send({ error: 'forbidden' })
+    const imp = openImpersonation(readCookie(req.headers.cookie, 'portal_impersonate'), state.impersonateKey, nowMs())
+    setSessionCookies(reply, [clearCookie('portal_impersonate', '/', state.secureCookies)])
+    const session = currentSession(state, req)
+    if (session && imp && imp.actor === session.sub) await deps.impersonateAudit?.('stop', session.sub, imp.target)
+    if (wantsHtml(req)) return reply.code(303).header('location', '/').header('cache-control', 'no-store').send()
+    return reply.code(200).send({ ok: true })
   })
 
   app.post('/auth/logout', (req, reply) => {

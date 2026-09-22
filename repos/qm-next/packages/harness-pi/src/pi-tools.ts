@@ -3,6 +3,7 @@ import { Type } from 'typebox'
 import type { CronFireLogEntry, ScopeId } from '@qm/types'
 import type { EntryType } from '@qm/types'
 import type { ToolContext, PublishInput, PublishAudienceDescriptor, ShareDirective } from '@qm/types'
+import type { OutgoingAttachment } from '@qm/types'
 import type { GapWork, McpToolDescriptor } from '@qm/types'
 import { NeedsApproval, CommandDenied } from '@qm/types'
 import { parseScopeId } from '@qm/types'
@@ -52,6 +53,8 @@ export interface ToolContextRef {
     approvalKey?: string
   }>
   pausedOnApproval?: boolean | undefined
+  /** Outbound files produced this turn (playground artifacts) — drained into the turn result. */
+  turnAttachments?: OutgoingAttachment[]
   emit?: (entry: { type: EntryType; payload: unknown; scopeLabel: ScopeId }) => void | Promise<unknown>
   scopeLabel?: ScopeId
   orgScopeId?: ScopeId
@@ -583,6 +586,35 @@ export function createPiTools(ref: ToolContextRef, opts?: PiToolsOptions): ToolD
         ...(ref.abortSignal ? { signal: ref.abortSignal } : {}),
       }
       const r = await tc.execute(params.command, Object.keys(execOpts).length ? execOpts : undefined)
+      // X3b G8 — policy verdicts travel on the result so the approval
+      // card carries matched + approvalKey (qm NeedsApproval parity).
+      if (r.policyVerdict?.decision === 'require_approval') {
+        const reason = r.policyVerdict.reason ?? 'policy requires approval'
+        ref.pendingApprovals?.push({
+          command: params.command,
+          reason,
+          kind: 'approval',
+          ...(r.policyVerdict.matched !== undefined ? { matched: r.policyVerdict.matched } : {}),
+          ...(params.purpose ? { purpose: params.purpose } : {}),
+          ...(r.policyVerdict.ruleId ? { approvalKey: r.policyVerdict.ruleId } : {}),
+        })
+        ref.pausedOnApproval = true
+        return recordResult(
+          callId,
+          { tool: 'execute', blocked: 'needs_approval', reason },
+          { ...text(`[blocked: needs human approval] ${reason}`), terminate: true },
+          true,
+        )
+      }
+      if (r.policyVerdict?.decision === 'deny') {
+        const reason = r.policyVerdict.reason ?? r.policyVerdict.ruleId ?? 'denied by policy'
+        return recordResult(
+          callId,
+          { tool: 'execute', denied: true, reason },
+          text(`[denied by policy] ${reason}`),
+          true,
+        )
+      }
       const parts = [r.stdout, r.stderr ? `[stderr]\n${r.stderr}` : ''].filter(Boolean).join('\n')
       const reachedPrefix = r.reached ? `[ran on ${r.reached.label}'s computer]\n` : ''
       return recordResult(
@@ -965,7 +997,8 @@ export function createPiTools(ref: ToolContextRef, opts?: PiToolsOptions): ToolD
     description:
       'Create a small interactive playground only when the person asks to see, play with, or step through a mechanism. ' +
       'Provide a self-contained HTML document with inline CSS and JavaScript; the browser runs it in an isolated frame ' +
-      'without network access. The playground is attached to the turn automatically, so do not add a marker or URL to the reply.',
+      'without network access. The playground is saved to Files, where the person can open it; turn-attachment ' +
+      'delivery is not wired yet, so mention where it landed if it matters.',
     parameters: Type.Object({
       title: Type.String({ description: 'Short title shown above the playground.' }),
       html: Type.Optional(Type.String({ description: 'Self-contained HTML document or fragment.' })),
@@ -981,6 +1014,7 @@ export function createPiTools(ref: ToolContextRef, opts?: PiToolsOptions): ToolD
         const html = params.file !== undefined ? (await tc.read(params.file)).content : params.html
         if (html == null) throw new Error(`no such file: ${params.file}`)
         const artifact = await tc.createPlayground({ title: params.title, html })
+        if (artifact.attachment) (ref.turnAttachments ??= []).push(artifact.attachment)
         return recordResult(
           callId,
           { tool: 'miniapp' },

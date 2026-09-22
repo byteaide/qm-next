@@ -848,8 +848,19 @@ export function imRunResultDelivery(
     body = cards
       ? { card: cards.render({ runId: run.id, sessionId: result.sessionId ?? '', approvals: result.pendingApprovals ?? [] }) }
       : { text: approvalRequestNotice(result.pendingApprovals ?? []) }
-  } else if (result?.status === 'ok' && result.reply !== undefined) {
-    body = replyAs === 'text' ? { text: result.reply } : { markdown: result.reply }
+  } else if (result?.status === 'ok' && (result.reply !== undefined || result.attachments?.length)) {
+    // qm runResultDelivery: the reply and the turn's outbound files ride
+    // together; an attachments-only turn still delivers (no empty text),
+    // and an empty-reply turn with no files sends nothing.
+    const hasReply = result.reply !== undefined && result.reply !== ''
+    const hasFiles = !!result.attachments?.length
+    if (hasReply || hasFiles) {
+      const primary = hasReply ? (replyAs === 'text' ? { text: result.reply! } : { markdown: result.reply! }) : {}
+      body = {
+        ...primary,
+        ...(hasFiles ? { attachments: result.attachments } : {}),
+      } as OutboundBody
+    }
   } else if (result?.status === 'refused') {
     body = { text: `⚠️ ${result.reason ?? 'turn refused'}` }
   }

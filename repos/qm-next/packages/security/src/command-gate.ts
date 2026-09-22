@@ -32,6 +32,7 @@ import { randomUUID } from 'node:crypto'
 import { CommandPolicyNotConfigured, type CommandPolicyRegistry } from './command-policy.ts'
 import { createAllowlistPolicy } from './policies/allowlist.ts'
 import { createDefaultDenylistPolicy, createDefaultDenylistPolicyAlias } from './policies/default-denylist.ts'
+import { createRuleEnginePolicy, RULE_ENGINE_POLICY_ID } from './policies/rule-engine.ts'
 import { bumpCommandGateDecision } from '@qm/runs'
 
 export interface CreateCommandGateOptions {
@@ -98,7 +99,11 @@ export function createCommandGate(
  */
 export function registerDefaultPolicies(
   registry: CommandPolicyRegistry,
-  opts: { policies?: ReadonlyArray<'baseline-deny' | 'default-denylist' | 'allowlist'> } = {},
+  opts: {
+    policies?: ReadonlyArray<'baseline-deny' | 'default-denylist' | 'allowlist' | 'rule-engine'>
+    /** Static rule set for the opt-in `rule-engine` policy (ADR-0019). */
+    ruleEngineResolve?: Parameters<typeof createRuleEnginePolicy>[0]['resolvePolicy']
+  } = {},
 ): readonly CommandPolicyId[] {
   const wanted = new Set(opts.policies ?? ['baseline-deny', 'default-denylist', 'allowlist'])
   const ids: CommandPolicyId[] = []
@@ -113,6 +118,12 @@ export function registerDefaultPolicies(
   if (wanted.has('allowlist')) {
     if (!registry.get('allowlist')) registry.register(createAllowlistPolicy())
     ids.push('allowlist')
+  }
+  if (wanted.has('rule-engine')) {
+    if (!registry.get(RULE_ENGINE_POLICY_ID)) {
+      registry.register(createRuleEnginePolicy({ resolvePolicy: opts.ruleEngineResolve ?? (() => undefined) }))
+    }
+    ids.push(RULE_ENGINE_POLICY_ID)
   }
   return ids
 }

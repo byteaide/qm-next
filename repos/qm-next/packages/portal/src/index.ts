@@ -53,6 +53,7 @@ export {
 } from './portal-routes.ts'
 export {
   createCoreAdminProbe,
+  createImpersonateAudit,
   createPortalServer,
   PortalService,
   type PortalConfig,

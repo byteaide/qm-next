@@ -29,9 +29,15 @@ export const DEFAULT_DENYLIST_PATTERNS: ReadonlyArray<{ pattern: string; reason:
     pattern: '\\brm\\b[^|;&]*\\s+-[^|;&]*\\s+/(?:\\s|$|[a-zA-Z0-9._][^/\\s|;&]*(?:\\s|$))',
     reason: 'catastrophic: rm targeting root-level path',
   },
-  // mkfs.* / mkswap / mkntfs — wipe disk partitions.
+  // mkfs.* / mkswap / mkntfs — wipe disk partitions. Two spellings
+  // because the safe-regex analyzer rejects quantified non-capturing
+  // groups (`(?:\.[a-z0-9]+)?`), qm's analyzer semantics preserved.
   {
-    pattern: '\\bmkfs(?:\\.[a-z0-9]+)?\\s+/dev/',
+    pattern: '\\bmkfs\\.[a-z0-9]+\\s+/dev/',
+    reason: 'catastrophic: filesystem creation command (mkfs / mkswap / mkntfs)',
+  },
+  {
+    pattern: '\\bmkfs\\s+/dev/',
     reason: 'catastrophic: filesystem creation command (mkfs / mkswap / mkntfs)',
   },
   // dd to /dev/sdX or /dev/nvmeXnY — direct disk write.

@@ -8,7 +8,7 @@
  * sandbox-routes surface still answer qm's unwired shapes until their
  * subsystems converge (deviation #46).
  */
-import { parseScopeId } from '@qm/types'
+import { parseScopeId, type CommandPolicy } from '@qm/types'
 import { cacheHitRatio, isStablePrefixMiss, type AdminRole, type CredentialUsageSink, type EgressAuditSink, type ErrorLog, type AuditLog, type MetricsSink, type TurnMetricSample } from '@qm/admin'
 import type { ScopeMemory } from '@qm/memory'
 import { isValidMcpServerId, type McpServer, type McpServerAuthMode, type McpServerStore, type McpToolService } from '@qm/mcp'
@@ -35,6 +35,8 @@ import type { SkillStore } from '@qm/skills'
 import type { DeploymentStore } from '../services/deployment-store.ts'
 import type { BlobTransferService } from '../services/blob-transfer.ts'
 import { ByteSourceTooLargeError, type FileStoreService } from '../services/file-store.ts'
+import type { CommandPolicyStore } from '../services/command-policy-store.ts'
+import { composePolicy, defaultDenylistPolicy, evaluateCommandPolicy, parseCommandPolicy } from '@qm/sandbox'
 import { badRequest, isObj, notFound, sendJson, type ApiRouteContext, type Route } from './framework.ts'
 import { verifyPortalIdentity } from '@qm/auth'
 
@@ -46,6 +48,8 @@ export interface AdminDeps {
   memory?: ScopeMemory
   files?: FileStoreService
   blobTransfer?: BlobTransferService
+  /** X3b per-scope command policies (storage/CRUD + simulate + sandbox provision resolution). */
+  commandPolicies?: CommandPolicyStore
   deployments?: DeploymentStore
   skills?: SkillStore
   skillPacks?: import('../services/skill-pack-store.ts').SkillPackStore
@@ -236,12 +240,136 @@ async function putScopeConfig(ctx: ApiRouteContext, deps: AdminDeps): Promise<un
   const actorId = await authorizeAdmin(ctx, deps, targetScope)
   if (!actorId) return undefined
   if (resource === 'command-policy-simulate') {
-    return sendJson(ctx, 501, {
-      error: 'not_configured',
-      message: 'command policy simulation needs the policy engine (lands with the convergence milestone)',
-    })
+    return simulateCommandPolicy(ctx, deps, targetScope, actorId)
+  }
+  if (resource === 'command-policy') {
+    return putCommandPolicy(ctx, deps, targetScope, actorId)
   }
   return sendJson(ctx, 404, { error: 'not_found', message: `unknown admin resource: ${resource}` })
+}
+
+async function scopeCommandPolicyRoutes(
+  ctx: ApiRouteContext,
+  deps: AdminDeps,
+  method: 'GET' | 'PUT' | 'DELETE',
+): Promise<unknown> {
+  const targetScope = ctx.params.scope
+  if (!targetScope) return notFound(ctx)
+  const actorId = await authorizeAdmin(ctx, deps, targetScope)
+  if (!actorId) return undefined
+  if (method === 'GET') return getCommandPolicy(ctx, deps, targetScope)
+  if (method === 'PUT') return putCommandPolicy(ctx, deps, targetScope, actorId)
+  return deleteCommandPolicy(ctx, deps, targetScope, actorId)
+}
+
+/**
+ * X3b — command-policy simulation over the same evaluator the sandbox
+ * gate runs, so simulate fidelity equals production fidelity (qm
+ * `admin/scope-config.ts` parity): the target policy is the inline
+ * supply, else the stored scope policy, else the org-floor baseline for
+ * org scopes (empty denylist for non-org). A non-org target evaluates
+ * against the composed policy — org floor (stored org policy, falling
+ * back to the catastrophic-primitive baseline) first, scope rules after
+ * — and `ruleSource`/`ruleIndex` report which layer fired, qm
+ * arithmetic included. Deployment-layer rules do not exist in qm-next
+ * yet, so `deploymentRulesEvaluated` stays false.
+ */
+async function simulateCommandPolicy(
+  ctx: ApiRouteContext,
+  deps: AdminDeps,
+  targetScope: string,
+  actorId: string,
+): Promise<unknown> {
+  const b = isObj(ctx.body) ? (ctx.body as Record<string, unknown>) : {}
+  const command = b.command
+  if (typeof command !== 'string' || !command.trim()) return badRequest(ctx, 'command is required')
+  const targetKind = parseScopeId(targetScope).kind
+  let supplied: CommandPolicy | undefined
+  let policySource: 'inline' | 'stored' | 'baseline' = 'baseline'
+  if (b.policy !== undefined) {
+    const parsed = parseCommandPolicy(b.policy)
+    if ('error' in parsed) return badRequest(ctx, parsed.error)
+    supplied = parsed.policy
+    policySource = 'inline'
+  }
+  const stored = supplied ?? (deps.commandPolicies ? (await deps.commandPolicies.get(targetScope))?.policy : undefined)
+  if (!supplied && stored) policySource = 'stored'
+  const target = stored ?? (targetKind === 'org' ? defaultDenylistPolicy() : { mode: 'denylist' as const, rules: [] })
+  const orgFloor =
+    (deps.commandPolicies ? (await deps.commandPolicies.get(deps.orgScope))?.policy : undefined) ??
+    defaultDenylistPolicy()
+  const effective = targetKind === 'org' ? target : composePolicy(orgFloor, target)
+  const result = evaluateCommandPolicy(command, effective)
+  const effectiveRuleIndex = result.ruleId ? effective.rules.findIndex((rule) => rule.pattern === result.ruleId) : -1
+  const orgRuleCount = targetKind === 'org' ? 0 : orgFloor.rules.length
+  let ruleSource: 'organization' | 'scope' | null = null
+  if (effectiveRuleIndex >= 0) ruleSource = effectiveRuleIndex < orgRuleCount ? 'organization' : 'scope'
+  const ruleIndex = effectiveRuleIndex < 0 ? null : effectiveRuleIndex - (ruleSource === 'scope' ? orgRuleCount : 0)
+  deps.auditLog?.record({
+    at: Date.now(),
+    principalId: actorId,
+    action: 'admin.command_policy.simulate',
+    resource: 'command-policy',
+    scopeLabel: targetScope,
+  })
+  return sendJson(ctx, 200, {
+    ok: true,
+    decision: result.decision,
+    reason: result.reason ?? null,
+    matched: result.matched ?? null,
+    ruleId: result.ruleId ?? null,
+    ruleSource,
+    ruleIndex,
+    policySource,
+    deploymentRulesEvaluated: false,
+  })
+}
+
+async function getCommandPolicy(ctx: ApiRouteContext, deps: AdminDeps, targetScope: string): Promise<unknown> {
+  const record = deps.commandPolicies ? await deps.commandPolicies.get(targetScope) : null
+  deps.auditLog?.record({
+    at: Date.now(),
+    principalId: ctx.actor?.id ?? 'unknown',
+    action: 'admin.command_policy.read',
+    resource: 'command-policy',
+    scopeLabel: targetScope,
+  })
+  return sendJson(ctx, 200, {
+    ok: true,
+    scopeId: targetScope,
+    policy: record?.policy ?? null,
+    ...(record?.setBy ? { setBy: record.setBy } : {}),
+    ...(record ? { updatedAt: record.updatedAt } : {}),
+  })
+}
+
+async function putCommandPolicy(ctx: ApiRouteContext, deps: AdminDeps, targetScope: string, actorId: string): Promise<unknown> {
+  if (!deps.commandPolicies) return notFound(ctx)
+  const b = isObj(ctx.body) ? (ctx.body as Record<string, unknown>) : {}
+  const parsed = parseCommandPolicy(b.policy)
+  if ('error' in parsed) return badRequest(ctx, parsed.error)
+  const record = await deps.commandPolicies.set(targetScope, parsed.policy, { setBy: actorId })
+  deps.auditLog?.record({
+    at: Date.now(),
+    principalId: actorId,
+    action: 'admin.command_policy.update',
+    resource: 'command-policy',
+    scopeLabel: targetScope,
+  })
+  return sendJson(ctx, 200, { ok: true, scopeId: targetScope, policy: record.policy })
+}
+
+async function deleteCommandPolicy(ctx: ApiRouteContext, deps: AdminDeps, targetScope: string, actorId: string): Promise<unknown> {
+  if (!deps.commandPolicies) return notFound(ctx)
+  const deleted = await deps.commandPolicies.delete(targetScope)
+  deps.auditLog?.record({
+    at: Date.now(),
+    principalId: actorId,
+    action: 'admin.command_policy.delete',
+    resource: 'command-policy',
+    scopeLabel: targetScope,
+  })
+  return sendJson(ctx, 200, { ok: true, scopeId: targetScope, deleted })
 }
 
 async function getAdminResources(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
@@ -1414,12 +1542,30 @@ async function startImpersonation(ctx: ApiRouteContext, deps: AdminDeps): Promis
   if (!target) return badRequest(ctx, 'target principal required')
   if (target === actorId) return badRequest(ctx, 'cannot impersonate yourself')
   const member = (await deps.directory?.listPeople())?.find((m) => m.principalId === target) ?? null
+  // X2 qm parity (admin/users.ts:435-447): the support flow is asserted by
+  // an audit event, not by acting as the target — the portal seals the
+  // session; the core only records who assumed whom.
+  deps.auditLog?.record({
+    at: Date.now(),
+    principalId: actorId,
+    action: 'impersonate.start',
+    resource: target,
+    scopeLabel: deps.orgScope,
+  })
   return { ok: true, target, displayName: member?.displayName ?? target }
 }
 
 async function stopImpersonation(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
   const actorId = await authorizeAdmin(ctx, deps, deps.orgScope)
   if (!actorId) return undefined
+  const target = String((ctx.body as { target?: string } | null)?.target ?? '').trim()
+  deps.auditLog?.record({
+    at: Date.now(),
+    principalId: actorId,
+    action: 'impersonate.stop',
+    resource: target || '-',
+    scopeLabel: deps.orgScope,
+  })
   return { ok: true }
 }
 
@@ -1454,6 +1600,9 @@ export function adminRoutes(deps: AdminDeps): ReadonlyArray<Route> {
     { method: 'GET', path: '/v1/admin/scopes', auth: 'either', handle: t(h((ctx) => listAdminScopes(ctx, deps))) },
     { method: 'GET', path: '/v1/admin/scopes/:scope', auth: 'either', handle: t(h((ctx) => getScopeConfig(ctx, deps))) },
     { method: 'PUT', path: '/v1/admin/scopes/:scope/:resource', auth: 'either', handle: t(h((ctx) => putScopeConfig(ctx, deps))) },
+    { method: 'GET', path: '/v1/admin/scopes/:scope/command-policy', auth: 'either', handle: t(h((ctx) => scopeCommandPolicyRoutes(ctx, deps, 'GET'))) },
+    { method: 'PUT', path: '/v1/admin/scopes/:scope/command-policy', auth: 'either', handle: t(h((ctx) => scopeCommandPolicyRoutes(ctx, deps, 'PUT'))) },
+    { method: 'DELETE', path: '/v1/admin/scopes/:scope/command-policy', auth: 'either', handle: t(h((ctx) => scopeCommandPolicyRoutes(ctx, deps, 'DELETE'))) },
     { method: 'GET', path: '/v1/admin/resources', auth: 'either', handle: t(h((ctx) => getAdminResources(ctx, deps))) },
     { method: 'GET', path: '/v1/admin/retention', auth: 'either', handle: t(h((ctx) => retention(ctx, deps))) },
     { method: 'POST', path: '/v1/admin/scopes/:scope/auto-flagger/test', auth: 'either', handle: t(h((ctx) => testAutoFlagger(ctx, deps))) },

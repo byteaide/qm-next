@@ -17,6 +17,7 @@ import { CommandDenied, NeedsApproval } from '@qm/types'
 import { ephemeralCredLinkPaths, ephemeralCredLinkScript, errMessage, shq, shortHash } from '@qm/credentials'
 import { nonInteractiveShellPrefix } from './sandbox-env.ts'
 import { evaluateCommandPolicy } from './policy.ts'
+import type { PolicyVerdictMetadata } from '@qm/types'
 import { defaultDenylistPolicy } from './default-policy.ts'
 import { createExecProcessSessions, type ExecProcessIo } from './exec-process-session.ts'
 import { materializeRoLayers, type RoLayerData } from './ro-layers.ts'
@@ -57,6 +58,15 @@ export interface LocalSandboxOptions {
    * tests that wire the sandbox by hand keep working).
    */
   policy?: CommandPolicy | 'default-denylist'
+  /**
+   * X3b per-scope resolution (qm `config.getCommandPolicy(scope)` parity):
+   * consulted once per provision with the writable layer's scopeId. The
+   * returned policy — `CommandPolicy`, the `'default-denylist'` preset,
+   * or undefined (fall back to the construction-level `policy`) — is
+   * bound to the handle, so each scope's sandbox runs under its own
+   * composed rule set (composePolicy(orgFloor, scopePolicy) upstream).
+   */
+  policyFor?: (scopeId: string) => CommandPolicy | 'default-denylist' | undefined | Promise<CommandPolicy | 'default-denylist' | undefined>
 }
 
 const FINGERPRINT_FIXED_SOURCES = ['fly/Dockerfile', 'local/Dockerfile', 'aws/microvm-agent/agent.mjs']
@@ -114,20 +124,32 @@ export function createLocalSandbox(opts: LocalSandboxOptions = {}): Sandbox {
       ? defaultDenylistPolicy()
       : opts.policy
 
-  function policyDeniedResult(command: string, reason: string): ExecResult {
+  // X3b per-scope policies: provision resolves `policyFor(scopeId)` once
+  // per handle; run consults the handle's policy before the construction
+  // -level fallback.
+  const handlePolicies = new Map<string, CommandPolicy>()
+  const policyForScope = async (scopeId: string): Promise<CommandPolicy | undefined> => {
+    const spec = await opts.policyFor?.(scopeId)
+    if (spec === undefined) return resolvedPolicy
+    return spec === 'default-denylist' ? defaultDenylistPolicy() : spec
+  }
+
+  function policyDeniedResult(command: string, reason: string, verdict?: PolicyVerdictMetadata): ExecResult {
     return {
       code: 1,
       stdout: '',
       stderr: `[policy denied: ${reason}] ${command}`,
       timedOut: false,
+      ...(verdict ? { policyVerdict: verdict } : {}),
     }
   }
-  function policyApprovalRequiredResult(command: string, reason: string): ExecResult {
+  function policyApprovalRequiredResult(command: string, reason: string, verdict?: PolicyVerdictMetadata): ExecResult {
     return {
       code: 2,
       stdout: '',
       stderr: `[policy requires approval: ${reason}] ${command}`,
       timedOut: false,
+      ...(verdict ? { policyVerdict: verdict } : {}),
     }
   }
 
@@ -436,6 +458,8 @@ export function createLocalSandbox(opts: LocalSandboxOptions = {}): Sandbox {
         ...(scratch ? { scratch: true } : {}),
         ...(env ? { env } : {}),
       }
+      const scopePolicy = await policyForScope(scope)
+      if (scopePolicy) handlePolicies.set(handle.id, scopePolicy)
 
       try {
         const prep = await execRaw(name, `mkdir -p ${shq(workspaceDir)} && ${ephemeralCredLinkScript(homeDir)}`, 30)
@@ -463,18 +487,28 @@ export function createLocalSandbox(opts: LocalSandboxOptions = {}): Sandbox {
     async run(handle, command, execOpts?: ExecOptions): Promise<ExecResult> {
       // Phase 3J command-policy gate: refuse before the docker exec so
       // `rm -rf /` never reaches the container. The policy is resolved
-      // once at sandbox construction; here we just consult it.
-      if (resolvedPolicy) {
-        const verdict = evaluateCommandPolicy(command, resolvedPolicy)
+      // once per handle at provision (`policyFor(scopeId)`); here we just
+      // consult it, falling back to the construction-level policy.
+      const handlePolicy = handlePolicies.get(handle.id) ?? resolvedPolicy
+      if (handlePolicy) {
+        const verdict = evaluateCommandPolicy(command, handlePolicy)
         if (verdict.decision !== 'allow') {
           const reason = verdict.reason ?? verdict.ruleId ?? 'policy denied'
+          const metadata: PolicyVerdictMetadata = {
+            decision: verdict.decision,
+            ...(verdict.ruleId !== undefined ? { ruleId: verdict.ruleId } : {}),
+            ...(verdict.matched !== undefined ? { matched: verdict.matched } : {}),
+            ...(verdict.reason !== undefined ? { reason: verdict.reason } : {}),
+          }
           if (verdict.decision === 'deny') {
             if (execOpts?.throwOnPolicy) throw new CommandDenied(command, reason)
-            return policyDeniedResult(command, reason)
+            return policyDeniedResult(command, reason, metadata)
           }
-          // require_approval
-          if (execOpts?.throwOnPolicy) throw new NeedsApproval(command, reason)
-          return policyApprovalRequiredResult(command, reason)
+          // require_approval — qm parity: the rule identity travels as
+          // approvalKey so the approval card can carry matched + key.
+          if (execOpts?.throwOnPolicy)
+            throw new NeedsApproval(command, reason, 'approval', verdict.matched, verdict.ruleId)
+          return policyApprovalRequiredResult(command, reason, metadata)
         }
       }
       const timeoutSec = execOpts?.timeoutMs ? Math.ceil(execOpts.timeoutMs / 1000) : defaultTimeoutSec

@@ -20,6 +20,7 @@ import { skillRoutes, type SkillRoutesDeps } from './routes/skill-routes.ts'
 import { searchRoutes, type SearchRoutesDeps } from './routes/search-routes.ts'
 import { contextRoutes, type ContextRoutesDeps } from './routes/context-routes.ts'
 import { contextPolicyRoutes, type ContextPolicyRoutesDeps } from './routes/context-policy-routes.ts'
+import { directoryManageCheck, directoryMemberCheck } from './routes/scope-access.ts'
 import { surfaceCacheRoutes, type SurfaceCacheRoutesDeps } from './routes/surface-cache-routes.ts'
 import { environmentRoutes, type EnvironmentRoutesDeps } from './routes/environment-routes.ts'
 import { projectRoutes, type ProjectRoutesDeps } from './routes/project-routes.ts'
@@ -249,7 +250,12 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
     registerRouteTable(app, opts, contextRoutes(deps.context))
   }
   if (deps.contextPolicy) {
-    registerRouteTable(app, opts, contextPolicyRoutes(deps.contextPolicy))
+    registerRouteTable(app, opts, contextPolicyRoutes({
+      ...deps.contextPolicy,
+      ...(deps.directory?.directory && !deps.contextPolicy.memberScope
+        ? { memberScope: directoryMemberCheck(deps.directory.directory) }
+        : {}),
+    }))
   }
   if (deps.surfaceCache) {
     registerRouteTable(app, opts, surfaceCacheRoutes(deps.surfaceCache))
@@ -270,7 +276,12 @@ export function createApiServer(deps: ApiDeps, opts: ApiServerOptions): FastifyI
     registerRouteTable(app, opts, grantRoutes(deps.grants))
   }
   if (deps.soul) {
-    registerRouteTable(app, opts, soulRoutes(deps.soul))
+    registerRouteTable(app, opts, soulRoutes({
+      ...deps.soul,
+      ...(deps.directory?.directory && !deps.soul.managesScope
+        ? { managesScope: directoryManageCheck(deps.directory.directory) }
+        : {}),
+    }))
   }
   if (deps.config) {
     registerRouteTable(app, opts, surfaceConfigRoutes(deps.config))

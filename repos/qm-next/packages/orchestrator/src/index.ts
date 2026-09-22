@@ -7,6 +7,7 @@ export {
   currentTimeBlock,
   deriveSurfaceTools,
   renderComputerBlock,
+  renderSharedFilesBlock,
   renderGatewayBlock,
   selectFrameMode,
   type ComposeFrameOptions,
@@ -22,5 +23,25 @@ export {
   type RuntimeRouteTarget,
 } from './runtime-choice.ts'
 export { createMockHarness, mockProfile, type MockHarness, type MockHarnessOptions, type MockTurnStep } from './mock-harness.ts'
-export { createSandboxToolContext, type SandboxToolContextDeps } from './tool-context.ts'
+export {
+  detectOnboardingStatus,
+  onboardingBlockFor,
+  PROACTIVE_OPENER_PROMPT,
+  renderPendingOnboardingPrompt,
+  setOnboardingStatus,
+  ONBOARDING_SKILL_NAME,
+  ONBOARDING_VERSION,
+  type OnboardingStatus,
+  type OnboardingTurnDeps,
+} from './onboarding.ts'
+export {
+  createSandboxToolContext,
+  type CronControlSurface,
+  type McpControlSurface,
+  type PlaygroundControlSurface,
+  type SandboxToolContextDeps,
+  type ShareControlSurface,
+  type WebhookControlSurface,
+} from './tool-context.ts'
+export { normalizePlaygroundTitle, validatePlaygroundHtml, PLAYGROUND_MIMETYPE } from './playground.ts'
 export { buildStagePorts, type BuildStagePortsOptions } from './admission-integration.ts'

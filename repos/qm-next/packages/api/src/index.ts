@@ -29,6 +29,7 @@ export { skillRoutes, type SkillRoutesDeps } from './routes/skill-routes.ts'
 export { searchRoutes, type SearchRoutesDeps } from './routes/search-routes.ts'
 export { contextRoutes, type ContextRoutesDeps } from './routes/context-routes.ts'
 export { contextPolicyRoutes, type ContextPolicyRoutesDeps } from './routes/context-policy-routes.ts'
+export { directoryManageCheck, directoryMemberCheck, type ScopeAccessCheck } from './routes/scope-access.ts'
 export { surfaceCacheRoutes, toEvent, type SurfaceCacheRoutesDeps } from './routes/surface-cache-routes.ts'
 export { environmentRoutes, type EnvironmentRoutesDeps } from './routes/environment-routes.ts'
 export { projectRoutes, projectView, type ProjectRoutesDeps } from './routes/project-routes.ts'
@@ -87,12 +88,19 @@ export {
   createMemoryConnectorSurface,
   createMemoryWebhookStore,
   createMemoryBlobTransfer,
+  createMemoryCommandPolicyStore,
+  createPostgresCommandPolicyStore,
+  createCronControl,
+  createToolControlSurfaces,
+  sharedFileHandles,
   deploymentView,
   parseBotLedger,
   THINKING_LEVELS,
   WEBHOOK_SCHEMES,
   MAX_BLOB_BYTES,
   type ChannelPolicyStore,
+  type CommandPolicyRecord,
+  type CommandPolicyStore,
   type IngestEvent,
   type Project,
   type ProjectMutation,

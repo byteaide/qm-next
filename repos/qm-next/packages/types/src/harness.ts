@@ -7,7 +7,7 @@
  */
 import type { ConversationTurn } from './conversation.ts'
 import type { ScopeId } from './identity.ts'
-import type { IncomingAttachment } from './destination.ts'
+import type { IncomingAttachment, OutgoingAttachment } from './destination.ts'
 import type { NewEntry, Session, SessionEntry } from './session.ts'
 import type { GapPhases, GapWork, LlmCallUsage, LlmTransportMeta, NewTapeRecord, TapeRecord } from './session-store.ts'
 import type { ProviderKeys } from './model.ts'
@@ -157,6 +157,8 @@ export interface HarnessTurnResult {
   stopped?: true
   pendingApprovals?: HarnessPendingApproval[]
   pausedOnApproval?: boolean
+  /** Outbound files produced this turn (playground artifacts); the orchestrator copies these onto the 'ok' TurnResult. */
+  attachments?: OutgoingAttachment[]
   modelCalls?: number
   cacheUsage?: { cacheRead: number; cacheWrite: number; uncachedInput: number }
   compileMs?: number
