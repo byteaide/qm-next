@@ -17,7 +17,7 @@
 | git smart-HTTP 后端（capability 绑定） | ✅ | `c739c8c`（`deployment-git-routes.ts`）；`404fab5` 修复 `refs/heads/current` 使普通 `git clone` 可用 |
 | Fly / AWS provider | ❌ 不移植（2026-09-22 拍板） | `rg "FlyDeploy\|AwsDeploy" packages` 零命中 |
 
-### 1.2 集群 2 — 生产化（4/5 关闭，剩凭据受限项）
+### 1.2 集群 2 — 生产化（4/5 关闭；用户模型登录搁置为有意偏差）
 
 | 条目 | 状态 | 证据 |
 |---|---|---|
@@ -80,7 +80,7 @@ qm 的产品灵魂层 = **16 段顺序组装管线 + 三模式协议帧 + soul �
 | 监控/队列/字节存储 | MonitorPoller + pg-boss + S3 全落地 | 🟢 |
 | 运行可观测（runs 台账/聚合/重放） | #28/#47e 落地 | 🟢 |
 | IM 域（飞书） | 14.0b 表情确认、agent-request 卡片、ambient judge（默认 `keyword`，`model` 显式启用） | 🟢（webhook 同意/投递重定向按决策放弃） |
-| 用户模型登录 | codex-device-login 与订阅 OAuth 均 502 桩 | 🔴 依赖 ChatGPT 凭据 |
+| 用户模型登录 | codex-device-login 与订阅 OAuth 均 502 桩 | 🟡 搁置（2026-09-22 拍板：有意偏差、代码保持就绪、不再等凭据；API-key connect 通道可用，模型面走国产 LLM——SenseNova） |
 | Connectors 核心 | 后台执行/oauth-flow/consent-link/browser-session/secret-envelope/emoji-upload 已上线；**`connectors/oauth.ts`（PROVIDERS+well-known+PKCE+refresh，qm 626 行）仍未移植** | 🟡 |
 | ToolContext 控制面 | background 已真实（进程注册表）；soul 已接线；**cron×9/webhook×3/MCP/shareArtifact 已接控制面**（cron 走 @qm/triggers store+scheduler 的 qm control-service 阶梯，MCP 走 @qm/mcp tool service，share 走 grant ledger；组合时身份绑定，未接线仍诚实不可用） | 🟢 |
 | ToolContext publish/playground | T5 评估已出（`t5-publish-playground-evaluation-2026-09-22.md`）：publish 维持诚实不可用→**永久**有意偏差（resident-auth 捕获、公网 URL 面缺口；原触发条件=Fly/AWS PRD，2026-09-22 拍板不移植后无触发路径）；createPlayground 已全量收口（存储侧 2026-09-22 `PlaygroundControlSurface` + `uploadForViewer`；投递侧 2026-09-22 第 5 批 5a：`PlaygroundArtifact.attachment` 携带 blob 元数据 → harness-pi `ref.turnAttachments` → `HarnessTurnResult.attachments` → orchestrator ok 透传 → bridge `imRunResultDelivery` body.attachments（空回复+无附件不投递，qm runResultDelivery 对齐）→ feishu provider blob 读取上传；`ApiService.blobTransfer` 暴露 + feishu service 接线 ImBlobs 适配） | 🟢 publish=永久有意偏差；playground 全链路 |

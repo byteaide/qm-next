@@ -98,9 +98,9 @@ qm 参考实现规模：`crons.ts` 489 行、`webhooks.ts` 176 行、`slack/deli
 | 条目 | 门控 | 就位后动作 |
 |---|---|---|
 | codex-device-login + 订阅 OAuth | ChatGPT 凭据 | 代码就绪，凭据到位即验证 `user-model-auth-routes.ts:55,83` 链路 |
-| 5.2 飞书真机静默腿 | FEISHU 凭据 + 人工发消息 | 断言 ambient 群聊未寻址消息零投递 |
+| 5.2 飞书真机静默腿 | FEISHU 凭据（已在库）+ 人工发消息 | 断言 ambient 群聊未寻址消息零投递；差一次人工配合 |
 
-> Fly/AWS provider 已于 2026-09-22 拍板**不移植**（原门控行移除，见 §4 拍板注记）。
+> codex-device-login + 订阅 OAuth 已于 2026-09-22 拍板**搁置**（有意偏差，代码就绪，不再等凭据；原门控行移除）。Fly/AWS provider 同日拍板不移植（见 §4 拍板注记）。
 
 ---
 
