@@ -5,6 +5,7 @@ import {
   createApiServer,
   createMemoryAdminService,
   createMemoryAuditLog,
+  createMemoryCommandPolicyStore,
   mintSignedPayload,
   type ApiDeps,
   type ApiServerOptions,
@@ -53,15 +54,16 @@ function baseDeps(): ApiDeps {
   }
 }
 
-function rig() {
+function rig(opts: { commandPolicies?: boolean } = {}) {
   const auditLog = createMemoryAuditLog()
   const adminDeps = {
     admin: createMemoryAdminService({ orgId: 'test', seedAdmins: ['person:ada'] }),
     orgScope: ORG,
     auditLog,
+    ...(opts.commandPolicies ? { commandPolicies: createMemoryCommandPolicyStore() } : {}),
   }
   const app = createApiServer({ ...baseDeps(), admin: adminDeps }, OPTS)
-  return { app, auditLog }
+  return { app, auditLog, adminDeps }
 }
 
 test('admin command-policy-simulate: baseline fallback catches catastrophic commands', async () => {
@@ -72,8 +74,9 @@ test('admin command-policy-simulate: baseline fallback catches catastrophic comm
   const body = res.json()
   assert.equal(body.ok, true)
   assert.equal(body.decision, 'deny')
-  assert.equal(body.ruleSource, 'baseline')
-  assert.equal(typeof body.ruleIndex, 'number')
+  assert.equal(body.policySource, 'baseline')
+  assert.equal(body.ruleSource, 'scope')
+  assert.equal(body.ruleIndex, 0)
   assert.match(body.matched, /rm/)
   const events = await auditLog.tail({ limit: 10 })
   assert.ok(events.some((e) => e.action === 'admin.command_policy.simulate' && e.principalId === 'person:ada'))
@@ -107,9 +110,11 @@ test('admin command-policy-simulate: inline policy evaluates and is attributed a
   assert.equal(res.statusCode, 200)
   const body = res.json()
   assert.equal(body.decision, 'require_approval')
-  assert.equal(body.ruleSource, 'inline')
+  assert.equal(body.ruleSource, 'scope')
+  assert.equal(body.policySource, 'inline')
   assert.equal(body.ruleIndex, 0)
   assert.equal(body.reason, 'cluster mutation')
+  assert.equal(body.matched, 'kubectl delete')
   await app.close()
 })
 
@@ -172,8 +177,7 @@ test('admin command-policy-simulate: non-admin gets the guard ladder 403', async
   await app.close()
 })
 
-test('admin impersonate: start audits and answers displayName; stop audits the lifecycle end (X2, qm parity)', async () => {
-  const { app, auditLog } = rig()
+test('admin impersonate: start audits and answers displayName; stop audits the lifecycle end (X2, qm parity)', async () => {  const { app, auditLog } = rig()
   const ada = auth(await token('person:ada'))
 
   const noTarget = await app.inject({ method: 'POST', url: '/v1/admin/impersonate', headers: ada, payload: {} })
@@ -206,4 +210,130 @@ test('admin impersonate: start audits and answers displayName; stop audits the l
   assert.ok(stopEvent)
   assert.equal(stopEvent.resource, 'feishu:gang')
   await app.close()
+})
+
+test('admin command-policy CRUD: put/get/delete round-trips with audit + validation (X3b 4b)', async () => {
+  const { app, auditLog } = rig({ commandPolicies: true })
+  const ada = auth(await token('person:ada'))
+
+  const missing = await app.inject({ method: 'GET', url: '/v1/admin/scopes/org:test/command-policy', headers: ada })
+  assert.equal(missing.statusCode, 200)
+  assert.equal(missing.json().policy, null)
+
+  const invalid = await app.inject({
+    method: 'PUT',
+    url: '/v1/admin/scopes/org:test/command-policy',
+    headers: ada,
+    payload: { policy: { mode: 'denylist', rules: [{ pattern: '(', decision: 'deny' }] } },
+  })
+  assert.equal(invalid.statusCode, 400)
+  assert.match(invalid.json().message, /pattern is not a valid regex/)
+
+  const put = await app.inject({
+    method: 'PUT',
+    url: '/v1/admin/scopes/org:test/command-policy',
+    headers: ada,
+    payload: {
+      policy: {
+        mode: 'denylist',
+        rules: [{ pattern: '\\bkubectl\\b', decision: 'require_approval', reason: 'cluster mutation' }],
+      },
+    },
+  })
+  assert.equal(put.statusCode, 200)
+  assert.equal(put.json().ok, true)
+  assert.equal(put.json().policy.rules.length, 1)
+
+  const got = await app.inject({ method: 'GET', url: '/v1/admin/scopes/org:test/command-policy', headers: ada })
+  assert.equal(got.statusCode, 200)
+  assert.equal(got.json().policy.rules[0].reason, 'cluster mutation')
+  assert.equal(got.json().setBy, 'person:ada')
+
+  const gone = await app.inject({ method: 'DELETE', url: '/v1/admin/scopes/org:test/command-policy', headers: ada })
+  assert.equal(gone.statusCode, 200)
+  assert.equal(gone.json().deleted, true)
+  const afterDelete = await app.inject({ method: 'GET', url: '/v1/admin/scopes/org:test/command-policy', headers: ada })
+  assert.equal(afterDelete.json().policy, null)
+
+  const events = await auditLog.tail({ limit: 10 })
+  for (const action of ['admin.command_policy.update', 'admin.command_policy.read', 'admin.command_policy.delete']) {
+    assert.ok(events.some((e) => e.action === action), `expected audit: ${action}`)
+  }
+  await app.close()
+})
+
+test('admin command-policy simulate: stored scope policy composes over the org floor (qm ruleSource arithmetic)', async () => {
+  const { app } = rig({ commandPolicies: true })
+  const ada = auth(await token('person:ada'))
+  const channelURL = '/v1/admin/scopes/channel:test/command-policy'
+  const simulateURL = '/v1/admin/scopes/channel:test/command-policy-simulate'
+
+  await app.inject({
+    method: 'PUT',
+    url: channelURL,
+    headers: ada,
+    payload: {
+      policy: {
+        mode: 'denylist',
+        rules: [{ pattern: '\\bhelm\\s+install\\b', decision: 'require_approval', reason: 'scope: helm' }],
+      },
+    },
+  })
+  await app.inject({
+    method: 'PUT',
+    url: '/v1/admin/scopes/org:test/command-policy',
+    headers: ada,
+    payload: {
+      policy: {
+        mode: 'denylist',
+        rules: [{ pattern: '\\bkubectl\\b', decision: 'deny', reason: 'org: kubectl' }],
+      },
+    },
+  })
+
+  const orgRule = await app.inject({ method: 'PUT', url: simulateURL, headers: ada, payload: { command: 'kubectl get pods' } })
+  assert.equal(orgRule.json().decision, 'deny')
+  assert.equal(orgRule.json().ruleSource, 'organization', 'org rule fires through the composed policy')
+  assert.equal(orgRule.json().ruleIndex, 0)
+  assert.equal(orgRule.json().policySource, 'stored')
+
+  const scopeRule = await app.inject({ method: 'PUT', url: simulateURL, headers: ada, payload: { command: 'helm install x' } })
+  assert.equal(scopeRule.json().decision, 'require_approval')
+  assert.equal(scopeRule.json().ruleSource, 'scope', 'scope rule fires after the silent org floor')
+  assert.equal(scopeRule.json().ruleIndex, 0, 'scope-relative rule index')
+  assert.equal(scopeRule.json().reason, 'scope: helm')
+
+  const silent = await app.inject({ method: 'PUT', url: simulateURL, headers: ada, payload: { command: 'echo hello' } })
+  assert.equal(silent.json().decision, 'allow')
+  assert.equal(silent.json().ruleSource, null)
+
+  await app.inject({ method: 'DELETE', url: channelURL, headers: ada })
+  const orgStillBinds = await app.inject({ method: 'PUT', url: simulateURL, headers: ada, payload: { command: 'kubectl get pods' } })
+  assert.equal(orgStillBinds.json().decision, 'deny', 'stored org policy still binds after scope policy deletion')
+  assert.equal(orgStillBinds.json().ruleSource, 'organization')
+  await app.close()
+})
+
+test('admin command-policy CRUD: 403 for non-admins, 404 when the store is unwired', async () => {
+  const wired = rig({ commandPolicies: true })
+  const stranger = auth(await token('person:stranger'))
+  const forbidden = await wired.app.inject({
+    method: 'PUT',
+    url: '/v1/admin/scopes/org:test/command-policy',
+    headers: stranger,
+    payload: { policy: { mode: 'denylist', rules: [] } },
+  })
+  assert.equal(forbidden.statusCode, 403)
+  await wired.app.close()
+
+  const unwired = rig()
+  const ada = auth(await token('person:ada'))
+  const missing = await unwired.app.inject({
+    method: 'PUT',
+    url: '/v1/admin/scopes/org:test/command-policy',
+    headers: ada,
+    payload: { policy: { mode: 'denylist', rules: [] } },
+  })
+  assert.equal(missing.statusCode, 404)
+  await unwired.app.close()
 })

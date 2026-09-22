@@ -87,7 +87,7 @@ qm 的产品灵魂层 = **16 段顺序组装管线 + 三模式协议帧 + soul �
 | Context-policy 成员检查 | 目录成员校验已接：directory 在线时 GET/PUT 越权 403（qm `memberScope` 阶梯），离线保持 lane-A 开放 | 🟢 |
 | soul 共享 scope 写校验 | `managesScope` 已接目录（qm `createCanManageScope` 语义：personal=本人、group=成员、channel=私有成员）；未接目录时维持拒绝 | 🟢 |
 | Portal | 包已就绪 + SSO；**impersonation 路由未移植**；playground 匿名会话随 13.0 | 🟡 |
-| Command policy 模拟 | X3b 完整版扫描器已落地（2026-09-22，4a）：`scannableCommand` 全量移植（`packages/sandbox/src/scannable-command.ts`——heredoc/引号剥离、裸词去引号、`sh -c`/eval/`env -S`/sudo/nice/timeout/xargs/coproc 载荷、管道到 shell/SQL 客户端的 stdin 生产者、herestring、简单变量间接、SQL 客户端载荷，深度帽 8），求值器改为对 scannable 文本匹配（qm firstMatch 语义：无效存量规则跳过不锁域、`matched` 返回命中子串、verdict 加 `matched`）；qm 506 行语料移植 24 项全绿；simulate 响应改 `matched`（子串）+ 新增 `ruleId`（模式）。剩余：每作用域存储/CRUD + 分层（4b）、G6 收敛决策 + G8 审批联动（4c） | 🟡 扫描器🟢，存储/分层余 |
+| Command policy 模拟 | X3b 存储分层已落地（2026-09-22，4b）：每作用域策略存储（`packages/api/src/services/command-policy-store.ts`，memory + PG 双实现 + 历史表，写入经 `parseCommandPolicy` 校验）；admin CRUD（GET/PUT/DELETE `/v1/admin/scopes/:scope/command-policy`，审计 read/update/delete）+ simulate 升级到 qm `scope-config.ts` 保真（目标=inline→存储→基线回落，非 org 目标与 org floor `composePolicy` 组合，`ruleSource`=organization/scope + qm ruleIndex 偏移算术，新增 `policySource`）；`evaluateCommandWithLayer` + `composePolicy` 移植（qm 语义：floor 先行、scope 只紧不松、层规则只在 scope 沉默处生效、allowlist scope 终局）；沙箱 provision 按 scope 解析 `policyFor`（每 handle 绑定组合策略，qm resolution-service parity）。剩余：G6 双引擎收敛决策 + G8 审批联动/部署层命令规则（4c） | 🟡 存储/分层🟢，4c 余 |
 | environments/projects 存储 | 刻意每进程（`@qm/api/src/services/`，见 #816 评论） | 🟡 有意为之 |
 | 多实例心跳 | `instance_heartbeats` 表在；`TRUNCATE_ONLY` 仅 notes——非真正多实例交接 | 🟡 |
 
@@ -122,7 +122,7 @@ qm 的产品灵魂层 = **16 段顺序组装管线 + 三模式协议帧 + soul �
 2. **明确挂起**（connectors/oauth.ts、impersonation、Fly/AWS PRD（2026-09-22 拍板暂缓）、5.2 真机 e2e）——均有登记与触发条件；
 3. **有意偏差**（#55 源码词汇、#55b gateway 门控、lane-A 简化、每进程存储、段⑩⑪ slack delivery 不移植、publish 维持诚实不可用）——已自文档化，属架构决策而非缺口。
 
-基线侧 qm 自 2026-09-05 起无移动，不产生新差异。第三批（2026-09-22）已收口：X3b 最小版 + createPlayground 存储侧 + X2 核心审计语义。第四批 a 段（2026-09-22）已收口：X3b 完整版 scannableCommand 扫描器（qm 语料 24 项移植全绿，沙箱门闭合 `sh -c`/eval/管道等绕过面）。剩余实现类工作 = createPlayground 投递小项（im-bridge 附件面）+ X2 portal 密封流（ImpersonationClaims 机制已备）+ 每作用域策略存储/CRUD + 分层（4b）+ G6 双引擎收敛决策 + G8 审批联动（4c）+ Q2（依赖 Q0，随偏差挂起）+ 集群 M 多实例。X3a 审计（2026-09-22）已完成。
+基线侧 qm 自 2026-09-05 起无移动，不产生新差异。第三批（2026-09-22）已收口：X3b 最小版 + createPlayground 存储侧 + X2 核心审计语义。第四批（2026-09-22，同日连续交付）已收口：a 段 scannableCommand 扫描器（qm 语料 24 项全绿）+ b 段每作用域存储/CRUD/分层（store 双实现、admin CRUD、simulate qm 保真、composePolicy/evaluateCommandWithLayer、沙箱 per-scope policyFor）。剩余实现类工作 = createPlayground 投递小项（im-bridge 附件面）+ X2 portal 密封流（ImpersonationClaims 机制已备）+ G6 双引擎收敛决策 + G8 审批联动/部署层命令规则（4c）+ Q2（依赖 Q0，随偏差挂起）+ 集群 M 多实例。X3a 审计（2026-09-22）已完成。
 
 ---
 

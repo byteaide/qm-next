@@ -83,7 +83,8 @@ import { createMemorySkillStore, type SkillStore } from '@qm/skills'
 import type { RuntimeRouteConfig } from '@qm/orchestrator'
 import { createHarnessRouter, createMockHarness, createSandboxToolContext, OrchestratorService } from '@qm/orchestrator'
 import Schema from '@qm/schemastery'
-import { createLocalSandbox } from '@qm/sandbox'
+import { composePolicy, createLocalSandbox, defaultDenylistPolicy } from '@qm/sandbox'
+import type { CommandPolicyStore } from './services/command-policy-store.ts'
 import {
   createMemoryMap,
   createMemoryRunStore,
@@ -245,6 +246,13 @@ export interface ApiConfig {
      */
     commandPolicy?: 'default-denylist' | 'off'
   }
+  /**
+   * X3b per-scope command-policy storage (qm config-store parity): read
+   * by the admin command-policy CRUD + simulate routes and resolved once
+   * per sandbox provision, composed over the catastrophic-primitive
+   * floor (composePolicy semantics — the floor evaluates first).
+   */
+  commandPolicyStore?: CommandPolicyStore
   /** Dev default system prompt (explicit operator override; empty soul default). */
   systemPrompt?: string
   /** Security posture the rendered policy prompt resolves from (default auto). */
@@ -820,6 +828,10 @@ export class ApiService extends Service<ApiConfig> {
       : undefined
     if (soulStore && 'ready' in soulStore) await (soulStore as { ready(): Promise<void> }).ready()
     const surfaceBranding = this.config.surfaceConfig?.branding
+    // X3b — per-scope command policies: admin CRUD/simulate reads them and
+    // every sandbox provision composes the stored scope policy over the
+    // catastrophic-primitive floor (composePolicy semantics).
+    const commandPolicyStore = this.config.commandPolicyStore
     // Q3 segment ⑫ — shared-files manifest: when a grant ledger + file
     // store exist, every turn's stable prefix lists the granted handles
     // (qm sharedFilesSystemSection inside the cache boundary).
@@ -856,6 +868,7 @@ export class ApiService extends Service<ApiConfig> {
     const sandboxConfig = this.config.sandbox
     if (sandboxConfig && Object.keys(sandboxConfig).length > 0) {
       const sc = sandboxConfig
+      const orgScopeId = this.config.scopeId ?? 'org:default'
       const sandbox = createLocalSandbox({
         ...(sc.image ? { image: sc.image } : {}),
         ...(sc.dockerBin ? { dockerBin: sc.dockerBin } : {}),
@@ -863,6 +876,20 @@ export class ApiService extends Service<ApiConfig> {
         ...(sc.memoryMb !== undefined ? { memoryMb: sc.memoryMb } : {}),
         ...(sc.defaultTimeoutSec !== undefined ? { defaultTimeoutSec: sc.defaultTimeoutSec } : {}),
         ...(sc.commandPolicy === 'off' ? {} : { policy: 'default-denylist' as const }),
+        // X3b: per-scope policies compose over the floor exactly like the
+        // admin simulate view evaluates them (qm resolution-service parity:
+        // composePolicy(orgFloor, scopePolicy), floor first). Gate off
+        // means no policy at all, per-scope or otherwise.
+        ...(sc.commandPolicy === 'off' || !commandPolicyStore
+          ? {}
+          : {
+              policyFor: async (scopeId: string) => {
+                const stored = await commandPolicyStore.get(scopeId)
+                if (!stored) return 'default-denylist' as const
+                const orgStored = orgScopeId !== scopeId ? await commandPolicyStore.get(orgScopeId) : undefined
+                return composePolicy(orgStored?.policy ?? defaultDenylistPolicy(), stored.policy)
+              },
+            }),
       })
       this.sandbox = sandbox
       const processRegistry = sandbox.readProcess
@@ -1474,7 +1501,8 @@ export class ApiService extends Service<ApiConfig> {
                  runs,
                  ...(this.config.portalIdentitySecret ? { portalIdentitySecret: this.config.portalIdentitySecret } : {}),
                 ...(memoryStore ? { memory: memoryStore } : {}),
-                ...(fileStore ? { files: fileStore, blobTransfer: blobTransfer! } : {}),
+                 ...(fileStore ? { files: fileStore, blobTransfer: blobTransfer! } : {}),
+                 ...(commandPolicyStore ? { commandPolicies: commandPolicyStore } : {}),
                 ...(deploymentStore ? { deployments: deploymentStore } : {}),
                 ...(skillStore ? { skills: skillStore } : {}),
                 ...(skillPackStore ? { skillPacks: skillPackStore } : {}),

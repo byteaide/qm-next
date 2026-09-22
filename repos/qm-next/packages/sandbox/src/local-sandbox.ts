@@ -57,6 +57,15 @@ export interface LocalSandboxOptions {
    * tests that wire the sandbox by hand keep working).
    */
   policy?: CommandPolicy | 'default-denylist'
+  /**
+   * X3b per-scope resolution (qm `config.getCommandPolicy(scope)` parity):
+   * consulted once per provision with the writable layer's scopeId. The
+   * returned policy — `CommandPolicy`, the `'default-denylist'` preset,
+   * or undefined (fall back to the construction-level `policy`) — is
+   * bound to the handle, so each scope's sandbox runs under its own
+   * composed rule set (composePolicy(orgFloor, scopePolicy) upstream).
+   */
+  policyFor?: (scopeId: string) => CommandPolicy | 'default-denylist' | undefined | Promise<CommandPolicy | 'default-denylist' | undefined>
 }
 
 const FINGERPRINT_FIXED_SOURCES = ['fly/Dockerfile', 'local/Dockerfile', 'aws/microvm-agent/agent.mjs']
@@ -113,6 +122,16 @@ export function createLocalSandbox(opts: LocalSandboxOptions = {}): Sandbox {
     : opts.policy === 'default-denylist'
       ? defaultDenylistPolicy()
       : opts.policy
+
+  // X3b per-scope policies: provision resolves `policyFor(scopeId)` once
+  // per handle; run consults the handle's policy before the construction
+  // -level fallback.
+  const handlePolicies = new Map<string, CommandPolicy>()
+  const policyForScope = async (scopeId: string): Promise<CommandPolicy | undefined> => {
+    const spec = await opts.policyFor?.(scopeId)
+    if (spec === undefined) return resolvedPolicy
+    return spec === 'default-denylist' ? defaultDenylistPolicy() : spec
+  }
 
   function policyDeniedResult(command: string, reason: string): ExecResult {
     return {
@@ -436,6 +455,8 @@ export function createLocalSandbox(opts: LocalSandboxOptions = {}): Sandbox {
         ...(scratch ? { scratch: true } : {}),
         ...(env ? { env } : {}),
       }
+      const scopePolicy = await policyForScope(scope)
+      if (scopePolicy) handlePolicies.set(handle.id, scopePolicy)
 
       try {
         const prep = await execRaw(name, `mkdir -p ${shq(workspaceDir)} && ${ephemeralCredLinkScript(homeDir)}`, 30)
@@ -463,9 +484,11 @@ export function createLocalSandbox(opts: LocalSandboxOptions = {}): Sandbox {
     async run(handle, command, execOpts?: ExecOptions): Promise<ExecResult> {
       // Phase 3J command-policy gate: refuse before the docker exec so
       // `rm -rf /` never reaches the container. The policy is resolved
-      // once at sandbox construction; here we just consult it.
-      if (resolvedPolicy) {
-        const verdict = evaluateCommandPolicy(command, resolvedPolicy)
+      // once per handle at provision (`policyFor(scopeId)`); here we just
+      // consult it, falling back to the construction-level policy.
+      const handlePolicy = handlePolicies.get(handle.id) ?? resolvedPolicy
+      if (handlePolicy) {
+        const verdict = evaluateCommandPolicy(command, handlePolicy)
         if (verdict.decision !== 'allow') {
           const reason = verdict.reason ?? verdict.ruleId ?? 'policy denied'
           if (verdict.decision === 'deny') {

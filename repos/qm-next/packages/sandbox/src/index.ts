@@ -12,6 +12,8 @@ export * from './exec-file-ops.ts'
 export * from './local-sandbox.ts'
 export {
   evaluateCommandPolicy,
+  evaluateCommandWithLayer,
+  composePolicy,
   assertPolicyAllows,
   escapeForRegex,
   compileSafeRegex,

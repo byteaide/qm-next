@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { evaluateCommandPolicy } from '../src/policy.ts'
+import { composePolicy, evaluateCommandPolicy, evaluateCommandWithLayer } from '../src/policy.ts'
 import { scannableCommand } from '../src/scannable-command.ts'
 import { defaultDenylistPolicy } from '../src/default-policy.ts'
-import type { CommandPolicy } from '@qm/types'
+import type { CommandPolicy, CommandRule } from '@qm/types'
 
 function orgFloor(): CommandPolicy {
   return {
@@ -406,6 +406,79 @@ test('scannable: SQL-looking text that is only data still passes (no false posit
   ]) {
     assert.equal(decision(cmd, p), 'allow', `false positive on: ${cmd}`)
   }
+})
+
+test('scannable: scope rules can tighten but org floor wins (evaluated first)', () => {
+  const scope: CommandPolicy = {
+    mode: 'denylist',
+    rules: [{ pattern: 'rm -rf', decision: 'allow' }],
+  }
+  const composed = composePolicy(orgFloor(), scope)
+  assert.equal(decision('rm -rf build', composed), 'require_approval')
+})
+
+test('scannable: a lower scope cannot downgrade an org allowlist to a denylist', () => {
+  const orgAllowlist: CommandPolicy = {
+    mode: 'allowlist',
+    rules: [{ pattern: '^ls\\b', decision: 'allow' }],
+  }
+  const scope: CommandPolicy = { mode: 'denylist', rules: [] }
+  const composed = composePolicy(orgAllowlist, scope)
+  assert.equal(composed.mode, 'allowlist')
+  assert.equal(decision('cat secrets', composed), 'deny')
+})
+
+test('scannable: a lower scope can tighten an org denylist to an allowlist', () => {
+  const scope: CommandPolicy = {
+    mode: 'allowlist',
+    rules: [{ pattern: '^ls\\b', decision: 'allow' }],
+  }
+  const composed = composePolicy(orgFloor(), scope)
+  assert.equal(composed.mode, 'allowlist')
+  assert.equal(decision('cat secrets', composed), 'deny')
+})
+
+test('scannable layering: layer rules apply only where the scope policy is silent', () => {
+  const layer: CommandRule[] = [
+    { pattern: '\\bkubectl\\b', decision: 'require_approval', reason: 'layer: kubectl' },
+    { pattern: '\\bhelm\\b', decision: 'deny', reason: 'layer: helm' },
+  ]
+  const dflt: CommandPolicy = { mode: 'denylist', rules: [] }
+  assert.equal(evaluateCommandWithLayer('kubectl get pods', dflt, layer).decision, 'require_approval')
+  assert.equal(evaluateCommandWithLayer('helm install x', dflt, layer).decision, 'deny')
+  assert.equal(evaluateCommandWithLayer('echo hi', dflt, layer).decision, 'allow')
+})
+
+test('scannable layering: a scope decision is final; the layer never widens it', () => {
+  const layer: CommandRule[] = [{ pattern: '\\bkubectl\\b', decision: 'require_approval' }]
+  const allowlist: CommandPolicy = { mode: 'allowlist', rules: [{ pattern: '^ls\\b', decision: 'allow' }] }
+  assert.equal(evaluateCommandWithLayer('kubectl get pods', allowlist, layer).decision, 'deny')
+
+  const scope: CommandPolicy = {
+    mode: 'denylist',
+    rules: [{ pattern: '\\bdeploy\\b', decision: 'require_approval', reason: 'scope: deploy' }],
+  }
+  const denyLayer: CommandRule[] = [{ pattern: '\\bdeploy\\b', decision: 'deny', reason: 'layer: deploy' }]
+  const r = evaluateCommandWithLayer('deploy prod', scope, denyLayer)
+  assert.equal(r.decision, 'require_approval')
+  assert.equal(r.reason, 'scope: deploy')
+
+  const carve: CommandPolicy = { mode: 'denylist', rules: [{ pattern: 'kubectl get', decision: 'allow' }] }
+  assert.equal(evaluateCommandWithLayer('kubectl get pods', carve, layer).decision, 'allow')
+})
+
+test('scannable layering: layer rules run against the scannable text too', () => {
+  const layer: CommandRule[] = [{ pattern: '\\bacmecli\\s+tool\\s+query_database\\b', decision: 'require_approval' }]
+  const dflt: CommandPolicy = { mode: 'denylist', rules: [] }
+  assert.equal(evaluateCommandWithLayer("acme''cli tool query_database", dflt, layer).decision, 'require_approval')
+  assert.equal(evaluateCommandWithLayer("eval 'acmecli tool query_database'", dflt, layer).decision, 'require_approval')
+  assert.equal(evaluateCommandWithLayer("echo 'acmecli tool query_database'", dflt, layer).decision, 'allow')
+})
+
+test('scannable layering: no layer rules matches evaluateCommandPolicy', () => {
+  const p = orgFloor()
+  const command = 'git push --force origin main'
+  assert.deepEqual(evaluateCommandWithLayer(command, p, []), evaluateCommandPolicy(command, p))
 })
 
 test('sandbox gate integration: shell-wrapped catastrophic commands now reach the default denylist', () => {

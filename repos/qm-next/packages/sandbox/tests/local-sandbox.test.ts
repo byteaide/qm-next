@@ -222,6 +222,30 @@ test('run: wraps commands with the noninteractive prefix, env exports and abort 
   assert.ok(cmds.at(-1)!.includes('.pgid'))
 })
 
+test('policy: policyFor binds a per-scope policy to the handle, construction policy is the fallback', async () => {
+  const b = createBackend()
+  const sandbox = createLocalSandbox({
+    dockerExec: b.dockerExec,
+    fetchImpl: b.fetchImpl,
+    repoRoot: '/x',
+    policy: 'default-denylist',
+    policyFor: (scopeId) =>
+      scopeId === 's-scoped'
+        ? { mode: 'denylist', rules: [{ pattern: '\\becho\\s+blocked\\b', decision: 'deny', reason: 'blocked echo' }] }
+        : undefined,
+  })
+  const handle = await sandbox.provision([rw('s-scoped')])
+  const denied = await sandbox.run(handle, 'echo blocked')
+  assert.equal(denied.code, 1)
+  assert.match(denied.stderr, /policy denied: blocked echo/)
+  assert.ok(!b.execCmds().some((c) => c.includes('echo blocked')), 'denied command never reaches docker')
+  assert.equal((await sandbox.run(handle, 'echo fine')).code, 0)
+
+  const plain = await sandbox.provision([rw('s-plain')])
+  assert.equal((await sandbox.run(plain, 'mkfs.ext4 /dev/sda')).code, 1, 'construction fallback still gates')
+  assert.equal((await sandbox.run(plain, 'echo fine')).code, 0)
+})
+
 test('file ops: write/read bytes, listDir via find, extractFiles via tar', async () => {
   const b = createBackend()
   const sandbox = createLocalSandbox({ dockerExec: b.dockerExec, fetchImpl: b.fetchImpl, repoRoot: '/x' })

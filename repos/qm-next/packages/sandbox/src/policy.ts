@@ -138,8 +138,48 @@ export function compileSafeRegex(pattern: string, flags = ''): RegExp {
  * validate-at-write-time layer, this is runtime defence in depth.
  */
 export function evaluateCommandPolicy(command: string, policy: CommandPolicy): PolicyVerdict {
+  const match = firstMatchVerdict(scannableCommand(command), policy.rules)
+  if (match) return match
+  // No rule matched.
+  return { decision: policy.mode === 'allowlist' ? 'deny' : 'allow' }
+}
+
+/**
+ * Compose an organization floor with an optional scope policy (qm
+ * `composePolicy` parity): rules concatenate floor-first so the floor
+ * is evaluated first and a lower scope can tighten but never widen it —
+ * a scope `allow` carve-out cannot resurrect something the floor gates.
+ * An org-floor `allowlist` mode is authoritative (cannot be downgraded
+ * to a denylist); otherwise the scope's mode applies.
+ */
+export function composePolicy(orgFloor: CommandPolicy, scope?: CommandPolicy): CommandPolicy {
+  if (!scope) return orgFloor
+  const mode = orgFloor.mode === 'allowlist' ? 'allowlist' : scope.mode
+  return { mode, rules: [...orgFloor.rules, ...scope.rules] }
+}
+
+/**
+ * Layered evaluation (qm `evaluateCommandWithLayer` parity): the scope
+ * policy decides first; in `denylist` mode, deployment-layer rules apply
+ * only where the scope policy is silent, and never widen a scope
+ * decision. `allowlist` scope mode is final (deny on no match).
+ */
+export function evaluateCommandWithLayer(
+  command: string,
+  policy: CommandPolicy,
+  layerRules: readonly CommandRule[],
+): PolicyVerdict {
   const scannable = scannableCommand(command)
-  for (const rule of policy.rules) {
+  const scopeMatch = firstMatchVerdict(scannable, policy.rules)
+  if (scopeMatch) return scopeMatch
+  if (policy.mode === 'allowlist') return { decision: 'deny', reason: 'not in allowlist' }
+  const layerMatch = firstMatchVerdict(scannable, layerRules)
+  if (layerMatch) return layerMatch
+  return { decision: 'allow' }
+}
+
+function firstMatchVerdict(scannable: string, rules: readonly CommandRule[]): PolicyVerdict | null {
+  for (const rule of rules) {
     let regex: RegExp
     try {
       regex = compileSafeRegex(rule.pattern, 'i')
@@ -156,8 +196,7 @@ export function evaluateCommandPolicy(command: string, policy: CommandPolicy): P
       return verdict
     }
   }
-  // No rule matched.
-  return { decision: policy.mode === 'allowlist' ? 'deny' : 'allow' }
+  return null
 }
 
 /**

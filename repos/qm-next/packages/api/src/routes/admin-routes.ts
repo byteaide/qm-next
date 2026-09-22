@@ -8,7 +8,7 @@
  * sandbox-routes surface still answer qm's unwired shapes until their
  * subsystems converge (deviation #46).
  */
-import { parseScopeId } from '@qm/types'
+import { parseScopeId, type CommandPolicy } from '@qm/types'
 import { cacheHitRatio, isStablePrefixMiss, type AdminRole, type CredentialUsageSink, type EgressAuditSink, type ErrorLog, type AuditLog, type MetricsSink, type TurnMetricSample } from '@qm/admin'
 import type { ScopeMemory } from '@qm/memory'
 import { isValidMcpServerId, type McpServer, type McpServerAuthMode, type McpServerStore, type McpToolService } from '@qm/mcp'
@@ -35,7 +35,8 @@ import type { SkillStore } from '@qm/skills'
 import type { DeploymentStore } from '../services/deployment-store.ts'
 import type { BlobTransferService } from '../services/blob-transfer.ts'
 import { ByteSourceTooLargeError, type FileStoreService } from '../services/file-store.ts'
-import { defaultDenylistPolicy, evaluateCommandPolicy, parseCommandPolicy } from '@qm/sandbox'
+import type { CommandPolicyStore } from '../services/command-policy-store.ts'
+import { composePolicy, defaultDenylistPolicy, evaluateCommandPolicy, parseCommandPolicy } from '@qm/sandbox'
 import { badRequest, isObj, notFound, sendJson, type ApiRouteContext, type Route } from './framework.ts'
 import { verifyPortalIdentity } from '@qm/auth'
 
@@ -47,6 +48,8 @@ export interface AdminDeps {
   memory?: ScopeMemory
   files?: FileStoreService
   blobTransfer?: BlobTransferService
+  /** X3b per-scope command policies (storage/CRUD + simulate + sandbox provision resolution). */
+  commandPolicies?: CommandPolicyStore
   deployments?: DeploymentStore
   skills?: SkillStore
   skillPacks?: import('../services/skill-pack-store.ts').SkillPackStore
@@ -239,16 +242,37 @@ async function putScopeConfig(ctx: ApiRouteContext, deps: AdminDeps): Promise<un
   if (resource === 'command-policy-simulate') {
     return simulateCommandPolicy(ctx, deps, targetScope, actorId)
   }
+  if (resource === 'command-policy') {
+    return putCommandPolicy(ctx, deps, targetScope, actorId)
+  }
   return sendJson(ctx, 404, { error: 'not_found', message: `unknown admin resource: ${resource}` })
 }
 
+async function scopeCommandPolicyRoutes(
+  ctx: ApiRouteContext,
+  deps: AdminDeps,
+  method: 'GET' | 'PUT' | 'DELETE',
+): Promise<unknown> {
+  const targetScope = ctx.params.scope
+  if (!targetScope) return notFound(ctx)
+  const actorId = await authorizeAdmin(ctx, deps, targetScope)
+  if (!actorId) return undefined
+  if (method === 'GET') return getCommandPolicy(ctx, deps, targetScope)
+  if (method === 'PUT') return putCommandPolicy(ctx, deps, targetScope, actorId)
+  return deleteCommandPolicy(ctx, deps, targetScope, actorId)
+}
+
 /**
- * X3b (minimal) — command-policy simulation over the same evaluator the
- * sandbox gate runs (`evaluateCommandPolicy`), so simulate fidelity
- * equals production fidelity. Inline policy is validated with
- * `parseCommandPolicy`; without one, the catastrophic-primitive baseline
- * evaluates. Scope policy storage and org-floor composition land with
- * the batch-4 convergence (X3a audit, gaps G3/G4).
+ * X3b — command-policy simulation over the same evaluator the sandbox
+ * gate runs, so simulate fidelity equals production fidelity (qm
+ * `admin/scope-config.ts` parity): the target policy is the inline
+ * supply, else the stored scope policy, else the org-floor baseline for
+ * org scopes (empty denylist for non-org). A non-org target evaluates
+ * against the composed policy — org floor (stored org policy, falling
+ * back to the catastrophic-primitive baseline) first, scope rules after
+ * — and `ruleSource`/`ruleIndex` report which layer fired, qm
+ * arithmetic included. Deployment-layer rules do not exist in qm-next
+ * yet, so `deploymentRulesEvaluated` stays false.
  */
 async function simulateCommandPolicy(
   ctx: ApiRouteContext,
@@ -259,17 +283,28 @@ async function simulateCommandPolicy(
   const b = isObj(ctx.body) ? (ctx.body as Record<string, unknown>) : {}
   const command = b.command
   if (typeof command !== 'string' || !command.trim()) return badRequest(ctx, 'command is required')
-  let effective = defaultDenylistPolicy()
-  let ruleSource: 'inline' | 'baseline' = 'baseline'
+  const targetKind = parseScopeId(targetScope).kind
+  let supplied: CommandPolicy | undefined
+  let policySource: 'inline' | 'stored' | 'baseline' = 'baseline'
   if (b.policy !== undefined) {
     const parsed = parseCommandPolicy(b.policy)
     if ('error' in parsed) return badRequest(ctx, parsed.error)
-    effective = parsed.policy
-    ruleSource = 'inline'
+    supplied = parsed.policy
+    policySource = 'inline'
   }
+  const stored = supplied ?? (deps.commandPolicies ? (await deps.commandPolicies.get(targetScope))?.policy : undefined)
+  if (!supplied && stored) policySource = 'stored'
+  const target = stored ?? (targetKind === 'org' ? defaultDenylistPolicy() : { mode: 'denylist' as const, rules: [] })
+  const orgFloor =
+    (deps.commandPolicies ? (await deps.commandPolicies.get(deps.orgScope))?.policy : undefined) ??
+    defaultDenylistPolicy()
+  const effective = targetKind === 'org' ? target : composePolicy(orgFloor, target)
   const result = evaluateCommandPolicy(command, effective)
-  const ruleIndex =
-    result.ruleId !== undefined ? effective.rules.findIndex((rule) => rule.pattern === result.ruleId) : -1
+  const effectiveRuleIndex = result.ruleId ? effective.rules.findIndex((rule) => rule.pattern === result.ruleId) : -1
+  const orgRuleCount = targetKind === 'org' ? 0 : orgFloor.rules.length
+  let ruleSource: 'organization' | 'scope' | null = null
+  if (effectiveRuleIndex >= 0) ruleSource = effectiveRuleIndex < orgRuleCount ? 'organization' : 'scope'
+  const ruleIndex = effectiveRuleIndex < 0 ? null : effectiveRuleIndex - (ruleSource === 'scope' ? orgRuleCount : 0)
   deps.auditLog?.record({
     at: Date.now(),
     principalId: actorId,
@@ -284,9 +319,57 @@ async function simulateCommandPolicy(
     matched: result.matched ?? null,
     ruleId: result.ruleId ?? null,
     ruleSource,
-    ruleIndex: ruleIndex >= 0 ? ruleIndex : null,
+    ruleIndex,
+    policySource,
     deploymentRulesEvaluated: false,
   })
+}
+
+async function getCommandPolicy(ctx: ApiRouteContext, deps: AdminDeps, targetScope: string): Promise<unknown> {
+  const record = deps.commandPolicies ? await deps.commandPolicies.get(targetScope) : null
+  deps.auditLog?.record({
+    at: Date.now(),
+    principalId: ctx.actor?.id ?? 'unknown',
+    action: 'admin.command_policy.read',
+    resource: 'command-policy',
+    scopeLabel: targetScope,
+  })
+  return sendJson(ctx, 200, {
+    ok: true,
+    scopeId: targetScope,
+    policy: record?.policy ?? null,
+    ...(record?.setBy ? { setBy: record.setBy } : {}),
+    ...(record ? { updatedAt: record.updatedAt } : {}),
+  })
+}
+
+async function putCommandPolicy(ctx: ApiRouteContext, deps: AdminDeps, targetScope: string, actorId: string): Promise<unknown> {
+  if (!deps.commandPolicies) return notFound(ctx)
+  const b = isObj(ctx.body) ? (ctx.body as Record<string, unknown>) : {}
+  const parsed = parseCommandPolicy(b.policy)
+  if ('error' in parsed) return badRequest(ctx, parsed.error)
+  const record = await deps.commandPolicies.set(targetScope, parsed.policy, { setBy: actorId })
+  deps.auditLog?.record({
+    at: Date.now(),
+    principalId: actorId,
+    action: 'admin.command_policy.update',
+    resource: 'command-policy',
+    scopeLabel: targetScope,
+  })
+  return sendJson(ctx, 200, { ok: true, scopeId: targetScope, policy: record.policy })
+}
+
+async function deleteCommandPolicy(ctx: ApiRouteContext, deps: AdminDeps, targetScope: string, actorId: string): Promise<unknown> {
+  if (!deps.commandPolicies) return notFound(ctx)
+  const deleted = await deps.commandPolicies.delete(targetScope)
+  deps.auditLog?.record({
+    at: Date.now(),
+    principalId: actorId,
+    action: 'admin.command_policy.delete',
+    resource: 'command-policy',
+    scopeLabel: targetScope,
+  })
+  return sendJson(ctx, 200, { ok: true, scopeId: targetScope, deleted })
 }
 
 async function getAdminResources(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
@@ -1517,6 +1600,9 @@ export function adminRoutes(deps: AdminDeps): ReadonlyArray<Route> {
     { method: 'GET', path: '/v1/admin/scopes', auth: 'either', handle: t(h((ctx) => listAdminScopes(ctx, deps))) },
     { method: 'GET', path: '/v1/admin/scopes/:scope', auth: 'either', handle: t(h((ctx) => getScopeConfig(ctx, deps))) },
     { method: 'PUT', path: '/v1/admin/scopes/:scope/:resource', auth: 'either', handle: t(h((ctx) => putScopeConfig(ctx, deps))) },
+    { method: 'GET', path: '/v1/admin/scopes/:scope/command-policy', auth: 'either', handle: t(h((ctx) => scopeCommandPolicyRoutes(ctx, deps, 'GET'))) },
+    { method: 'PUT', path: '/v1/admin/scopes/:scope/command-policy', auth: 'either', handle: t(h((ctx) => scopeCommandPolicyRoutes(ctx, deps, 'PUT'))) },
+    { method: 'DELETE', path: '/v1/admin/scopes/:scope/command-policy', auth: 'either', handle: t(h((ctx) => scopeCommandPolicyRoutes(ctx, deps, 'DELETE'))) },
     { method: 'GET', path: '/v1/admin/resources', auth: 'either', handle: t(h((ctx) => getAdminResources(ctx, deps))) },
     { method: 'GET', path: '/v1/admin/retention', auth: 'either', handle: t(h((ctx) => retention(ctx, deps))) },
     { method: 'POST', path: '/v1/admin/scopes/:scope/auto-flagger/test', auth: 'either', handle: t(h((ctx) => testAutoFlagger(ctx, deps))) },

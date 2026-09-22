@@ -9,6 +9,13 @@ export {
   type ChannelPolicyStore,
 } from './channel-policy-store.ts'
 export {
+  createMemoryCommandPolicyStore,
+  createPostgresCommandPolicyStore,
+  COMMAND_POLICY_SCHEMA_STATEMENTS,
+  type CommandPolicyRecord,
+  type CommandPolicyStore,
+} from './command-policy-store.ts'
+export {
   createSurfaceContextQueue,
   type ContextOutcome,
   type PendingContextRequest,
