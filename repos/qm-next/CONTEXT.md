@@ -108,6 +108,8 @@ _Avoid_: pending approval, done, paused, rejected
 The lifecycle position of a Run: queued, running, awaiting approval, succeeded, failed, or cancelled.
 _Avoid_: done, status, result
 
+> **Phase 7+ 观测约定（2026-09-20 cutover 起）**：对外暴露的 `Run.status` 字段对 `runSource='target'` 行**不再推进**到 `'done'`，永远停留在 `'pending'` 或 `'running'`。观测端做终态判定**必须**读 `Run.targetState ∈ {succeeded, failed, cancelled}`。legacy `runSource='legacy'` 行（迁移脚本未跑过）仍可能含 `status='done'`，向后兼容两套字段都查。详见 `docs/parity-api-contract.md` §turns 与 `packages/store/src/memory-run-store.ts:179-195` `complete()` 实现。
+
 **Attempt State**:
 The lifecycle position of one Attempt: queued, running, suspended, succeeded, failed, or cancelled.
 _Avoid_: run state, retry state, result

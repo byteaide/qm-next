@@ -184,7 +184,10 @@ async function pollRun(runId: string, timeoutMs = 90_000): Promise<any> {
     const { status, body } = await req('GET', `/v1/runs/${runId}`)
     if (status !== 200) throw new Error(`GET /v1/runs/${runId} → ${status}`)
     last = body
-    if (body.status === 'done' || body.status === 'failed') return body
+    // Phase 7 cutover: target-source 行的 `status` 字段不再推进到 'done'；
+    // 必须同时检查 `targetState` 才是真终态。详见 packages/store/src/memory-run-store.ts:179-195。
+    if (body.status === 'done' || body.status === 'failed'
+      || body.targetState === 'succeeded' || body.targetState === 'failed' || body.targetState === 'cancelled') return body
     await new Promise((r) => setTimeout(r, 400))
   }
   throw new Error(`run ${runId} 未在 ${timeoutMs}ms 内终结；last=${JSON.stringify(last)}`)
