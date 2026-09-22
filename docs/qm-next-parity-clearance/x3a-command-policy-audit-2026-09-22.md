@@ -32,14 +32,14 @@
 | G4 | 每作用域策略存储 + CRUD 缺失 | 中 | qm-next 无 config-store 等价物承接 policy；simulate 的"读存储策略"分支依赖它 |
 | G5 | X3b simulate 未实现 | 中 | 见解锁路径；inline-policy 版本可先行 |
 | G6 | 双引擎收敛方向未决 | 中 | 建议：规则引擎作为 CommandGate 的一种 `CommandPolicy` 实现（文本取自 `args.argv`/`rawText` → scannableCommand → firstMatch），类目策略管结构化操作（publish/webhook/mcp 是 qm 用其他机制管的，qm-next 类目设计是超集） |
-| G7 | 沙箱引擎无 `i` 标志 + 无 safe-regex | 低 | qm 全部忽略大小写 + ReDoS 防护；qm-next 运营者可提交规则 = ReDoS 面。小修，应随任意移植顺带 |
+| G7 | 沙箱引擎无 `i` 标志 + 无 safe-regex | 低 | qm 全部忽略大小写 + ReDoS 防护；qm-next 运营者可提交规则 = ReDoS 面。小修，应随任意移植顺带。（2026-09-22 已修：`compileSafeRegex` 移植 + `i` 标志 + `(?:` 语法修复——qm 分析器把 `(?:` 的 `?` 误判为量词并把组内原子量词错误记到整个组，qm 规则碰巧全避开；qm-next 的 mkfs 规则改写为两条避开 `(?:...)?` 形式） |
 | G8 | require_approval → ApprovalRequest 链路断开 | 低 | 审批回路强（commandRequestId），缺"策略产出 → NeedsApproval → 挂起"一跳；G2 接线时补 |
 
 ## X3b（simulate）解锁路径
 
 qm 参照实现：`admin/scope-config.ts:49-78`——inline policy（`parseCommandPolicy` 校验）或存储策略 → org 组合 → `evaluateCommand` → decision/matched/ruleSource/ruleIndex → 审计 `command-policy.simulate`。
 
-- **最小版（~0.25 天，可进第 3 批）**：先做 G7（`i` 标志 + safe-regex）+ G2-lite（api 装配线给沙箱配 `'default-denylist'`，唤醒引擎）→ simulate 接受 inline policy + org 基线，求值器与生产共用同一个 `evaluateCommandPolicy`。一致性即保真。
+- **最小版（~0.25 天，可进第 3 批）**：先做 G7（`i` 标志 + safe-regex）+ G2-lite（api 装配线给沙箱配 `'default-denylist'`，唤醒引擎）→ simulate 接受 inline policy + org 基线，求值器与生产共用同一个 `evaluateCommandPolicy`。一致性即保真。（2026-09-22：已实现，含 6 条引擎测试 + 6 条路由测试）
 - **完整版（第 4 批，~1-1.5 天）**：G1（scannableCommand 移植 + qm 语料回归）→ 生产与 simulate 同步升级语义；G4（存储 + CRUD）→ simulate 的存储分支与 ruleSource/ruleIndex 归属；G3（composePolicy）→ 组合语义对齐。
 - 收敛方向（G6）需要一个决策记录：规则引擎收编为 CommandGate 的策略实现，`PolicyVerdict` 已是 `CommandDecision` 同形（KV-005 切换完成），合并成本主要在请求形状适配。
 

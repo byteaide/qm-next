@@ -10,5 +10,13 @@ export * from './exec-process-session.ts'
 export * from './ro-layers.ts'
 export * from './exec-file-ops.ts'
 export * from './local-sandbox.ts'
-export { evaluateCommandPolicy, assertPolicyAllows, escapeForRegex, type PolicyVerdict } from './policy.ts'
+export {
+  evaluateCommandPolicy,
+  assertPolicyAllows,
+  escapeForRegex,
+  compileSafeRegex,
+  parseCommandPolicy,
+  type PolicyVerdict,
+  type ParseCommandPolicyResult,
+} from './policy.ts'
 export { DEFAULT_DENYLIST_PATTERNS, defaultDenylistPolicy } from './default-policy.ts'

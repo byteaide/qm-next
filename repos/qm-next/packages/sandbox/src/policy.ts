@@ -16,9 +16,11 @@
  *     the `rm -rf\s+/` denylist pattern because the slash is followed by
  *     `tmp`. This is intentional — false positives on legitimate work
  *     are worse than misses on adversarial inputs.
- *   - The matcher is one-shot (first match wins) and case-sensitive by
- *     default. Callers who need case-insensitive matching should write
- *     the pattern with the `i` flag explicitly.
+ *   - Patterns compile through `compileSafeRegex` (qm parity): length
+ *     cap, no backreferences/lookarounds, no nested/ambiguous repetition
+ *     (ReDoS surface), and the `i` flag is always applied — operators
+ *     must not rely on case sensitivity (`RM -RF /` matches `rm`).
+ *   - The matcher is one-shot (first match wins).
  */
 import type { CommandDecisionValue, CommandPolicy, CommandRule } from '@qm/types'
 import { CommandDenied, NeedsApproval } from '@qm/types'
@@ -42,8 +44,90 @@ interface CompiledRule {
   regex: RegExp
 }
 
+/** Pattern length ceiling (qm `util/safe-regex.ts` parity). */
+const MAX_PATTERN_CHARS = 256
+
+/**
+ * ReDoS-guarded regex compilation (qm `src/util/safe-regex.ts` parity):
+ * rejects oversized patterns, backreferences, lookarounds, and
+ * nested/ambiguous repetition before handing the pattern to `RegExp`.
+ */
+export function compileSafeRegex(pattern: string, flags = ''): RegExp {
+  if (!pattern || pattern.length > MAX_PATTERN_CHARS) {
+    throw new Error(`pattern must be 1-${MAX_PATTERN_CHARS} characters`)
+  }
+  if (/\\[1-9]|\\k<|\(\?[=!<]/.test(pattern)) {
+    throw new Error('backreferences and lookarounds are not supported')
+  }
+  const groups: Array<{ quantified: boolean; alternation: boolean }> = []
+  let escaped = false
+  let inClass = false
+  let previousQuantifier = false
+  let closed: { quantified: boolean; alternation: boolean } | null = null
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i]!
+    if (escaped) {
+      escaped = false
+      previousQuantifier = false
+      closed = null
+      continue
+    }
+    if (ch === '\\') {
+      escaped = true
+      continue
+    }
+    if (ch === '[') {
+      inClass = true
+      previousQuantifier = false
+      closed = null
+      continue
+    }
+    if (ch === ']' && inClass) {
+      inClass = false
+      continue
+    }
+    if (inClass) continue
+    if (ch === '(') {
+      groups.push({ quantified: false, alternation: false })
+      // `(?:` is group syntax, not a quantifier — qm's analyzer
+      // misclassifies it as one (its own rules avoid `(?:`), which
+      // would wrongly mark the group as quantified. Lookarounds and
+      // named groups are already rejected by the safety prefilter
+      // above, so skipping one `?` here is exact.
+      if (pattern[i + 1] === '?') i++
+      previousQuantifier = false
+      closed = null
+      continue
+    }
+    if (ch === '|') {
+      if (groups.length) groups[groups.length - 1]!.alternation = true
+      previousQuantifier = false
+      closed = null
+      continue
+    }
+    if (ch === ')') {
+      closed = groups.pop() ?? { quantified: false, alternation: false }
+      previousQuantifier = false
+      continue
+    }
+    const quantifier = ch === '*' || ch === '+' || (ch === '?' && pattern[i - 1] !== '(') || ch === '{'
+    if (quantifier) {
+      if (previousQuantifier || (closed && (closed.quantified || closed.alternation))) {
+        throw new Error('nested or ambiguous repetition is not supported')
+      }
+      if (groups.length) groups[groups.length - 1]!.quantified = true
+      previousQuantifier = true
+      closed = null
+      continue
+    }
+    previousQuantifier = false
+    closed = null
+  }
+  return new RegExp(pattern, flags)
+}
+
 function compileRules(rules: readonly CommandRule[]): CompiledRule[] {
-  return rules.map((rule) => ({ rule, regex: new RegExp(rule.pattern) }))
+  return rules.map((rule) => ({ rule, regex: compileSafeRegex(rule.pattern, 'i') }))
 }
 
 /**
@@ -84,4 +168,50 @@ export function assertPolicyAllows(command: string, policy: CommandPolicy): Poli
 /** Escape a string for safe inclusion in a regex pattern (caller still chooses flags). */
 export function escapeForRegex(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** qm `parseCommandPolicy` parity: `{ policy }` on success, `{ error }` with a stable message on rejection. */
+export type ParseCommandPolicyResult = { policy: CommandPolicy } | { error: string }
+
+/**
+ * Validate an operator-supplied command policy (qm
+ * `src/policy/command-policy.ts:34-64` parity): object shape, closed
+ * mode set, non-empty pattern strings that compile through
+ * `compileSafeRegex`, canonical decision values, optional string
+ * reasons. Used by the admin simulate surface before evaluation.
+ */
+export function parseCommandPolicy(input: unknown): ParseCommandPolicyResult {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    return { error: 'command policy must be an object' }
+  }
+  const b = input as { mode?: unknown; rules?: unknown }
+  if (b.mode !== 'denylist' && b.mode !== 'allowlist') {
+    return { error: 'mode must be "denylist" or "allowlist"' }
+  }
+  if (!Array.isArray(b.rules)) return { error: 'rules must be an array' }
+  const rules: CommandRule[] = []
+  for (const [i, raw] of b.rules.entries()) {
+    if (typeof raw !== 'object' || raw === null) return { error: `rules[${i}] must be an object` }
+    const r = raw as { pattern?: unknown; decision?: unknown; reason?: unknown }
+    if (typeof r.pattern !== 'string' || r.pattern.length === 0) {
+      return { error: `rules[${i}].pattern must be a non-empty string` }
+    }
+    try {
+      compileSafeRegex(r.pattern, 'i')
+    } catch (e) {
+      return { error: `rules[${i}].pattern is not a valid regex: ${(e as Error).message}` }
+    }
+    if (r.decision !== 'allow' && r.decision !== 'deny' && r.decision !== 'require_approval') {
+      return { error: `rules[${i}].decision must be "allow", "deny", or "require_approval"` }
+    }
+    if (r.reason !== undefined && typeof r.reason !== 'string') {
+      return { error: `rules[${i}].reason must be a string` }
+    }
+    rules.push({
+      pattern: r.pattern,
+      decision: r.decision,
+      ...(r.reason !== undefined ? { reason: r.reason } : {}),
+    })
+  }
+  return { policy: { mode: b.mode, rules } }
 }

@@ -87,7 +87,7 @@ qm 的产品灵魂层 = **16 段顺序组装管线 + 三模式协议帧 + soul �
 | Context-policy 成员检查 | 目录成员校验已接：directory 在线时 GET/PUT 越权 403（qm `memberScope` 阶梯），离线保持 lane-A 开放 | 🟢 |
 | soul 共享 scope 写校验 | `managesScope` 已接目录（qm `createCanManageScope` 语义：personal=本人、group=成员、channel=私有成员）；未接目录时维持拒绝 | 🟢 |
 | Portal | 包已就绪 + SSO；**impersonation 路由未移植**；playground 匿名会话随 13.0 | 🟡 |
-| Command policy 模拟 | X3a 审计完成（2026-09-22，`x3a-command-policy-audit-2026-09-22.md`）：解锁路径已定——最小版（引擎唤醒 + inline policy，~0.25 天）可进第 3 批，完整版（scannableCommand 移植 + 存储/CRUD + 分层）随第 4 批 | 🟡 |
+| Command policy 模拟 | X3b 最小版已落地（2026-09-22）：simulate 接 inline policy + 灾难级基线，求值器与沙箱门共用（`admin-routes.ts` simulateCommandPolicy）；沙箱门已唤醒（默认 `default-denylist`，可配 off）；引擎加 `i` 标志 + safe-regex（qm 对齐）。剩余：scannableCommand 语义归一化 + 存储/CRUD + 分层（第 4 批，见 X3a 审计） | 🟡 |
 | environments/projects 存储 | 刻意每进程（`@qm/api/src/services/`，见 #816 评论） | 🟡 有意为之 |
 | 多实例心跳 | `instance_heartbeats` 表在；`TRUNCATE_ONLY` 仅 notes——非真正多实例交接 | 🟡 |
 
@@ -97,7 +97,7 @@ qm 的产品灵魂层 = **16 段顺序组装管线 + 三模式协议帧 + soul �
 
 1. **依赖受限（凭据）**：codex-device-login（502 `oauth_start_failed`）、订阅 OAuth（502 `oauth_complete_failed`）——2026-09-22 拍板：无 ChatGPT 真实凭证，模型面走国产 LLM；两项登记为有意偏差，不再以"等凭据"挂起（代码保持就绪）。
 2. **未移植模块**：`connectors/oauth.ts`（IM provider OAuth 栈，注释称"待 P5 18.0 IM providers 落地"）、portal impersonation 路由、Fly/AWS 部署 provider（2026-09-22 拍板暂缓；publish 随之登记有意偏差）。
-3. **功能桩**：`command-policy-simulate` 501（X3a 审计已定解锁路径：最小版第 3 批、完整版第 4 批；双引擎休眠为最高优先差距）；ToolContext 的 publish 诚实不可用（有意偏差，见 T5 评估）、createPlayground 待第 3 批小移植（cron/webhook/MCP/shareArtifact 已于 2026-09-22 接控制面收口）。
+3. **功能桩**：`command-policy-simulate` 最小版已收口（2026-09-22，X3b-min；完整版第 4 批）；ToolContext 的 publish 诚实不可用（有意偏差，见 T5 评估）、createPlayground 待第 3 批小移植（cron/webhook/MCP/shareArtifact 已于 2026-09-22 接控制面收口）。
 4. **lane-A 刻意简化**：environments/projects 每进程存储（context-policy 成员检查 #44 与 soul `managesScope` 已于 2026-09-22 接目录收口）。
 5. **qm-soul 二期**：段⑮ onboarding 已于 2026-09-22 收口（Q4）；段⑩⑪ 随 slack delivery 不移植登记有意偏差；段⑫ grantedHandles 已于 2026-09-22 收口（composer 段位 + 授权句柄 read 阶梯）；登记偏差 #55（源码词汇）、#55b（gateway 块 envelope 门控，有意行为差异）；5.2 飞书真机静默腿。
 

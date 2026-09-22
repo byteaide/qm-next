@@ -237,6 +237,13 @@ export interface ApiConfig {
     defaultTimeoutSec?: number
     /** Hard ceiling for per-command exec timeouts in seconds. */
     defaultTimeoutCeilingSec?: number
+    /**
+     * Command policy for the Phase 3J sandbox gate. Defaults to
+     * `'default-denylist'` — the catastrophic-primitive floor evaluates
+     * before every docker exec. `'off'` disables the gate (not
+     * recommended; ADR-0002 keeps a policy between agents and shells).
+     */
+    commandPolicy?: 'default-denylist' | 'off'
   }
   /** Dev default system prompt (explicit operator override; empty soul default). */
   systemPrompt?: string
@@ -424,6 +431,7 @@ export const Config = Schema.object({
     memoryMb: Schema.number().description('Memory cap (MB) per sandbox container'),
     defaultTimeoutSec: Schema.number().description('Per-command exec timeout in seconds'),
     defaultTimeoutCeilingSec: Schema.number().description('Hard ceiling for per-command exec timeouts in seconds'),
+    commandPolicy: Schema.string().description('Sandbox command gate: default-denylist (default, catastrophic-primitive floor) | off'),
   }).description('Sandbox-backed tool execution; set any field (e.g. defaultTimeoutSec) to give every turn a ToolContext'),
   anthropicApiKey: Schema.string().description('Anthropic key for the pi harness'),
   openaiApiKey: Schema.string().description('OpenAI key for the pi harness'),
@@ -854,6 +862,7 @@ export class ApiService extends Service<ApiConfig> {
         ...(sc.cpus !== undefined ? { cpus: sc.cpus } : {}),
         ...(sc.memoryMb !== undefined ? { memoryMb: sc.memoryMb } : {}),
         ...(sc.defaultTimeoutSec !== undefined ? { defaultTimeoutSec: sc.defaultTimeoutSec } : {}),
+        ...(sc.commandPolicy === 'off' ? {} : { policy: 'default-denylist' as const }),
       })
       this.sandbox = sandbox
       const processRegistry = sandbox.readProcess

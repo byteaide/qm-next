@@ -35,6 +35,7 @@ import type { SkillStore } from '@qm/skills'
 import type { DeploymentStore } from '../services/deployment-store.ts'
 import type { BlobTransferService } from '../services/blob-transfer.ts'
 import { ByteSourceTooLargeError, type FileStoreService } from '../services/file-store.ts'
+import { defaultDenylistPolicy, evaluateCommandPolicy, parseCommandPolicy } from '@qm/sandbox'
 import { badRequest, isObj, notFound, sendJson, type ApiRouteContext, type Route } from './framework.ts'
 import { verifyPortalIdentity } from '@qm/auth'
 
@@ -236,12 +237,55 @@ async function putScopeConfig(ctx: ApiRouteContext, deps: AdminDeps): Promise<un
   const actorId = await authorizeAdmin(ctx, deps, targetScope)
   if (!actorId) return undefined
   if (resource === 'command-policy-simulate') {
-    return sendJson(ctx, 501, {
-      error: 'not_configured',
-      message: 'command policy simulation needs the policy engine (lands with the convergence milestone)',
-    })
+    return simulateCommandPolicy(ctx, deps, targetScope, actorId)
   }
   return sendJson(ctx, 404, { error: 'not_found', message: `unknown admin resource: ${resource}` })
+}
+
+/**
+ * X3b (minimal) — command-policy simulation over the same evaluator the
+ * sandbox gate runs (`evaluateCommandPolicy`), so simulate fidelity
+ * equals production fidelity. Inline policy is validated with
+ * `parseCommandPolicy`; without one, the catastrophic-primitive baseline
+ * evaluates. Scope policy storage and org-floor composition land with
+ * the batch-4 convergence (X3a audit, gaps G3/G4).
+ */
+async function simulateCommandPolicy(
+  ctx: ApiRouteContext,
+  deps: AdminDeps,
+  targetScope: string,
+  actorId: string,
+): Promise<unknown> {
+  const b = isObj(ctx.body) ? (ctx.body as Record<string, unknown>) : {}
+  const command = b.command
+  if (typeof command !== 'string' || !command.trim()) return badRequest(ctx, 'command is required')
+  let effective = defaultDenylistPolicy()
+  let ruleSource: 'inline' | 'baseline' = 'baseline'
+  if (b.policy !== undefined) {
+    const parsed = parseCommandPolicy(b.policy)
+    if ('error' in parsed) return badRequest(ctx, parsed.error)
+    effective = parsed.policy
+    ruleSource = 'inline'
+  }
+  const result = evaluateCommandPolicy(command, effective)
+  const ruleIndex =
+    result.ruleId !== undefined ? effective.rules.findIndex((rule) => rule.pattern === result.ruleId) : -1
+  deps.auditLog?.record({
+    at: Date.now(),
+    principalId: actorId,
+    action: 'admin.command_policy.simulate',
+    resource: 'command-policy',
+    scopeLabel: targetScope,
+  })
+  return sendJson(ctx, 200, {
+    ok: true,
+    decision: result.decision,
+    reason: result.reason ?? null,
+    matched: result.ruleId ?? null,
+    ruleSource,
+    ruleIndex: ruleIndex >= 0 ? ruleIndex : null,
+    deploymentRulesEvaluated: false,
+  })
 }
 
 async function getAdminResources(ctx: ApiRouteContext, deps: AdminDeps): Promise<unknown> {
