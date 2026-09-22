@@ -61,6 +61,14 @@ export interface TurnResolution {
    */
   memoryBlock?: string
   /**
+   * Segment ⑮ — the pending-onboarding block (qm renderPendingOnboarding-
+   * Prompt). Appends after the memory block, outside the cache boundary
+   * (qm orchestrator.ts:1650); the resolution emits it only for DMs whose
+   * skill store resolves the onboarding skill and whose notebook lacks a
+   * completion marker.
+   */
+  onboardingBlock?: string
+  /**
    * Resolution-side assertion that the turn carries the surface tool set;
    * the orchestrator merges it with the caller-supplied TurnInput flag and
    * the turn-origin derivation to select mode-autonomous.

@@ -531,3 +531,75 @@ test('mode selection rides the harness turn input (ADR-0018)', async () => {
   assert.equal(captured[0]!.surfaceTools, false)
   assert.match(captured[0]!.systemPrompt, /no live 1:1 with a person and no surface tools/)
 })
+
+test('segment 15: onboarding appends after memory, outside the cache boundary', async () => {
+  const captured: Array<{ systemPrompt: string; systemCacheBoundary: number | undefined }> = []
+  const mock = createMockHarness()
+  const capturing: Harness = {
+    profile: mock.profile,
+    models: mock.models,
+    tools: mock.tools,
+    turns: {
+      runTurn: async (input: HarnessTurnInput) => {
+        captured.push({ systemPrompt: input.systemPrompt, systemCacheBoundary: input.systemCacheBoundary })
+        return mock.turns.runTurn(input)
+      },
+    },
+  } as unknown as Harness
+  const registry = createHarnessRouter({ defaultId: 'mock' })
+  registry.register(capturing)
+  const soulResolution: ResolutionService = {
+    resolve: async () => ({
+      systemPrompt: 'soul-body',
+      orgScopeId: ORG,
+      memoryBlock: '\n\n## What you remember\nctx\n\nfact',
+      onboardingBlock: '## Pending Onboarding\nMemory has no onboarding completion marker for v2.',
+    }),
+    scopeFor: () => SCOPE,
+  }
+  const orch = boot(buildDeps({ harness: registry, resolution: soulResolution }))
+
+  await orch.handleTurn(turnInput())
+  const prompt = captured[0]!.systemPrompt
+  const boundary = captured[0]!.systemCacheBoundary!
+  assert.ok(prompt.slice(0, boundary).includes('soul-body'), 'stable prefix holds the soul')
+  assert.ok(!prompt.slice(0, boundary).includes('## Pending Onboarding'), 'onboarding never enters the cache boundary')
+  const memoryAt = prompt.indexOf('## What you remember')
+  const onboardingAt = prompt.indexOf('## Pending Onboarding')
+  assert.ok(memoryAt > boundary && onboardingAt > memoryAt, 'qm segment order: memory then onboarding, both post-boundary')
+})
+
+test('proactive opener with empty text feeds the opener prompt to the harness', async () => {
+  const captured: Array<{ input: string }> = []
+  const mock = createMockHarness()
+  const capturing: Harness = {
+    profile: mock.profile,
+    models: mock.models,
+    tools: mock.tools,
+    turns: {
+      runTurn: async (input: HarnessTurnInput) => {
+        captured.push({ input: input.input })
+        return mock.turns.runTurn(input)
+      },
+    },
+  } as unknown as Harness
+  const registry = createHarnessRouter({ defaultId: 'mock' })
+  registry.register(capturing)
+  const sessions = new FakeSessions()
+  const orch = boot(buildDeps({ harness: registry, sessions }))
+
+  const opener = turnInput({ proactiveOpener: true, text: '   ' })
+  const openerResult = await orch.handleTurn(opener)
+  assert.ok(captured[0]!.input.includes("hasn't typed anything yet"), 'empty opener text substitutes the opener prompt')
+  const entries = await sessions.getEntries(openerResult.sessionId!)
+  const userEntry = entries.find((e) => e.type === 'user')
+  assert.equal((userEntry!.payload as { text?: string }).text, '   ', 'the session entry keeps the raw (whitespace) inbound text')
+
+  captured.length = 0
+  await orch.handleTurn(turnInput({ proactiveOpener: true, text: 'real user text' }))
+  assert.equal(captured[0]!.input, 'real user text', 'non-empty opener text passes through untouched')
+
+  captured.length = 0
+  await orch.handleTurn(turnInput({ text: '' }))
+  assert.equal(captured[0]!.input, '', 'empty text without the opener flag stays empty')
+})

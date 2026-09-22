@@ -24,6 +24,17 @@ export {
 } from './runtime-choice.ts'
 export { createMockHarness, mockProfile, type MockHarness, type MockHarnessOptions, type MockTurnStep } from './mock-harness.ts'
 export {
+  detectOnboardingStatus,
+  onboardingBlockFor,
+  PROACTIVE_OPENER_PROMPT,
+  renderPendingOnboardingPrompt,
+  setOnboardingStatus,
+  ONBOARDING_SKILL_NAME,
+  ONBOARDING_VERSION,
+  type OnboardingStatus,
+  type OnboardingTurnDeps,
+} from './onboarding.ts'
+export {
   createSandboxToolContext,
   type CronControlSurface,
   type McpControlSurface,

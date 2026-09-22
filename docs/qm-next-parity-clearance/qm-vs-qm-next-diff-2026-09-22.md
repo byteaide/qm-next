@@ -59,7 +59,8 @@ qm 的产品灵魂层 = **16 段顺序组装管线 + 三模式协议帧 + soul �
 
 - **#55（源码词汇层）**：模板源码平台词 neutralized；渲染输出在 provider label 等于 qm 字面量时保持字节一致——偏差仅存在于源码词汇层。
 - **#55b（有意行为差异）**：qm 只要有 surface 名就渲染 gateway 行；qm-next 改为**仅在 IM envelope 实际提供事实（`TurnInput.gatewayContext`）时渲染段⑨**，避免与模式帧的 surface 措辞重复。
-- **段⑩⑪⑮ 挂二期**：home channel、cron 多目的地交付菜单、onboarding 检测——依赖 qm 的 delivery-candidates+signing+apiBaseUrl、onboarding-skill 记忆检测，均未移植。composer 段位槽位已按 ADR-0018 顺序预留。
+- **段⑩⑪ 有意偏差（2026-09-22 拍板：slack delivery 不移植）**：home channel（⑩）与 cron 多目的地交付菜单（⑪）依赖 qm 的 delivery-candidates+signing+apiBaseUrl（`slack/delivery.ts`）——用户决定不移植 slack delivery 栈，两段随 Q0 一并登记为有意偏差。composer 段位槽位仍按 ADR-0018 预留。
+- **段⑮ 已收口（2026-09-22，Q4）**：onboarding 检测按 qm `onboarding.ts` 75 行字节级移植（`packages/orchestrator/src/onboarding.ts`）——记忆标记语法（completed/dismissed/pending v2）、DM + onboarding skill 双门、fail-open；段位在 memoryBlock（⑭）之后、缓存边界外（qm orchestrator.ts:1650 顺序）；`PROACTIVE_OPENER_PROMPT` 接管空文本 proactive opener 的 harness 输入（qm 2253）。台账见 `onboarding.test.ts`（22 测试）+ orchestrator 段⑮/边界用例。
 - **段⑫ 已收口（2026-09-22）**：共享文件 ACL（`grantedHandles`）走 lane-A grant ledger + 文件存储——composer 段⑫清单渲染进缓存边界内，ToolContext `read(shared/<name>)` 按 qm 阶梯解析（文本内联 / 二进制物化 / 歧义报错）；授权句柄与工具读取共用同一推导，prompt 不承诺取不到的文件。
 - **5.2 飞书 e2e 静默腿待真机**：ambient 群聊未寻址消息→断言零投递（需 FEISHU 凭据 + 人工发消息）。
 
@@ -69,20 +70,20 @@ qm 的产品灵魂层 = **16 段顺序组装管线 + 三模式协议帧 + soul �
 
 | 子系统 | qm-next 现状 | 判定 |
 |---|---|---|
-| 灵魂层（协议帧+soul 联邦） | 段①-⑥+⑧+⑨+⑬⑭已组装，12/12 golden 对拍；⑩⑪⑫⑮挂二期 | 🟢 核心已对齐（登记 #55/#55b） |
+| 灵魂层（协议帧+soul 联邦） | 段①-⑥+⑧+⑨+⑬⑭⑮已组装，12/12 golden 对拍；⑩⑪登记有意偏差（slack delivery 不移植，2026-09-22） | 🟢 核心已对齐（登记 #55/#55b） |
 | 模式选择（autonomous/conversation/fallback） | 已激活，行为测试覆盖 | 🟢 |
 | P1 契约（tools 可选/安全回调/模型工具/SessionStore/goal hooks） | 类型冻结，双实现 | 🟢（`HarnessSecurityScreenInput` 冻结仍建议抽查） |
 | 存储族（DurableMap/keychain/model/tasks/soul） | `@qm/store`/`@qm/model`/`@qm/tasks` + 新增 soul PG twin | 🟢 |
 | 12.0 控制面（capability/share/blobs/secret-drop/admin UI） | 全部落地，#47a/b/d/e 已关闭 | 🟢 |
 | Admin 控制台 | 字节级移植 + `/admin/ui` | 🟢 |
-| 部署运行时 | Docker + `/d/<slug>` + git HTTP；Fly/AWS 无 | 🟡 剩未来 PRD |
+| 部署运行时 | Docker + `/d/<slug>` + git HTTP；Fly/AWS 无（2026-09-22 拍板暂缓） | 🟡 剩未来 PRD |
 | 监控/队列/字节存储 | MonitorPoller + pg-boss + S3 全落地 | 🟢 |
 | 运行可观测（runs 台账/聚合/重放） | #28/#47e 落地 | 🟢 |
 | IM 域（飞书） | 14.0b 表情确认、agent-request 卡片、ambient judge（默认 `keyword`，`model` 显式启用） | 🟢（webhook 同意/投递重定向按决策放弃） |
 | 用户模型登录 | codex-device-login 与订阅 OAuth 均 502 桩 | 🔴 依赖 ChatGPT 凭据 |
 | Connectors 核心 | 后台执行/oauth-flow/consent-link/browser-session/secret-envelope/emoji-upload 已上线；**`connectors/oauth.ts`（PROVIDERS+well-known+PKCE+refresh，qm 626 行）仍未移植** | 🟡 |
 | ToolContext 控制面 | background 已真实（进程注册表）；soul 已接线；**cron×9/webhook×3/MCP/shareArtifact 已接控制面**（cron 走 @qm/triggers store+scheduler 的 qm control-service 阶梯，MCP 走 @qm/mcp tool service，share 走 grant ledger；组合时身份绑定，未接线仍诚实不可用） | 🟢 |
-| ToolContext publish/playground | 仍诚实不可用，等 T5 评估（portal/blobs 集成面 + sandbox 产物物化路径）再定移植或登记有意偏差 | 🟡 |
+| ToolContext publish/playground | T5 评估已出（`t5-publish-playground-evaluation-2026-09-22.md`）：publish 维持诚实不可用→有意偏差（resident-auth 捕获、公网 URL 面缺口，触发条件=Fly/AWS PRD）；createPlayground 可小移植（不走 sandbox，`uploadForViewer` 已够），建议列第 3 批 | 🟡 publish=有意偏差；playground=待小移植 |
 | Context-policy 成员检查 | 目录成员校验已接：directory 在线时 GET/PUT 越权 403（qm `memberScope` 阶梯），离线保持 lane-A 开放 | 🟢 |
 | soul 共享 scope 写校验 | `managesScope` 已接目录（qm `createCanManageScope` 语义：personal=本人、group=成员、channel=私有成员）；未接目录时维持拒绝 | 🟢 |
 | Portal | 包已就绪 + SSO；**impersonation 路由未移植**；playground 匿名会话随 13.0 | 🟡 |
@@ -94,11 +95,11 @@ qm 的产品灵魂层 = **16 段顺序组装管线 + 三模式协议帧 + soul �
 
 ## 3. 仍然存在的差异清单（全部有归属）
 
-1. **依赖受限（凭据）**：codex-device-login（502 `oauth_start_failed`）、订阅 OAuth（502 `oauth_complete_failed`）——等 ChatGPT 凭据（`user-model-auth-routes.ts:55,83`）。
-2. **未移植模块**：`connectors/oauth.ts`（IM provider OAuth 栈，注释称"待 P5 18.0 IM providers 落地"）、portal impersonation 路由、Fly/AWS 部署 provider（未来 PRD）。
-3. **功能桩**：`command-policy-simulate` 501；ToolContext 的 publish/playground 诚实不可用（cron/webhook/MCP/shareArtifact 已于 2026-09-22 接控制面收口）。
+1. **依赖受限（凭据）**：codex-device-login（502 `oauth_start_failed`）、订阅 OAuth（502 `oauth_complete_failed`）——2026-09-22 拍板：无 ChatGPT 真实凭证，模型面走国产 LLM；两项登记为有意偏差，不再以"等凭据"挂起（代码保持就绪）。
+2. **未移植模块**：`connectors/oauth.ts`（IM provider OAuth 栈，注释称"待 P5 18.0 IM providers 落地"）、portal impersonation 路由、Fly/AWS 部署 provider（2026-09-22 拍板暂缓；publish 随之登记有意偏差）。
+3. **功能桩**：`command-policy-simulate` 501；ToolContext 的 publish 诚实不可用（有意偏差，见 T5 评估）、createPlayground 待第 3 批小移植（cron/webhook/MCP/shareArtifact 已于 2026-09-22 接控制面收口）。
 4. **lane-A 刻意简化**：environments/projects 每进程存储（context-policy 成员检查 #44 与 soul `managesScope` 已于 2026-09-22 接目录收口）。
-5. **qm-soul 二期**：段⑩⑪⑮（依赖 delivery-candidates/signing/apiBaseUrl、onboarding 检测）；段⑫ grantedHandles 已于 2026-09-22 收口（composer 段位 + 授权句柄 read 阶梯）；登记偏差 #55（源码词汇）、#55b（gateway 块 envelope 门控，有意行为差异）；5.2 飞书真机静默腿。
+5. **qm-soul 二期**：段⑮ onboarding 已于 2026-09-22 收口（Q4）；段⑩⑪ 随 slack delivery 不移植登记有意偏差；段⑫ grantedHandles 已于 2026-09-22 收口（composer 段位 + 授权句柄 read 阶梯）；登记偏差 #55（源码词汇）、#55b（gateway 块 envelope 门控，有意行为差异）；5.2 飞书真机静默腿。
 
 ---
 
@@ -117,11 +118,11 @@ qm 的产品灵魂层 = **16 段顺序组装管线 + 三模式协议帧 + soul �
 
 自 2026-09-15 偏差台账开立以来：**12.0 控制面、16.0 长尾、19.0 迁移、20.0 生产化、部署运行时、全部小尾巴（#27/#28/#47a-e）以及灵魂层核心（M-Soul-0..5）均已关闭**。当前 qm 与 qm-next 的全部剩余差异可归为三类：
 
-1. **凭据受限**（ChatGPT：codex-device-login + 订阅 OAuth）——代码就绪，等凭据；
-2. **明确挂起**（connectors/oauth.ts、impersonation、Fly/AWS PRD、段⑩⑪⑫⑮、5.2 真机 e2e）——均有登记与触发条件；
-3. **有意偏差**（#55 源码词汇、#55b gateway 门控、lane-A 简化、每进程存储）——已自文档化，属架构决策而非缺口。
+1. **凭据受限 → 转有意偏差**（2026-09-22：无 ChatGPT 真实凭证，模型面走国产 LLM；codex-device-login + 订阅 OAuth 代码就绪但不再等凭据）；
+2. **明确挂起**（connectors/oauth.ts、impersonation、Fly/AWS PRD（2026-09-22 拍板暂缓）、5.2 真机 e2e）——均有登记与触发条件；
+3. **有意偏差**（#55 源码词汇、#55b gateway 门控、lane-A 简化、每进程存储、段⑩⑪ slack delivery 不移植、publish 维持诚实不可用）——已自文档化，属架构决策而非缺口。
 
-基线侧 qm 自 2026-09-05 起无移动，不产生新差异。下一批自然的对齐工作 = ChatGPT 凭据就位后的登录链路 + 二期四段（依赖 delivery/ACL 车道）。
+基线侧 qm 自 2026-09-05 起无移动，不产生新差异。第二批（2026-09-22）后剩余实现类工作 = createPlayground 小移植（第 3 批）+ Q2（依赖 Q0，随偏差挂起）+ 集群 M 多实例 + X3a 审计。
 
 ---
 

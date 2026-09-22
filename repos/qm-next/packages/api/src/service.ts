@@ -62,7 +62,7 @@ import {
 } from '@qm/model'
 import { createMemoryScopeMemory, type ScopeMemory } from '@qm/memory'
 import { renderSecurityPolicyPrompt, resolveSecurityPolicy, type SecurityScreener } from '@qm/security'
-import { renderComputerBlock, renderSharedFilesBlock } from '@qm/orchestrator'
+import { onboardingBlockFor, renderComputerBlock, renderSharedFilesBlock, type OnboardingTurnDeps } from '@qm/orchestrator'
 import { createMcpServerStore, createMcpToolService, type McpServerStore, type McpToolService } from '@qm/mcp'
 import {
   createBrowserSessionStore,
@@ -817,6 +817,11 @@ export class ApiService extends Service<ApiConfig> {
     // (qm sharedFilesSystemSection inside the cache boundary).
     const sharedFilesDeps = (): SharedFilesDeps | undefined =>
       grantLedger && fileStore ? { grants: grantLedger, files: fileStore } : undefined
+    // Q4 segment ⑮ — pending-onboarding detection (qm orchestrator.ts:966):
+    // DMs with the onboarding skill resolved and no completion marker in
+    // the scope notebook render the block after the memory segment.
+    const onboardingDeps = (): OnboardingTurnDeps | undefined =>
+      memoryStore && skillStore ? { memory: memoryStore, skills: skillStore } : undefined
     const resolution: ResolutionService = (() => {
       const inner = createSoulResolution(this.config, soulStore, surfaceBranding, () => {
         const spec = this.sandbox?.profile.spec
@@ -826,9 +831,14 @@ export class ApiService extends Service<ApiConfig> {
         resolve: async (conversation, actor) => {
           const base = await inner.resolve(conversation, actor)
           const deps = sharedFilesDeps()
-          if (!deps) return base
-          const handles = await sharedFileHandles(deps, conversation.audience)
-          return { ...base, ...(handles.length ? { sharedFilesBlock: renderSharedFilesBlock(handles) } : {}) }
+          const handles = deps ? await sharedFileHandles(deps, conversation.audience) : []
+          const ob = onboardingDeps()
+          const onboarding = ob ? await onboardingBlockFor(ob, conversation, base.orgScopeId) : undefined
+          return {
+            ...base,
+            ...(handles.length ? { sharedFilesBlock: renderSharedFilesBlock(handles) } : {}),
+            ...(onboarding ? { onboardingBlock: onboarding } : {}),
+          }
         },
         scopeFor: (conversation, actor) => inner.scopeFor(conversation, actor),
       }
