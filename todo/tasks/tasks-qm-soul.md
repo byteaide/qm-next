@@ -8,7 +8,7 @@ Based on [ai-dev-tasks](https://github.com/snarktank/ai-dev-tasks) task format, 
 **Estimate:** ~7d ai 总工作量；串行为主（契约→纯函数→组装→行为），M-Soul-4 可分叉并行
 
 <!--TOON:tasks_meta{id,feature,prd,status,est,est_ai,logged}:
-tasks-qm-soul,qm-soul（qm-next 产品灵魂层）,本文件§背景与证据,planned,~7d,~7d,2026-09-21T00:00Z
+tasks-qm-soul,qm-soul（qm-next 产品灵魂层）,本文件§背景与证据,done,~7d,~7d,2026-09-21T00:00Z
 -->
 
 ## 背景与证据（PRD-lite）
