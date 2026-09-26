@@ -16,6 +16,7 @@ import type {
   NewEntry,
   NewLlmRequest,
   NewTapeRecord,
+  
   ScopeId,
   Session,
    SessionEntryHit,
@@ -26,6 +27,7 @@ import type {
    SessionStore,
    TapeRecord,
  } from '@qm/types'
+import { entryWithinTenure } from '@qm/types'
 
 export interface MemoryStoreOptions {
   now?: () => number
@@ -39,7 +41,7 @@ interface HeldLease {
   holder?: LeaseHolder
 }
 
-interface ParticipantWindow {
+interface MemoryParticipantWindow {
   validFrom: number
   validTo: number | null
   validFromSeq: number
@@ -54,7 +56,7 @@ export function createMemorySessionStore(opts: MemoryStoreOptions = {}): Session
   const tape = new Map<string, TapeRecord[]>()
   const llmRequests = new Map<string, LlmRequestRecord[]>()
   const byThread = new Map<string, string>()
-  const participants = new Map<string, Map<string, ParticipantWindow>>()
+  const participants = new Map<string, Map<string, MemoryParticipantWindow>>()
   const leases = new Map<string, HeldLease>()
 
   const promptHashOf = (request: unknown): string | null =>
@@ -160,6 +162,34 @@ export function createMemorySessionStore(opts: MemoryStoreOptions = {}): Session
       return opts?.limit !== undefined ? filtered.slice(-opts.limit) : filtered
     },
 
+    // --- M-Tape-1 projection readers ---
+
+    async getTranscriptEntries(sessionId, opts?: GetEntriesOptions) {
+      const log = entries.get(sessionId) ?? []
+      const since = opts?.sinceSeq ?? 0
+      const filtered = log.filter(
+        (e) => e.seq >= since && (opts?.beforeSeq === undefined || e.seq < opts.beforeSeq),
+      )
+      const sorted = [...filtered].sort((a, b) => a.seq - b.seq)
+      if (opts?.limit === 0) return []
+      return opts?.limit === undefined ? sorted : sorted.slice(-opts.limit)
+    },
+
+    async canReadTranscriptSuffix(sessionId, beforeSeq) {
+      const log = entries.get(sessionId) ?? []
+      if (beforeSeq <= 0) return true
+      for (let seq = 0; seq < beforeSeq; seq++) {
+        const entry = log[seq]
+        if (!entry || entry.type === 'soul') return false
+      }
+      return true
+    },
+
+    async latestEntrySeq(sessionId) {
+      const log = entries.get(sessionId)
+      return (log?.length ?? 0) - 1
+    },
+
     async appendTape(lease, rec: NewTapeRecord): Promise<TapeRecord> {
       const held = leases.get(lease.sessionId)
       if (!held || held.token !== lease.token) {
@@ -256,6 +286,27 @@ export function createMemorySessionStore(opts: MemoryStoreOptions = {}): Session
       const windows = participants.get(sessionId)
       if (!windows) return []
       return [...windows.entries()].filter(([, w]) => w.validTo === null).map(([principalId]) => principalId)
+    },
+
+    async visibleEntries(sessionId, principalId) {
+      const log = entries.get(sessionId) ?? []
+      const windows = participants.get(sessionId)
+      const window = windows?.get(principalId)
+      if (!window) return []
+      return log.filter((e) => entryWithinTenure(e, window))
+    },
+
+    async participantWindowsOf(sessionId) {
+      const windows = participants.get(sessionId)
+      if (!windows) return []
+      return [...windows.entries()].map(([principalId, w]) => ({
+        sessionId,
+        principalId,
+        validFrom: w.validFrom,
+        validTo: w.validTo,
+        validFromSeq: w.validFromSeq,
+        validToSeq: w.validToSeq,
+      }))
     },
 
     async listByParticipant(principalId) {

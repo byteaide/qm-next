@@ -5,9 +5,18 @@
  * concurrent runs over one thread serialize. P1 adds the tape and LLM
  * request record groups the harness layer consumes; participant views,
  * search, and admin listings remain deferred; additions must be additive.
+ *
+ * M-Tape-0..3 (2026-09-26): `tape-projection.ts` consumes the renderer-side
+ * reader methods (`getTranscriptEntries`, `canReadTranscriptSuffix`,
+ * `latestEntrySeq`, `visibleEntries`, `participantWindowsOf`) which qm
+ * already ships in `SessionStore`. qm-next ports them as additive methods
+ * so `createTranscriptSource` can be wired onto both memory and PG
+ * implementations. See `docs/session-tape-spec.md` §Rendering and
+ * `docs/parity-deviations.md` §Tape Renderer Projection.
  */
 import type { ScopeId } from './identity.ts'
 import type { GetEntriesOptions, NewEntry, Session, SessionEntry, SessionPatch, SessionType } from './session.ts'
+import type { ParticipantWindow } from './tape.ts'
 
 export type LeaseHolder = 'turn' | 'compaction' | 'fork' | 'backfill'
 
@@ -32,6 +41,13 @@ export interface TapeMeta {
   hidden?: boolean
   overheard?: boolean
   author?: string
+  // --- M-Tape-1 projection fields (qm-verbatim port; see
+  //     `repos/qm/src/sessions/session-store.ts:252-264` TapeMeta) ---
+  sourceRole?: 'agent'
+  attachments?: unknown[]
+  display?: string
+  securityTainted?: boolean
+  entryCreatedAt?: number
 }
 
 export interface NewTapeRecord {
@@ -194,6 +210,26 @@ export interface SessionStore {
   append(lease: Lease, entry: NewEntry): Promise<SessionEntry>
   getEntries(sessionId: string, opts?: GetEntriesOptions): Promise<SessionEntry[]>
 
+  // --- M-Tape-1 projection readers (renderer view of the tape) ---
+
+  /** Read transcript entries honoring tape-coverage watermark — entries
+   *  the tape has not yet mirrored are skipped (the projection path
+   *  expects coverage before serving). `opts.limit` / `opts.beforeSeq` /
+   *  `opts.sinceSeq` narrow the slice. qm `getTranscriptEntries`. */
+  getTranscriptEntries(sessionId: string, opts?: GetEntriesOptions): Promise<SessionEntry[]>
+
+  /** Whether the caller can read the full transcript suffix starting at
+   *  `beforeSeq` (i.e., coverage has reached at least `beforeSeq`); false
+   *  forces the projection to fall back to entry reconstruction. qm
+   *  `canReadTranscriptSuffix`. */
+  canReadTranscriptSuffix(sessionId: string, beforeSeq: number): Promise<boolean>
+
+  /** Highest seq assigned to any entry in this session, or -1 when the
+   *  session has no entries yet. The projection reads this to cap the
+   *  row pull and verify coverage (`coveredSeq >= latest`). qm
+   *  `latestEntrySeq`. */
+  latestEntrySeq(sessionId: string): Promise<number>
+
   appendTape(lease: Lease, rec: NewTapeRecord): Promise<TapeRecord>
   getTape(sessionId: string, opts?: GetTapeOptions): Promise<TapeRecord[]>
 
@@ -203,6 +239,18 @@ export interface SessionStore {
   addParticipant(sessionId: string, principalId: string): Promise<void>
   removeParticipant(sessionId: string, principalId: string): Promise<void>
   participantsOf(sessionId: string): Promise<string[]>
+
+  // --- M-Tape-1 viewer-side reader methods ---
+
+  /** Entries this principal is entitled to see under their participant
+   *  windows — the fallback path when `createTranscriptSource.forViewer`
+   *  cannot serve a tape projection. qm `visibleEntries`. */
+  visibleEntries(sessionId: string, principalId: string): Promise<SessionEntry[]>
+
+  /** All participant windows on this session. Empty for sessions with no
+   *  recorded participation; the projection uses them to filter
+   *  `forViewer` output via `entryWithinTenure`. qm `participantWindowsOf`. */
+  participantWindowsOf(sessionId: string): Promise<ParticipantWindow[]>
 
   // --- P3 surface lane (additive; sessions/conversations routes) ---
 

@@ -49,5 +49,9 @@ export interface NewEntry {
 
 export interface GetEntriesOptions {
   sinceSeq?: number
+  /** Exclusive upper bound — entries with seq >= beforeSeq are skipped.
+   *  Added for M-Tape-1 to support `createTranscriptSource` windowed
+   *  reads (qm `tape-projection.ts` `projected(sessionId, limit, beforeSeq)`). */
+  beforeSeq?: number
   limit?: number
 }

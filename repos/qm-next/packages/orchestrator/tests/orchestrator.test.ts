@@ -153,6 +153,49 @@ class FakeSessions implements SessionStore {
   async listLlmRequests(sessionId: string) {
     return this.llmRequests.get(sessionId) ?? []
   }
+
+  // --- M-Tape-1 projection readers (renderer view; not exercised by
+  //     the orchestrator path itself, but the interface requires them). ---
+
+  async getTranscriptEntries(sessionId: string) {
+    const log = this.entries.get(sessionId) ?? []
+    return [...log]
+      .sort((a, b) => a.seq - b.seq)
+      .map((e) => ({
+        sessionId,
+        seq: e.seq,
+        parentSeq: e.seq === 0 ? null : e.seq - 1,
+        type: e.type as any,
+        payload: e.payload,
+        scopeLabel: SCOPE,
+        createdAt: 0,
+      }))
+  }
+
+  async canReadTranscriptSuffix(_sessionId: string, _beforeSeq: number) {
+    return true
+  }
+
+  async latestEntrySeq(sessionId: string) {
+    const log = this.entries.get(sessionId) ?? []
+    return log.length === 0 ? -1 : log[log.length - 1]!.seq
+  }
+
+  async visibleEntries(sessionId: string, _principalId: string) {
+    return (this.entries.get(sessionId) ?? []).map((e) => ({
+      sessionId,
+      seq: e.seq,
+      parentSeq: e.seq === 0 ? null : e.seq - 1,
+      type: e.type as any,
+      payload: e.payload,
+      scopeLabel: SCOPE,
+      createdAt: 0,
+    }))
+  }
+
+  async participantWindowsOf(_sessionId: string) {
+    return []
+  }
 }
 
 class FakeRuns implements RunStore {

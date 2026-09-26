@@ -16,6 +16,7 @@ import type {
   NewEntry,
   NewLlmRequest,
   NewTapeRecord,
+  ParticipantWindow,
   ScopeId,
   Session,
    SessionEntryHit,
@@ -257,6 +258,47 @@ export function createPostgresSessionStore(
       return rows.map(rowToEntry)
     },
 
+    // --- M-Tape-1 projection readers ---
+
+    async getTranscriptEntries(sessionId, opts?: GetEntriesOptions): Promise<SessionEntry[]> {
+      const since = opts?.sinceSeq ?? 0
+      const before = opts?.beforeSeq
+      const limit = opts?.limit
+      if (limit === 0) return []
+      const params: unknown[] = [sessionId, since]
+      let where = 'WHERE session_id = $1 AND seq >= $2'
+      if (before !== undefined) {
+        params.push(before)
+        where += ` AND seq < $${params.length}`
+      }
+      let order = 'ORDER BY seq ASC'
+      let suffix = ''
+      if (limit !== undefined) {
+        params.push(limit)
+        suffix = ` LIMIT $${params.length}`
+      }
+      const rows = await q(`SELECT * FROM session_entries ${where} ${order}${suffix}`, params)
+      return rows.map(rowToEntry)
+    },
+
+    async canReadTranscriptSuffix(sessionId, beforeSeq): Promise<boolean> {
+      if (beforeSeq <= 0) return true
+      const rows = await q(
+        `SELECT seq, type FROM session_entries WHERE session_id = $1 AND seq < $2 ORDER BY seq ASC`,
+        [sessionId, beforeSeq],
+      )
+      if (rows.length !== beforeSeq) return false
+      return rows.every((r) => r.type !== 'soul')
+    },
+
+    async latestEntrySeq(sessionId): Promise<number> {
+      const rows = await q(
+        'SELECT COALESCE(MAX(seq), -1) AS m FROM session_entries WHERE session_id = $1',
+        [sessionId],
+      )
+      return Number(rows[0]!.m)
+    },
+
     async appendTape(lease, rec: NewTapeRecord): Promise<TapeRecord> {
       return withLease(lease, 'appendTape without a valid session lease', async (client) => {
         const max = await client.query(
@@ -417,6 +459,57 @@ export function createPostgresSessionStore(
         [sessionId],
       )
       return rows.map((r) => r.principal_id as string)
+    },
+
+    async visibleEntries(sessionId, principalId): Promise<SessionEntry[]> {
+      const winRows = await q(
+        `SELECT valid_from, valid_to, valid_from_seq, valid_to_seq
+           FROM participants WHERE session_id = $1 AND principal_id = $2`,
+        [sessionId, principalId],
+      )
+      const win = winRows[0]
+      if (!win) return []
+      const validFrom = Number(win.valid_from)
+      const validTo = win.valid_to === null ? null : Number(win.valid_to)
+      const validFromSeq = win.valid_from_seq === null ? null : Number(win.valid_from_seq)
+      const validToSeq = win.valid_to_seq === null ? null : Number(win.valid_to_seq)
+      const params: unknown[] = [sessionId]
+      const conds: string[] = ['session_id = $1']
+      if (validFromSeq !== null) {
+        params.push(validFromSeq)
+        conds.push(`seq >= $${params.length}`)
+      } else {
+        params.push(validFrom)
+        conds.push(`created_at >= $${params.length}`)
+      }
+      if (validToSeq !== null) {
+        params.push(validToSeq)
+        conds.push(`seq < $${params.length}`)
+      } else if (validTo !== null) {
+        params.push(validTo)
+        conds.push(`created_at < $${params.length}`)
+      }
+      const rows = await q(
+        `SELECT * FROM session_entries WHERE ${conds.join(' AND ')} ORDER BY seq ASC`,
+        params,
+      )
+      return rows.map(rowToEntry)
+    },
+
+    async participantWindowsOf(sessionId): Promise<ParticipantWindow[]> {
+      const rows = await q(
+        `SELECT principal_id, valid_from, valid_to, valid_from_seq, valid_to_seq
+           FROM participants WHERE session_id = $1`,
+        [sessionId],
+      )
+      return rows.map((r) => ({
+        sessionId,
+        principalId: r.principal_id as string,
+        validFrom: Number(r.valid_from),
+        validTo: r.valid_to === null ? null : Number(r.valid_to),
+        validFromSeq: r.valid_from_seq === null ? null : Number(r.valid_from_seq),
+        validToSeq: r.valid_to_seq === null ? null : Number(r.valid_to_seq),
+      }))
     },
 
     async listByParticipant(principalId): Promise<Session[]> {
