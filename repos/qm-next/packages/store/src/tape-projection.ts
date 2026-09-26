@@ -510,6 +510,8 @@ interface TranscriptRead {
   earlier: number
 }
 
+export type { TranscriptRead }
+
 export interface TranscriptSource {
   forRender(sessionId: string, opts?: GetEntriesOptions): Promise<TranscriptRead>
   forViewer(sessionId: string, principalId: string, opts?: GetEntriesOptions): Promise<TranscriptRead>

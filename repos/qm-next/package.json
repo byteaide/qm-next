@@ -24,6 +24,7 @@
     "rehearsal:cutover": "bash scripts/run-cutover-rehearsal.sh",
     "check:im": "bash scripts/check-im-isolation.sh",
     "check:soul": "bash scripts/check-soul-placeholder.sh",
+    "check:tape-renderer": "bash scripts/check-tape-renderer.sh",
     "rescope-check": "bash scripts/rescope-check.sh",
     "sandbox:local:build": "bash scripts/local-sandbox-build.sh",
     "typecheck": "tsc -b vendor/cosmokit vendor/schemastery vendor/cordis vendor/loader vendor/include vendor/timer && tsc -b tsconfig.json"

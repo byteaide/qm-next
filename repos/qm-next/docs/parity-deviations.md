@@ -1174,6 +1174,11 @@ UI，模型视图与 UI 视图字节同源（`pnpm check:tape-renderer` 守门�
   qm 的 `unknown` cast 在 qm-next strict typecheck 下收敛到具体 union 类型。
   关键不变量：`projectTapeEntries(sessionId, tapeRows, opts?)` 同一 `(rows, opts)`
   产出同一 `entries[]`（字节对拍闸门断言）。
+  ✅ 2026-09-26（A.1 落地：`packages/store/src/tape-projection.ts` 575L 移植；
+  `packages/types/src/session.ts` `GetEntriesOptions.beforeSeq` 加投影窗口支持；
+  `TapeMeta` 扩 5 字段；14 用例种子覆盖 pi/claude/coarse/mirror/compaction/
+  unstamped/delivery/tool_result；`pnpm check:tape-renderer` 守门 fold ≈
+  forRender）。
 - **#57** `createTranscriptSource` 缺失（qm-verbatim 移植起点）——qm
   `src/harness/tape-projection.ts:419-521` 102L，`forRender` + `forViewer` 双入口；
   `TranscriptStore` `pick:` 接受 `getEntries | visibleEntries | getTape |
@@ -1181,6 +1186,10 @@ UI，模型视图与 UI 视图字节同源（`pnpm check:tape-renderer` 守门�
   canReadTranscriptSuffix`（qm-next 走 memory+PG 双实现；`participantWindowsOf`
   与 `entryWithinTenure` 走 P1 既有契约）。qm-next 落同文件（`@qm/store/src/tape-projection.ts`），
   `packages/api/src/service.ts` 暴露 `createTranscriptSource(deps.sessions)`。
+  ✅ 2026-09-26（A.1 + A.3 落地：route `/v1/sessions/:id` 改 `forRender` +
+  legacy `windowed()` tailTurns 切割叠加；`/v1/sessions/:id/entries/:seq`
+  改 `forViewer` 应用 `entryWithinTenure`（A.3.4 personal-scope 过滤）；
+  `pnpm check:tape-renderer` 字节对拍闸门守门 fold ↔ forRender 同源）。
 - **#58** `runtime-recovery.ts` 缺失（qm-verbatim 移植起点）——qm-verbatim port
   33L（`recoveredRuntime(entries, runId, actorId): RuntimeChoice | undefined`，
   反向扫描 + 类型守卫 `isHarnessId` + `typeof choice.modelId === 'string'`）；

@@ -28,3 +28,12 @@ export {
   type PutBytesResult,
 } from './byte-store.ts'
 export { createS3ByteStore, type S3ByteStoreOptions } from './s3-byte-store.ts'
+export {
+  createTranscriptSource,
+  projectTapeEntries,
+  renderableTapeSlice,
+  searchRowsFromEntries,
+  type TapeProjection,
+  type TranscriptRead,
+  type TranscriptSource,
+} from './tape-projection.ts'

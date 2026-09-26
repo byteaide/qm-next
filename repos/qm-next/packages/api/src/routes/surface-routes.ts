@@ -7,9 +7,10 @@
  * budget trimming — deviation #42. Background views and the portal session
  * capability are dep-gated (control plane, 12.0).
  */
-import type { Orchestrator, RunStore, Session, SessionEntry, SessionStore } from '@qm/types'
+import type { GetEntriesOptions, Orchestrator, RunStore, Session, SessionEntry, SessionStore } from '@qm/types'
 import type { ApiRouteContext, Route } from './framework.ts'
 import { badRequest, isObj, notFound, sendJson } from './framework.ts'
+import { createTranscriptSource } from '@qm/store'
 
 export interface SurfaceRoutesDeps {
   sessions: SessionStore
@@ -106,7 +107,19 @@ export function surfaceRoutes(deps: SurfaceRoutesDeps): ReadonlyArray<Route> {
   async function transcriptFor(id: string, window?: TranscriptWindow): Promise<{ session: Session; entries: SessionEntry[]; earlierEntries?: number } | null> {
     const session = await deps.sessions.get(id)
     if (!session) return null
-    const w = windowed(await deps.sessions.getEntries(id), window)
+    // M-Tape-3 (2026-09-26): render via `createTranscriptSource.forRender`.
+    // The projection is the canonical renderer source; coverage-failing
+    // sessions transparently fall back to entry reconstruction inside
+    // `forRender` (qm `tape-projection.ts:469-484`). The legacy
+    // `windowed()` tail-turns cut applies on top so the tailTurns
+    // semantic (last N user entries) survives the projection switch.
+    const projectionOpts: GetEntriesOptions = {
+      ...(window?.beforeSeq !== undefined ? { beforeSeq: window.beforeSeq } : {}),
+      ...(window?.sinceSeq !== undefined ? { sinceSeq: window.sinceSeq } : {}),
+    }
+    const projection = createTranscriptSource(deps.sessions)
+    const read = await projection.forRender(id, projectionOpts)
+    const w = windowed(read.entries, window)
     return { session, entries: w.entries, ...(w.earlier > 0 ? { earlierEntries: w.earlier } : {}) }
   }
 
@@ -234,7 +247,15 @@ export function surfaceRoutes(deps: SurfaceRoutesDeps): ReadonlyArray<Route> {
         const seq = Number(ctx.params.seq)
         if (!Number.isInteger(seq) || seq < 0) return badRequest(ctx, 'seq must be a non-negative integer')
         if (!(await sessionForViewer(ctx.params.id ?? '', viewer))) return notFound(ctx)
-        const entry = (await deps.sessions.getEntries(ctx.params.id ?? '')).find((e) => e.seq === seq)
+        // M-Tape-3 / A.3.4: personal-scope tool result filtering. The
+        // legacy path returned any entry the viewer could see by
+        // participant membership; `forViewer` additionally applies
+        // `entryWithinTenure` against the viewer's participant window
+        // so a personal-scope tool result stays out of channel-audience
+        // reads (qm `tape-projection.ts:485-519`).
+        const projection = createTranscriptSource(deps.sessions)
+        const read = await projection.forViewer(ctx.params.id ?? '', viewer)
+        const entry = read.entries.find((e) => e.seq === seq)
         if (!entry) return notFound(ctx)
         return sendJson(ctx, 200, { entry })
       },

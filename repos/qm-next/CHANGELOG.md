@@ -5,6 +5,43 @@ qm-next 的全部显著变更记录在此文件。
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - qm-post-soul 优化批（M-Tape renderer + capability token 压缩 + ownership 类型层，2026-09-26）
+
+qm-soul 收口后第一批优化：renderer 视图接通（model-view 与 UI-view 同源）+
+capability token 压缩 + background ownership 类型层。
+
+### M-Tape renderer 投影（A.0 串行门 → A.1/A.2/A.3 全收口）
+
+qm 上游 `src/harness/tape-projection.ts` (539L) + `runtime-recovery.ts` (33L) + `session-tape-spec.md` (320L) 全部平移到 qm-next：
+
+- **A.0 spec 落盘**：`repos/qm-next/docs/session-tape-spec.md` (482L) qm-verbatim
+  平移 + qm-next 立场标注（cordis 单进程 + memory+PG 双实现 + 飞书 v1
+  渠道）；`parity-deviations.md` ## Tape Renderer Projection 节 + #56/#57/#58 登记；
+  `migration.md` §S-3 链接同步
+- **A.1 projection + transcript source**：`packages/types/src/tape.ts` 新建
+  （TAPE_RENDER_VERSION / RENDER_IMPORT_EVENT / ContextSummaryPayload /
+  createContextSummaryPayload / ParticipantWindow / entryWithinTenure /
+  SEARCHABLE_ENTRY_TYPES / entrySearchText / entrySearchAuthor /
+  NewSearchEntry / deliveryNoteManifest / legacyDeliveryNoteManifest）；
+  `SessionStore` 加 5 方法（getTranscriptEntries / canReadTranscriptSuffix /
+  latestEntrySeq / visibleEntries / participantWindowsOf）；`GetEntriesOptions`
+  加 beforeSeq；`MemorySessionStore` + `PostgresSessionStore` 双实现；
+  `packages/store/src/tape-projection.ts` (575L) qm-verbatim 移植 +
+  `searchRowsFromEntries`；14 用例种子（pi/claude/coarse/mirror/compaction/
+  unstamped/delivery/tool_result + memory/PG 双侧）
+- **A.2 runtime recovery**：`packages/types/src/runtime-choice.ts` 上移
+  RuntimeChoice（打破 runs → orchestrator 反向依赖）；
+  `packages/runs/src/runtime-recovery.ts` (65L) qm-verbatim port；
+  orchestrator `:97-` 在 `resolveChoice` 前 best-effort 取历史并 union 到
+  选择；11 用例测试
+- **A.3 renderer 视图接通**：`packages/api/src/routes/surface-routes.ts`
+  `transcriptFor` 改 `createTranscriptSource.forRender`（A.3.3）；
+  `/v1/sessions/:id/entries/:seq` 改 `forViewer` 应用 `entryWithinTenure`
+  （A.3.4 personal-scope 过滤）；`scripts/check-tape-renderer.sh` +
+  `pnpm check:tape-renderer` 新门门字节对拍 `fold(tape) ≈ forRender(tape).entries`
+  over canonical fixture（memory + PG 两路径）
+- **parity-deviations.md**：`#56 #57 #58` 全部 ✅ closed
+
 ## [Unreleased] - qm-soul 产品灵魂层（ADR-0018，2026-09-21）
 
 qm 的灵魂层平移：16 段顺序组装管线 + 三模式协议帧 + soul 联邦。
