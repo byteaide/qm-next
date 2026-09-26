@@ -1,6 +1,6 @@
 # qm-next Architecture
 
-中文为主（英文版后补）。状态：**Current — 2026-09-21 qm-soul 灵魂层（tag `soul`）后**。本文描述当前运行时行为（legacy 路径已于 Phase 7 切除）；ADR 记录决策原因。
+中文为主（英文版后补）。状态：**Current — 2026-09-26 qm-post-soul 优化批（tag `optim-2026-09`）后**。本文描述当前运行时行为（legacy 路径已于 Phase 7 切除）；ADR 记录决策原因。
 配套：PRD 与任务分解见 `aa` 仓 `todo/tasks/`（prd-qm-next.md / tasks-qm-next.md / tasks-qm-soul.md）。
 
 ## 0. 架构决定与当前行为
@@ -19,6 +19,9 @@
 | Trigger | `packages/types` 中最小 `TriggerRuntime` contract；composition 注入；`api.cronsRuntime` 兼容字段已删除 | 0003 |
 | Connector OAuth | Connector context owns lifecycle；durable `oauth_flows`/`consent_links` store；HTTP 只是 adapter | 0009, 0016 |
 | Soul 层（协议帧） | system prompt 是 orchestrator 每回合组装的定序协议帧（`composeFrame`）：modeFrame → effectiveSoul（org 权威，低 scope 声明不可覆盖）→ sharedCore → securityPrompt → computerBlock/skillsBlock → gatewayBlock；模式按回合来源选择（ambient/自动化带目的地→autonomous、非自动化 dm/web→conversation、否则 fallback）；渲染 fail-loud（未解析 token 中止组装）；`stableSystemBytes` 记录稳定段边界喂 harness prompt-cache（time/memory 块在边界后追加）；平台词汇经 `imChannel`/`imLabel` 变量注入，core 协议文本零平台符号；soul 经 SoulStore 联邦（PG twin `soul_configs`/`soul_history`），guidance 工具 soulRead/soulWrite 读写个人 scope | 0018 |
+| Renderer 视图（A.1+A.2+A.3 收口） | model-view 与 UI-view 同源：fold（harness-pi 视角，已 serving）→ projection（store 视角，renderer 消费）。qm-verbatim 移植 `packages/store/src/tape-projection.ts`（575L：projectTapeEntries + createTranscriptSource + searchRowsFromEntries） + `packages/types/src/tape.ts` 类型契约（TAPE_RENDER_VERSION + ContextSummaryPayload + ParticipantWindow + entryWithinTenure + SEARCHABLE_ENTRY_TYPES + entrySearchText/Author + deliveryNoteManifest + legacyDeliveryNoteManifest）；`SessionStore` 加 5 方法（getTranscriptEntries / canReadTranscriptSuffix / latestEntrySeq / visibleEntries / participantWindowsOf）；`TapeMeta` 加 5 字段（sourceRole / attachments / display / securityTainted / entryCreatedAt）；`GetEntriesOptions.beforeSeq` 投影窗口支持；`packages/api/src/routes/surface-routes.ts` `transcriptFor` 切 `createTranscriptSource.forRender`（A.3.3） + `/v1/sessions/:id/entries/:seq` 切 `forViewer` 走 `entryWithinTenure`（A.3.4 personal-scope 过滤）。`pnpm check:tape-renderer` 字节对拍闸门（memory + PG 双路径）守门 `fold(tape) ≈ forRender(tape).entries` over canonical fixture（pi-harness user + assistant text + mirror） | qm-post-soul A.1+A.2+A.3 |
+| Runtime 恢复（A.2） | `RuntimeChoice` 上移 `@qm/types/runtime-choice.ts` 打破 runs → orchestrator 反向依赖；`packages/runs/src/runtime-recovery.ts`（65L，qm-verbatim port：`recoveredRuntime(entries, runId, actorId)`）反向扫描最近连续 runtimes；orchestrator `:97-` 在 `resolveChoice` 之前 best-effort 取历史并与 `choice?.harnessId` 取并集；11 用例测试覆盖 foreign harness / invalid handoff / runId mismatch / multi-run isolation | qm-post-soul A.2 |
+| Background ownership types（C 类型层） | ADR-0020（proposed 状态）锁定 P5 21.0 worker split 落地的类型契约：`@qm/types/ownership.ts`（Ownership + OwnershipMember + TransferToken + OwnershipLease，纯 interface，零 `@qm/runs` 反向依赖）+ `@qm/runs/src/ownership.ts`（`isTransferToken` / `isOwnershipLease` 类型守卫 + `tryHandoverOwnership` / `acceptHandover` 桩函数 throw `'background ownership not yet implemented (P5 21.0 deferral)'`）。`task-protection.ts` re-export 桩函数（additive 不改 `createEcsTaskProtection`）。PG twin / memory twin / reaper integration / worker.ts admission fencing / 实装 全部延后到 P5 21.0 显式 go-live；当前只锁契约，行为零变更。16 用例测试覆盖类型守卫 + 桩函数 throw 行为 + composition-root re-export + ECS PUT 路径不变 | 0020 |
 
 ## 1. 设计原则
 

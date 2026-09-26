@@ -42,6 +42,93 @@ qm 上游 `src/harness/tape-projection.ts` (539L) + `runtime-recovery.ts` (33L) 
   over canonical fixture（memory + PG 两路径）
 - **parity-deviations.md**：`#56 #57 #58` 全部 ✅ closed
 
+### Capability Token opt-in 压缩（lane B 收口，parity #59）
+
+qm 上游 415 commits 中 qm-next **不上游**压缩（避免静默改线上协议），故
+lane B 把压缩作为**显式 opt-in** flag 后置：
+
+- **新 API surface**（`@qm/auth/capability-token.ts`）：`COMPRESS_FLAG='gzip1'` /
+  `CAPABILITY_COMPRESS_THRESHOLD=1024`（字节起跳点）/
+  `CAPABILITY_COMPRESS_CEILING=32768`（32 KB sanity ceiling，对抗性 payload
+  拒收）/ `CAPABILITY_COMPRESS_MARKER='__qm_cap_compressed_v1'`（envelope key）
+  / `compressPayload(json): string`（gzip + base64url + 前缀）/
+  `decompressPayload(text): string`（marker sniff + 反向）/
+  `isCompressedPayload(text): boolean`（纯前缀嗅探）/
+  `CapabilityTokenError`（三码稳态：`compression_oversize` /
+  `not_a_compressed_payload` / `decompression_failed`）
+- **mint 接线**：`mintCapabilityToken(claims, secret, orgId, { compress?: boolean })`
+  — 默认 off（legacy envelope，与 qm-verbatim port 一致）；`{ compress: true }`
+  切换到压缩 envelope `{orgId, __qm_cap_compressed_v1: 'gzip1',
+  data: 'gzip1.<base64url-gzip-bytes>'}`
+- **verify 透明**：自动嗅探 marker + 解压 + `orgId` 还原到 claims 顶层；
+  任何解码错误 fail-closed（返回 `null`，等同签名失败）
+- **wire 兼容矩阵**：`{compress: false}` token 与 qm 上游 byte-for-byte 兼容；
+  `{compress: true}` token 在 qm-next 端透明验证，qm 上游不识别 marker（不
+  影响生产路径——qm-next 控制平面铸造全部 token，qm 上游不铸造 qm-next token）
+- **20 用例测试**：`packages/auth/tests/capability-token-compression.test.ts`
+  覆盖 round-trip / 上限 / 篡改防御（marker + 缺 data / marker + 无效 gzip /
+  marker + 非对象 JSON / marker + 缺必需 claim 字段）/ 错误码稳定性 /
+  legacy 路径 byte-identical
+- **运维 runbook**：`docs/operations.md §15` 收口 operator 旋钮
+  `compress-tokens: true`、wire 兼容矩阵、回滚路径（切回 false 即可，
+  不需清扫脚本）；`~/.aidevops/.agent-workspace/knowledge/0040-capability-token-compression.md`
+  是设计参考
+- **parity-deviations.md #59** ✅ closed
+
+### Background Ownership 类型层（lane C 收口，ADR-0020 proposed）
+
+P5 21.0 worker split 落地的前置契约锁定。当前只锁类型，实装延后：
+
+- **ADR-0020**（`docs/adr/0020-background-ownership-types.md`，status:
+  `proposed`）—— 镜像 qm `docs/background-ownership.md`；定义状态机（5 类
+  OwnershipMember state × 4 类 claimKind）+ 协议边界（Install：契约锁定 /
+  Bootstrap：P5 21.0 显式 go-live）+ deferral 清单（PG twin / memory twin /
+  reaper integration / worker.ts admission fencing / 实装）
+- **类型契约**（`@qm/types/ownership.ts`）：`Ownership`（deploymentId +
+  generation + acceptedAt + members[]）/ `OwnershipMember`（instanceId +
+  deploymentId + taskArn + state + generation + acknowledgedAt）/
+  `TransferToken`（token + acceptedDeploymentId + sourceDeploymentId +
+  expiresAt + nonce；token 标 `[redacted-credential]` opaque 不日志）/
+  `OwnershipLease`（instanceId + ownership + claimKind + claimId +
+  claimToken + expiresAt）。纯 interface，零 `@qm/runs` 反向依赖
+- **守卫 + 桩函数**（`@qm/runs/src/ownership.ts`）：`isTransferToken` /
+  `isOwnershipLease` 类型守卫（typeof + key 存在 + primitive-kind 严格结构
+  探针，不 trust token / claimToken value 内容）；`tryHandoverOwnership(lease,
+  token)` / `acceptHandover(token)` 抛
+  `'background ownership not yet implemented (P5 21.0 deferral)'`（钉死
+  字符串供 P5 21.0 回归仪表盘 grep 检测，**非 silent no-op return** —— 防
+  caller 误以为 handover 成功）
+- **composition root 接线**（`packages/runs/src/task-protection.ts`）：re-export
+  `tryHandoverOwnership` / `acceptHandover` / `OWNERSHIP_NOT_IMPLEMENTED`，
+  给 composition root 单一入口；`createEcsTaskProtection` 现有 ECS PUT 路径
+  不变（additive only）
+- **16 用例测试**：`packages/runs/tests/ownership.test.ts` 覆盖类型守卫
+  9 / 桩函数 throw 行为 5 / composition-root re-export + ECS PUT 路径不变 2
+- **deferral 显式**：P5 21.0 worker split 启动前不写实装；当前只锁契约，
+  行为零变更
+
+### 验证基线（lane D.5）
+
+- `pnpm typecheck` 绿
+- `pnpm test` 1258 tests / 1202 pass / 0 fail / 56 skip（PG 相关 + 真实模型）；
+  新增 36 用例（20 compression + 16 ownership）
+- `pnpm check:im` 绿
+- `pnpm check:soul` 绿
+- `pnpm check:tape-renderer` 绿（M-Tape-3 字节对拍闸门）
+- `pnpm test:pg` 一次性 PG16 容器对拍（lane A 双实现 + lane C 类型契约
+  smoke + lane B 不依赖 PG）—— qm-next 默认 PG 路径通过
+
+### Tag
+
+- `qm-soul`（2026-09-21，前批）→ `optim-2026-09`（2026-09-26，本批收口）
+
+### 偏差登记（`docs/parity-deviations.md` 收口）
+
+- `#56 #57 #58` ✅ closed 2026-09-26（M-Tape A.1+A.3+A.2）
+- `#59` ✅ closed 2026-09-26（lane B capability token 压缩）
+- `#60` 延期登记（P1-3.1 model gateway catalog 不在本批范围——与 qm-post-soul
+  战略一致，qm-verbatim port 留作重启参考）
+
 ## [Unreleased] - qm-soul 产品灵魂层（ADR-0018，2026-09-21）
 
 qm 的灵魂层平移：16 段顺序组装管线 + 三模式协议帧 + soul 联邦。
