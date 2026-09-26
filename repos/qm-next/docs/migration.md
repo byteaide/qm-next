@@ -87,6 +87,14 @@ qm 平铺列 → qm-next `meta` JSON（锚点：`@qm/types TapeMeta`，session-s
 
 公共列（session_id/seq/kind/scope_label/harness/entry_seq/covers_entry_seq/created_at）直拷。
 
+Tape 设计文档与 qm-verbatim 立场注记见
+[`docs/session-tape-spec.md`](session-tape-spec.md)（qm 上游 spec
+`repos/qm/docs/session-tape-spec.md` 的平移，2026-09-26 新建）。
+迁移后的 qm-next 端 fold（harness-pi）与 renderer projection（store）同
+`(tape, audience)` 输入，模型视图与 UI 视图字节同源——见 spec §What this buys
+注 1 与 `docs/parity-deviations.md` §Tape Renderer Projection（M-Tape-0..3
+收口，#56/#57/#58 closed）。
+
 **S-4 LLM 请求记录**
 
 - `session_llm_requests` → `llm_requests`（改名）：公共列 id/session_id/turn_seq/step/model/scope_label/created_at 直拷；`request` 允许 NULL（qm 早期行 NOT NULL，兼容）。

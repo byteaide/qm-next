@@ -1153,3 +1153,49 @@ frames + soul federation) into the orchestrator; ADR
   `skillsBlock` instead of appending to `systemPrompt`, so the orchestrator
   fixes segment position (⑧ inside the stable prefix, ⑭ after the cache
   boundary) without decorator order governing prompt semantics (ADR-0018).
+
+## Tape Renderer Projection (2026-09-26, M-Tape-0..3)
+
+qm-next renderer 视图接通（model-view fold 与 UI-view projection 同源）的偏差登记。
+qm-verbatim 平移源：
+
+- `repos/qm/src/harness/tape-projection.ts:1-539` — `projectTapeEntries` + `createTranscriptSource` + `searchRowsFromEntries`
+- `repos/qm/src/harness/runtime-recovery.ts:1-33` — `recoveredRuntime`
+- `repos/qm/docs/session-tape-spec.md` — spec 设计（qm-next 立场注记见 `docs/session-tape-spec.md`）
+
+qm-next 当前 fold 路径已 serving（`packages/harness-pi/src/tape-fold.ts` 260L 平移 qm
+331L；`@qm/types` fold 契约 9 号偏差）；projection 路径未落地——本批 M-Tape-0..3
+收口。落地后 fold 与 projection 同 `(tape, audience)` 输入，输出分别给模型与给
+UI，模型视图与 UI 视图字节同源（`pnpm check:tape-renderer` 守门）。
+
+- **#56** `projectTapeEntries` 缺失（qm-verbatim 移植起点）——qm
+  `src/harness/tape-projection.ts:199-395` 主循环 197L + L1-100 类型与切片段 +
+  L523-538 `searchRowsFromEntries`。qm-next 落 `packages/store/src/tape-projection.ts`；
+  qm 的 `unknown` cast 在 qm-next strict typecheck 下收敛到具体 union 类型。
+  关键不变量：`projectTapeEntries(sessionId, tapeRows, opts?)` 同一 `(rows, opts)`
+  产出同一 `entries[]`（字节对拍闸门断言）。
+- **#57** `createTranscriptSource` 缺失（qm-verbatim 移植起点）——qm
+  `src/harness/tape-projection.ts:419-521` 102L，`forRender` + `forViewer` 双入口；
+  `TranscriptStore` `pick:` 接受 `getEntries | visibleEntries | getTape |
+  latestEntrySeq | participantWindowsOf` + 可选 `getTranscriptEntries |
+  canReadTranscriptSuffix`（qm-next 走 memory+PG 双实现；`participantWindowsOf`
+  与 `entryWithinTenure` 走 P1 既有契约）。qm-next 落同文件（`@qm/store/src/tape-projection.ts`），
+  `packages/api/src/service.ts` 暴露 `createTranscriptSource(deps.sessions)`。
+- **#58** `runtime-recovery.ts` 缺失（qm-verbatim 移植起点）——qm-verbatim port
+  33L（`recoveredRuntime(entries, runId, actorId): RuntimeChoice | undefined`，
+  反向扫描 + 类型守卫 `isHarnessId` + `typeof choice.modelId === 'string'`）；
+  qm-next 落 `packages/runs/src/runtime-recovery.ts`。orchestrator
+  `resolveChoice` 之前 fallback：找到则与 `choice?.harnessId` 取并集；
+  qm-next orchestrator 入口 `packages/orchestrator/src/orchestrator.ts:107` 周边。
+- **#59** capability token 压缩默认 opt-in（lane B）——`packages/auth/src/capability-token.ts`
+  加 `compressFlag` + `compressPayload`/`decompressPayload`；payload 字节数 ≥ 1024
+  → gzipped base64；`packages/auth/config/compress-tokens: true` 显式启用。
+  避免静默改线上协议；`docs/operations.md` 收口开关说明。
+- **#60** model gateway catalog 延期登记（lane A 收口 + D.2 关闭）——
+  P1-3.1 model gateway catalog 不在本批范围（与 qm-post-soul 战略一致：qm 上游
+  415 commits 中 model gateway 属于"战略外"，与 qm-next 已 serving 的
+  custom-providers + runtime registry + gateway 解耦）。qm-verbatim port 留作
+  重启参考。
+
+收口（lane D.2）：#56/#57/#58/#59 标 closed（commit message + 闸门绿证据）；
+#60 维持延期登记。`docs/session-tape-spec.md` 与 `docs/migration.md` §S-3 链接同步。
