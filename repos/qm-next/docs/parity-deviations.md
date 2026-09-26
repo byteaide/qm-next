@@ -1204,11 +1204,19 @@ UI，模型视图与 UI 视图字节同源（`pnpm check:tape-renderer` 守门�
   加 `compressFlag` + `compressPayload`/`decompressPayload`；payload 字节数 ≥ 1024
   → gzipped base64；`packages/auth/config/compress-tokens: true` 显式启用。
   避免静默改线上协议；`docs/operations.md` 收口开关说明。
+  ✅ 2026-09-26（B 落地：`@qm/auth/capability-token.ts` 加 `COMPRESS_FLAG='gzip1'` /
+  `CAPABILITY_COMPRESS_THRESHOLD=1024` / `CAPABILITY_COMPRESS_CEILING=32768` /
+  `CAPABILITY_COMPRESS_MARKER='__qm_cap_compressed_v1'`；`CapabilityTokenError`
+  三码稳态；`mintCapabilityToken(claims, secret, orgId, { compress?: boolean })`
+  默认 off；`verifyCapabilityToken` 透明 marker sniff + 解压 + `orgId` 还原；
+  20 用例测试覆盖 round-trip / 上限 / 篡改 / 错误码稳定性；
+  `docs/operations.md §15` 收口开关说明与回滚路径）。
 - **#60** model gateway catalog 延期登记（lane A 收口 + D.2 关闭）——
   P1-3.1 model gateway catalog 不在本批范围（与 qm-post-soul 战略一致：qm 上游
   415 commits 中 model gateway 属于"战略外"，与 qm-next 已 serving 的
   custom-providers + runtime registry + gateway 解耦）。qm-verbatim port 留作
   重启参考。
 
-收口（lane D.2）：#56/#57/#58/#59 标 closed（commit message + 闸门绿证据）；
+收口（lane D.2）：#56/#57/#58 标 closed（lane A 完成，commit message + 闸门绿证据）；
+#59 标 closed（lane B 完成：B wip commit + 闸门绿 + operations.md §15）；
 #60 维持延期登记。`docs/session-tape-spec.md` 与 `docs/migration.md` §S-3 链接同步。

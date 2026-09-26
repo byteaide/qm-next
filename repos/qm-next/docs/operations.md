@@ -355,3 +355,40 @@ tokens stay out of observation), 0017 (OAuth token encryption at rest)。
 **回滚:** §4 — 若新 secret 导致签名不兼容，回退镜像即可（校验逻辑向后兼容；旧签发器在轮换窗口内仍可校验）。dev 通道不变。
 
 **Linked:** parity-deviations.md #47b。
+
+## 15. Capability Token 压缩开关（parity #59，qm-post-soul lane B, 2026-09-26）
+
+**范围:** 大 payload capability token（≥ 30 个 keychain member / destination / grant 的 actor）的线缆字节数。
+
+**背景:** 12.0 上线的 capability token 默认走 flat envelope：`{orgId, actorId, scopeId, exp, ...rest}` 整体塞进 JWS payload 字段。线缆字节随 claim 体线性增长；当 claim ≥ 6 KB 时 token 已经 9 KB+，对 header-only 携带的内部服务来说不经济。qm 上游 415 commits 中 qm-next **不上游**压缩（避免静默改 wire），故 lane B 把压缩作为**显式 opt-in** flag 后置。
+
+**新行为（`packages/auth/src/capability-token.ts`）:**
+
+- `COMPRESS_FLAG = 'gzip1'` —— 线缆前缀嗅探 marker，钉死字符串（观测仪表盘 grep）。
+- `CAPABILITY_COMPRESS_THRESHOLD = 1024` —— 字节起跳点。低于此值 gzip 头+base64url 扩展大于节省。
+- `CAPABILITY_COMPRESS_CEILING = 32768`（32 KB）—— sanity ceiling，超限抛 `CapabilityTokenError { code: 'compression_oversize' }` 拒绝 mint（对抗性 payload）。
+- `compressPayload(json: string): string` —— 返回 `gzip1.<base64url-gzip-bytes>`。
+- `decompressPayload(text: string): string` —— 反向；任何解码失败抛 `CapabilityTokenError { code: 'not_a_compressed_payload' | 'decompression_failed' }`。
+- `mintCapabilityToken(claims, secret, orgId, { compress?: boolean })` —— `{ compress: true }` 显式启用；不传或 `false` 走 legacy wire（**默认 off**，与 qm-verbatim port 一致）。
+- `verifyCapabilityToken` —— 透明：通过 `__qm_cap_compressed_v1` marker 嗅探 envelope，自动解压并把 `orgId` 还原到 claims 顶层；任何解码错误 fail-closed（返回 `null`，等同签名校验失败）。
+
+**Operator 配置开关:**
+
+`packages/auth/config/compress-tokens: true` 是文档化的操作旋钮。`@qm/auth` 包本身不读该文件——它 ship 的 `{ compress }` per-mint 选项由 composition root（`@qm/api`）依据该 flag 注入。当配置从 `false` 切到 `true` 后，新 mint 的 token 走压缩 envelope；既有 legacy token 仍可验证（向后兼容），新旧 token 共存期间**不会**触发任何失败路径。
+
+**Wire 协议（compatibility matrix）:**
+
+| mint 端 | verify 端（qm-next） | verify 端（qm upstream） | 备注 |
+|--------|----------------------|--------------------------|------|
+| qm-next `{compress: false}` | ✅ verify | ✅ verify | 默认 legacy |
+| qm-next `{compress: true}` | ✅ verify | ❌ 不识别 marker | 切开关后新 token 形态 |
+| qm upstream | ✅ verify | ✅ verify | qm-next 兼容旧 qm token |
+
+**回滚路径:** §4 — 开关从 `true` 切回 `false`，**新 mint 的 token**回到 legacy envelope；既有 compressed token 仍可 verify（验证层透明），无需任何清扫或迁移脚本。
+
+**Observability hooks:**
+
+- `compressPayload` 抛 `compression_oversize` → 计数告警（典型 adversarial input 探测）
+- `decompressPayload` 抛 `not_a_compressed_payload` / `decompression_failed` → 通常意味着 token 被恶意篡改或外部系统的 mock 工具不熟悉新 marker，incident 排查路径参考 §9-§11 通用脱敏告警线
+
+**Linked:** parity-deviations.md #59。`~/.aidevops/.agent-workspace/knowledge/0040-capability-token-compression.md` 是设计参考。
