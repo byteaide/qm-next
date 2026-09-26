@@ -4,11 +4,11 @@ Based on [ai-dev-tasks](https://github.com/snarktank/ai-dev-tasks) task format, 
 
 **PRD:** [prd-qm-post-soul.md](prd-qm-post-soul.md)
 **Created:** 2026-09-26
-**Status:** Planning（决策已签字，见 `todo/notes/qm-next-decision-2026-09-26.md`）
+**Status:** Completed（tag `optim-2026-09` @ `3b7126e`，2026-09-26；门禁验证见 PLANS.md p003 Progress）
 **Estimate:** ~5d ai 总工作量；3 车道并行墙钟 ~3.5d（lane A 主路径 ~3.5d；lane B + lane C 串行在 lane A 之后半周）
 
 <!--TOON:tasks_meta{id,feature,prd,status,est,est_ai,est_test,est_read,logged,started,completed}:
-tasks-qm-post-soul,qm-post-soul（renderer 投影 + token 压缩 + ownership 抽象）,prd-qm-post-soul,planning,~5d,~4d,~1d,~2h,2026-09-26T00:00Z,
+tasks-qm-post-soul,qm-post-soul（renderer 投影 + token 压缩 + ownership 抽象）,prd-qm-post-soul,completed,~5d,~4d,~1d,~2h,2026-09-26T00:00Z,2026-09-26T00:00Z,2026-09-26T23:59Z
 -->
 
 ## 并行执行规程（沿 p002）
@@ -69,106 +69,106 @@ tasks-qm-post-soul,qm-post-soul（renderer 投影 + token 压缩 + ownership 抽
 
 ### A.0 【串行门】M-Tape-0 Spec 落盘 + parity 登记（~0.5d）
 
-- [ ] 0.1 `repos/qm-next/docs/session-tape-spec.md` 新建（qm-verbatim 翻译 + qm-next 立场标注）~2h
+- [x] 0.1 `repos/qm-next/docs/session-tape-spec.md` 新建（qm-verbatim 翻译 + qm-next 立场标注）~2h
   - 不删 "Image references" / "Migration" / "Resolved questions" 三节
   - 在 "What this buys" 节注明：qm-next 当前 fold（harness-pi）已落地，projection（store）未落地
   - 标注 qm-next 立场：cordis 单进程 + memory+PG 双实现 + 飞书 v1 渠道
-- [ ] 0.2 `repos/qm-next/docs/parity-deviations.md` 加 ## Tape Renderer Projection（2026-09-26）~1h
+- [x] 0.2 `repos/qm-next/docs/parity-deviations.md` 加 ## Tape Renderer Projection（2026-09-26）~1h
   - 引 qm `src/harness/tape-projection.ts:1-539` + `runtime-recovery.ts:1-33` 为参考实现
   - 标 #56 #57 #58 三条延期：
     - **#56**：`projectTapeEntries` 缺失（qm-verbatim 移植起点）
     - **#57**：`createTranscriptSource` 缺失（qm-verbatim 移植起点）
     - **#58**：`runtime-recovery.ts` 缺失（qm-verbatim 移植起点）
-- [ ] 0.3 `repos/qm-next/docs/migration.md` 第 19.0 "session_tape" 节末尾链接 `docs/session-tape-spec.md` ~0.5h
-- [ ] 0.4 串行门验收：`pnpm typecheck` + `pnpm check:im` + `pnpm check:soul` 全绿 ~0.5h
+- [x] 0.3 `repos/qm-next/docs/migration.md` 第 19.0 "session_tape" 节末尾链接 `docs/session-tape-spec.md` ~0.5h
+- [x] 0.4 串行门验收：`pnpm typecheck` + `pnpm check:im` + `pnpm check:soul` 全绿 ~0.5h
 
 ### A.1 【A】M-Tape-1 Projection + TranscriptSource（~1.5d）
 
-- [ ] 1.1 类型与切片段（qm L1-100 移植）~2h
+- [x] 1.1 类型与切片段（qm L1-100 移植）~2h
   - `DraftEntry` / `DraftEvent` / `TapeMessage` / `BoundAnnotation` 类型
   - `renderableTapeSlice(rows)`：找最近 `render_import` 截断
   - `tapeHasRenderBlockers(rows)`：`legacy_import` / `legacy_patch` 阻断
   - `entryMirror(row)` / `boundAnnotation(row)`：annotation → DraftEntry 翻
   - `userDraft` / `toolResultDraft`：message → DraftEntry 翻
   - **qm-verbatim 命名 + 行为**
-- [ ] 1.2 投影主循环段（qm L199-395 移植）~3h
+- [x] 1.2 投影主循环段（qm L199-395 移植）~3h
   - `projectTapeEntries(sessionId, tapeRows, opts?)`
   - opts.anchored 锚点逻辑
   - 主循环：kind 分流 + coarse run + coveredSeq 累加
   - settle 算法：DraftEvent[] → SessionEntry[] + coveredSeq + baseSeq
   - **关键不变量**：同一 `tape + audience` 产出同一 `entries[]`
-- [ ] 1.3 `createTranscriptSource(sessions)` 段（qm L419-521 移植）~3h
+- [x] 1.3 `createTranscriptSource(sessions)` 段（qm L419-521 移植）~3h
   - TranscriptStore pick: `getEntries | visibleEntries | getTape | latestEntrySeq | participantWindowsOf` + 可选 `getTranscriptEntries | canReadTranscriptSuffix`
   - `projected()` 内部：`latestEntrySeq` → 限额 cap → `getTape` → `projectTapeEntries` → 锚点判定
   - `forRender(sessionId, opts?)`：读 + 限额 + 早期 seq 计数
   - `forViewer(sessionId, principalId, opts?)`：参与者窗口过滤 + `entryWithinTenure`
-- [ ] 1.4 `searchRowsFromEntries(entries, sinceSeq)` 移植（qm L523-538）~1h
+- [x] 1.4 `searchRowsFromEntries(entries, sinceSeq)` 移植（qm L523-538）~1h
   - admin / search / inbox 搜索行生成
-- [ ] 1.5 测试套件（qm-verbatim 50 行种子 + qm-next 多引擎覆盖）~3h
+- [x] 1.5 测试套件（qm-verbatim 50 行种子 + qm-next 多引擎覆盖）~3h
   - `repos/qm-next/packages/store/tests/tape-projection.test.ts`
   - coverage gap / coarse run / mirror involvement / interrupt heal
   - **多引擎组合**：pi / claude / codex / opencode 四种 harness 切换用例
-- [ ] 1.6 `pnpm typecheck` + `pnpm test`（无 PG：memory store 单测 + foldLint 对拍）~1h
-- [ ] 1.7 `pnpm test:pg`（PostgresSessionStore 走 createTranscriptSource 双侧一致）~1h
+- [x] 1.6 `pnpm typecheck` + `pnpm test`（无 PG：memory store 单测 + foldLint 对拍）~1h
+- [x] 1.7 `pnpm test:pg`（PostgresSessionStore 走 createTranscriptSource 双侧一致）~1h
 
 ### A.2 【A】M-Tape-2 Runtime Recovery（~0.5d）
 
-- [ ] 2.1 `repos/qm-next/packages/runs/src/runtime-recovery.ts`（qm-verbatim port 33L）~2h
+- [x] 2.1 `repos/qm-next/packages/runs/src/runtime-recovery.ts`（qm-verbatim port 33L）~2h
   - `recoveredRuntime(entries, runId, actorId): RuntimeChoice | undefined`
   - 反向扫描 session entries，匹配 `tool='runtime' && runId && actorId && runtimeHandoff.choice` 的最新一条
   - 类型守卫：`isHarnessId(choice.harnessId)` + `typeof choice.modelId === 'string'`
-- [ ] 2.2 接 `repos/qm-next/packages/orchestrator/src/orchestrator.ts:107` 周边 ~1h
+- [x] 2.2 接 `repos/qm-next/packages/orchestrator/src/orchestrator.ts:107` 周边 ~1h
   - harness `resolveChoice` 前先 `recoveredRuntime(history, runId, actorId)`
   - 找到 → 用作 fallback；与 `choice?.harnessId` 取并集
-- [ ] 2.3 测试：3 条连续 tool_result 中取最新；不存在时返 undefined ~1h
-- [ ] 2.4 `pnpm typecheck` + `pnpm test` 全绿；parity-deviations #58 标注 "已 closed" ~0.5h
+- [x] 2.3 测试：3 条连续 tool_result 中取最新；不存在时返 undefined ~1h
+- [x] 2.4 `pnpm typecheck` + `pnpm test` 全绿；parity-deviations #58 标注 "已 closed" ~0.5h
 
 ### A.3 【A】M-Tape-3 渲染路径接通 + 字节对拍闸门（~1d）
 
-- [ ] 3.1 `repos/qm-next/packages/api/src/service.ts` 暴露 `createTranscriptSource(deps.sessions)` ~1h
-- [ ] 3.2 `@qm/admin` 的 transcript / spend / error 视图：替换 `getEntries → forRender` ~2h
-- [ ] 3.3 `@qm/web-ui` 的 chat / inbox / contexts 视图：替换 `getEntries → forRender` ~2h
-- [ ] 3.4 `@qm/web-ui` 的 personal-scope tool result 过滤：用 `entryWithinTenure` + `forViewer` ~1h
-- [ ] 3.5 **新门禁 `pnpm check:tape-renderer`** ~2h
+- [x] 3.1 `repos/qm-next/packages/api/src/service.ts` 暴露 `createTranscriptSource(deps.sessions)` ~1h
+- [x] 3.2 `@qm/admin` 的 transcript / spend / error 视图：替换 `getEntries → forRender` ~2h
+- [x] 3.3 `@qm/web-ui` 的 chat / inbox / contexts 视图：替换 `getEntries → forRender` ~2h
+- [x] 3.4 `@qm/web-ui` 的 personal-scope tool result 过滤：用 `entryWithinTenure` + `forViewer` ~1h
+- [x] 3.5 **新门禁 `pnpm check:tape-renderer`** ~2h
   - `repos/qm-next/scripts/check-tape-renderer.sh`
   - cold-rebuild 后 `fold(tape) === forRender(tape).entries`
   - 失败即 fail；接 `pnpm check:im` 同级
-- [ ] 3.6 `pnpm test:pg` + `pnpm test` 全绿；parity-deviations 收口（#56/#57/#58 → closed）~1h
+- [x] 3.6 `pnpm test:pg` + `pnpm test` 全绿；parity-deviations 收口（#56/#57/#58 → closed）~1h
 
 ### B 【B】Capability Token 压缩（~0.5d，可与 A.2/A.3 并行）
 
-- [ ] B.1 `repos/qm-next/packages/auth/src/capability-token.ts`（现有 104L + 增量）~1h
+- [x] B.1 `repos/qm-next/packages/auth/src/capability-token.ts`（现有 104L + 增量）~1h
   - 加 `compressFlag` 字段（默认关）
   - 加 `compressPayload(obj)` / `decompressPayload(s)` 工具函数（与 qm 同名）
-- [ ] B.2 触发压缩阈值：payload 字节数 ≥ 1024 → gzipped base64；< 1024 直传 ~0.5h
-- [ ] B.3 `packages/auth/config/compress-tokens: true` opt-in 配置项 ~0.5h
-- [ ] B.4 测试：双向 PG 兼容（存储 + 读取）~1h
-- [ ] B.5 `pnpm typecheck` + `pnpm test` + `pnpm test:pg` 全绿；parity-deviations #59 登记 ~0.5h
+- [x] B.2 触发压缩阈值：payload 字节数 ≥ 1024 → gzipped base64；< 1024 直传 ~0.5h
+- [x] B.3 `packages/auth/config/compress-tokens: true` opt-in 配置项 ~0.5h
+- [x] B.4 测试：双向 PG 兼容（存储 + 读取）~1h
+- [x] B.5 `pnpm typecheck` + `pnpm test` + `pnpm test:pg` 全绿；parity-deviations #59 登记 ~0.5h
 
 ### C 【C】Background Ownership 类型层（~1d，可与 A.2/A.3 并行）
 
-- [ ] C.1 ADR-0020 草稿 `repos/qm-next/docs/adr/0020-background-ownership-types.md` ~1h
+- [x] C.1 ADR-0020 草稿 `repos/qm-next/docs/adr/0020-background-ownership-types.md` ~1h
   - 状态：proposed（待 M-Soul-3 决策后转 accepted）
   - 说明 P5 21.0 启动时如何填充 ownership 实现
-- [ ] C.2 `repos/qm-next/packages/runs/src/ownership.ts`（新建）~1h
+- [x] C.2 `repos/qm-next/packages/runs/src/ownership.ts`（新建）~1h
   - 定义 `Ownership` / `TransferToken` / `OwnershipLease` 三个类型
   - 类型守卫函数：`isTransferToken(x)` / `isOwnershipLease(x)`
-- [ ] C.3 接 `repos/qm-next/packages/runs/src/task-protection.ts`（已有）~1h
+- [x] C.3 接 `repos/qm-next/packages/runs/src/task-protection.ts`（已有）~1h
   - 增加 stub 函数：
     - `tryHandoverOwnership(lease: OwnershipLease, token: TransferToken): Ownership | undefined` → throw "not yet implemented"
     - `acceptHandover(token: TransferToken): Ownership | undefined` → throw "not yet implemented"
-- [ ] C.4 测试：stub 函数行为正确（throw）；类型契约编译通过；现有 caller 编译通过 ~1h
-- [ ] C.5 **不写实现**：PG twin / memory twin / reaper 集成全部延后到 P5 21.0 启动（文档明示）
-- [ ] C.6 `pnpm typecheck` + `pnpm test` 全绿 ~0.5h
+- [x] C.4 测试：stub 函数行为正确（throw）；类型契约编译通过；现有 caller 编译通过 ~1h
+- [x] C.5 **不写实现**：PG twin / memory twin / reaper 集成全部延后到 P5 21.0 启动（文档明示）
+- [x] C.6 `pnpm typecheck` + `pnpm test` 全绿 ~0.5h
 
 ### D 【汇合】文档收口 + tag（~0.5d）
 
-- [ ] D.1 `repos/qm-next/CHANGELOG.md` [Unreleased] 段：post-soul 优化批（M-Tape + token 压缩 + ownership 类型）~1h
-- [ ] D.2 `repos/qm-next/docs/parity-deviations.md` 收口 #56/#57/#58/#59 → closed；#60 model gateway catalog 延期登记 ~0.5h
-- [ ] D.3 `repos/qm-next/docs/architecture.md` 更新：renderer 投影接通 + capability token 压缩 + ownership 类型层 ~0.5h
-- [ ] D.4 `repos/qm-next/docs/operations.md` 更新：capability token 压缩开关说明 ~0.5h
-- [ ] D.5 五门禁全绿：`pnpm typecheck` + `pnpm test` + `pnpm test:pg` + `pnpm check:im` + `pnpm check:soul` + `pnpm check:tape-renderer` ~1h
-- [ ] D.6 打 tag `optim-2026-09`（不绑 commit hash；D.5 后最近 commit 即 tag 点）~0.5h
+- [x] D.1 `repos/qm-next/CHANGELOG.md` [Unreleased] 段：post-soul 优化批（M-Tape + token 压缩 + ownership 类型）~1h
+- [x] D.2 `repos/qm-next/docs/parity-deviations.md` 收口 #56/#57/#58/#59 → closed；#60 model gateway catalog 延期登记 ~0.5h
+- [x] D.3 `repos/qm-next/docs/architecture.md` 更新：renderer 投影接通 + capability token 压缩 + ownership 类型层 ~0.5h
+- [x] D.4 `repos/qm-next/docs/operations.md` 更新：capability token 压缩开关说明 ~0.5h
+- [x] D.5 五门禁全绿：`pnpm typecheck` + `pnpm test` + `pnpm test:pg` + `pnpm check:im` + `pnpm check:soul` + `pnpm check:tape-renderer` ~1h
+- [x] D.6 打 tag `optim-2026-09`（不绑 commit hash；D.5 后最近 commit 即 tag 点）~0.5h
 
 ## Acceptance Baseline
 

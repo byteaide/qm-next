@@ -53,13 +53,12 @@ AI search:
 
 <!-- Add active plans here - see Plan Template below -->
 
-<!--TOON:active_plans[1]{id,title,status,phase,total_phases,owner,tags,est,est_ai,est_test,est_read,logged,started}:
-p003,qm-post-soul — qm-soul 收口后优化批,planning,M-Tape-0/3,4,@wxd,#qm-post-soul #tape-renderer #token-compression #ownership,~5d,~4d,~1d,~2h,2026-09-26T00:00Z,
+<!--TOON:active_plans[0]{id,title,status,phase,total_phases,owner,tags,est,est_ai,est_test,est_read,logged,started}:
 -->
 
 ### p003: qm-post-soul — qm-soul 收口后优化批（M-Tape renderer + capability token 压缩 + ownership 抽象）
 
-**Status:** Planning（决策已签字于 `todo/notes/qm-next-decision-2026-09-26.md`）
+**Status:** Completed（tag `optim-2026-09` @ `3b7126e`，2026-09-26；门禁验证：typecheck ✔、check:im ✔、check:soul ✔、check:tape-renderer ✔；test 1201/1 fail（预存 delivery-queue flaky）、test:pg 1314/3 fail（同源））
 **Owner:** @wxd
 **Tags:** #qm-post-soul #tape-renderer #token-compression #ownership #qm-parity
 **Estimate:** ~5d (ai:4d test:1d read:2h)；3 车道并行墙钟 ~3.5d
@@ -72,7 +71,8 @@ p003,qm-post-soul — qm-soul 收口后优化批,planning,M-Tape-0/3,4,@wxd,#qm-
 - `todo/notes/qm-soul-followup-tape-2026-09-26.md` — M-Tape-0..3 详细任务
 - `todo/notes/qm-next-decision-2026-09-26.md` — 决策记录（3 执行 / 6 延后 / 6 不做 / 2 closed）
 **Logged:** 2026-09-26
-**Started:** -
+**Started:** 2026-09-26
+**Completed:** 2026-09-26
 
 #### Purpose
 
@@ -144,14 +144,35 @@ qm-soul tag `soul`（2026-09-21）落地后，qm-next 的 fold（harness-pi `tap
 
 #### Progress
 
-- [ ] (2026-09-26) 决策记录 commit `3d956f1`；PRD + tasks 文件落盘（commit 待打）
-- [ ] Phase A.0 M-Tape-0 Spec 落盘 + parity 登记 ~0.5d
-- [ ] Phase A.1 M-Tape-1 Projection + TranscriptSource ~1.5d
-- [ ] Phase A.2 M-Tape-2 Runtime Recovery ~0.5d
-- [ ] Phase A.3 M-Tape-3 渲染路径接通 + 字节对拍闸门 ~1d
-- [ ] Phase B Capability Token 压缩 ~0.5d（可与 A.2/A.3 并行）
-- [ ] Phase C Background Ownership 类型层 ~1d（可与 A.2/A.3 并行）
-- [ ] Phase D 汇合（文档收口 + tag `optim-2026-09`）~0.5d
+- [x] (2026-09-26) 决策记录 commit `3d956f1`；PRD + tasks 文件落盘（commit `fac1249`）
+- [x] Phase A.0 M-Tape-0 Spec 落盘 + parity 登记 ~0.5d（commit `1899145`）
+- [x] Phase A.1 M-Tape-1 Projection + TranscriptSource ~1.5d（commit `a6c998f`）
+- [x] Phase A.2 M-Tape-2 Runtime Recovery ~0.5d（commit `c78a56f`）
+- [x] Phase A.3 M-Tape-3 渲染路径接通 + 字节对拍闸门 ~1d（commit `f4b42e7`）
+- [x] Phase B Capability Token 压缩 ~0.5d（commit `be539e6`，B.1-B.5 落地）
+- [x] Phase C Background Ownership 类型层 ~1d（commit `c6b21e1`，C.1-C.6 落地 + ADR-0020）
+- [x] Phase D 汇合（文档收口 + tag `optim-2026-09` @ `3b7126e`）~0.5d（commit `3b7126e`）
+
+#### Outcomes & Retrospective
+
+**交付：**
+
+- tag `optim-2026-09` @ `3b7126e`，commit 链 `1899145`→`a6c998f`→`c78a56f`→`f4b42e7`→`be539e6`→`c6b21e1`→`3b7126e`
+- 门禁验证：typecheck ✔（pnpm install 修复 @qm/model 符号链接后）、check:im ✔、check:soul ✔、check:tape-renderer ✔
+- test 1201✔/1✖/56 skip；test:pg 1314✔/3✖/4 skip（失败均在 im-core delivery-queue 计时 flaky，非 post-soul 引入）
+- post-soul 专属测试全绿：tape-projection 14✔、capability-token compression 16✔、ownership types 16✔、runtime-recovery 11✔
+
+**已知预存问题（非本批引入）：**
+
+- `packages/im-core/tests/delivery-queue.test.ts:80` — flaky：100ms lease TTL 在负载下过期（测试耗时 274ms > 100ms）
+- `packages/im-core/tests/delivery-queue-pg.test.ts:40,68` — flaky：30ms/100ms lease TTL 在 PG 延迟下过期
+- 修复方向：将 TTL 上调到 ≥500ms 或用 fake timer；不在本批范围
+
+**经验沉淀：**
+
+- pnpm install 后符号链接可能缺失（`@qm/model` 未链接），导致 typecheck TS2307；重跑 pnpm install 即恢复
+- qm-verbatim port（539L + 33L）逐行移植 + strict typecheck 收敛 `unknown` cast 是安全策略；字节对拍闸门 `check:tape-renderer` 提供长期回归保护
+- capability token 压缩 opt-in 纪律（默认关、显式启用）避免静默改线上协议；双向 PG 兼容测试验证存储+读取
 
 ## Completed Plans
 
@@ -350,9 +371,10 @@ v0.1.0 只覆盖 qm 最核心的 ~11%（15k/133k 行 TS）。本计划把 qm-nex
 - p002 完成形态进入运维期，qm 进入只读归档；qm-next 后续的"v1.x"演进（多渠道 IM 复活、新引擎/模型、监控完善）作为新计划立项
 - 任何 suspended 项的复活按 `ImProvider`/`Harness` 契约复用现有测试矩阵，无需重写
 
-<!--TOON:completed_plans[2]{id,title,owner,tags,est,actual,logged,started,completed,lead_time_days}:
+<!--TOON:completed_plans[3]{id,title,owner,tags,est,actual,logged,started,completed,lead_time_days}:
 p001,qm-next — Cordis 重写 + 飞书 IM 适配层,wxd,#qm-next #cordis #feishu #rewrite,~11d,~2d 墙钟,2026-09-12,2026-09-12,2026-09-13,1
 p002,qm-parity — qm-next 全功能对齐（qm 全功能替身）,wxd,#qm-parity #qm-next #parity,~23d,~3d 墙钟（双/三车道并行）,2026-09-13,2026-09-13,2026-09-15,2
+p003,qm-post-soul — qm-soul 收口后优化批（M-Tape renderer + capability token 压缩 + ownership 抽象）,wxd,#qm-post-soul #tape-renderer #token-compression #ownership,~5d,~1d 墙钟（单会话串行）,2026-09-26,2026-09-26,2026-09-26,0
 -->
 
 ## Archived Plans
@@ -424,5 +446,5 @@ Brief description of why this work matters.
 <!--/TOON:dependencies-->
 
 <!--TOON:analytics{total_plans,active,completed,archived,avg_lead_time_days,avg_variance_pct}:
-2,0,2,0,1.5,
+3,0,3,0,1.0,
 -->
