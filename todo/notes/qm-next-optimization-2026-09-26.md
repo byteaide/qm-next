@@ -239,7 +239,7 @@ git -C repos/qm-next log --oneline -20
 git -C repos/qm-next log --oneline --grep="X3b" | head -10
 
 # 3. 检查 qm-soul 状态
-git -C ~/Git/_worktrees/aa-qm-soul log --oneline -10
+git -C <qm-soul-worktree> log --oneline -10
 
 # 4. 检查 qm 上游 HEAD（需代理）
 cd repos/qm

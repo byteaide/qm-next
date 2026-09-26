@@ -53,10 +53,109 @@ AI search:
 
 <!-- Add active plans here - see Plan Template below -->
 
-<!--TOON:active_plans[0]{id,title,status,phase,total_phases,owner,tags,est,est_ai,est_test,est_read,logged,started}:
+<!--TOON:active_plans[1]{id,title,status,phase,total_phases,owner,tags,est,est_ai,est_test,est_read,logged,started}:
+p003,qm-post-soul — qm-soul 收口后优化批,planning,M-Tape-0/3,4,@wxd,#qm-post-soul #tape-renderer #token-compression #ownership,~5d,~4d,~1d,~2h,2026-09-26T00:00Z,
 -->
 
+### p003: qm-post-soul — qm-soul 收口后优化批（M-Tape renderer + capability token 压缩 + ownership 抽象）
+
+**Status:** Planning（决策已签字于 `todo/notes/qm-next-decision-2026-09-26.md`）
+**Owner:** @wxd
+**Tags:** #qm-post-soul #tape-renderer #token-compression #ownership #qm-parity
+**Estimate:** ~5d (ai:4d test:1d read:2h)；3 车道并行墙钟 ~3.5d
+**Dependencies:** p002 (qm-parity, 2026-09-15 完成) + qm-soul tag `soul` (2026-09-21)
+**PRD:** [todo/tasks/prd-qm-post-soul.md](tasks/prd-qm-post-soul.md)
+**Tasks:** [todo/tasks/tasks-qm-post-soul.md](tasks/tasks-qm-post-soul.md)
+**Related Notes:**
+- `todo/notes/qm-sync-2026-09-26.md` — qm 上游 415 commits 同步基线
+- `todo/notes/qm-next-optimization-2026-09-26.md` — P0/P1/P2/P3 全表 + closed/延后/不做 收口
+- `todo/notes/qm-soul-followup-tape-2026-09-26.md` — M-Tape-0..3 详细任务
+- `todo/notes/qm-next-decision-2026-09-26.md` — 决策记录（3 执行 / 6 延后 / 6 不做 / 2 closed）
+**Logged:** 2026-09-26
+**Started:** -
+
+#### Purpose
+
+qm-soul tag `soul`（2026-09-21）落地后，qm-next 的 fold（harness-pi `tape-fold.ts` 260L）写进 model 上下文，但 renderer 视图仍走 legacy `getEntries()` —— 模型视图与 UI 视图不一致。本批完成：
+
+1. **renderer 投影接通**（lane A 主路径，M-Tape-0..3）：qm `tape-projection.ts` 539L qm-verbatim port + `runtime-recovery.ts` 33L + 新 spec 文档 + 字节对拍闸门 `pnpm check:tape-renderer`
+2. **capability token 压缩**（lane B）：≥ 1024 字节时 gzipped base64；默认 opt-in，避免静默改线上协议
+3. **background ownership 类型层**（lane C）：`Ownership` / `TransferToken` / `OwnershipLease` 类型 + stub 函数，为 P5 21.0 worker 拆分预留 seam
+
+非目标（显式不做，与 qm-next 战略一致）：Slack/钉钉/企微、Fly/AWS、Porter/E2B/Modal/Superserve、桌面 app、Helm chart、tape retirement、model gateway catalog、Sentry/PostHog telemetry、persistent subagent、admin spend dashboard。
+
+#### Development Environment
+
+| Item | Value |
+|------|-------|
+| Language/runtime | TypeScript (strict, ESM, NodeNext)，Node ^22.19 \|\| >=24 |
+| Install | `cd repos/qm-next && pnpm install`（lane A 启动前由主会话执行一次） |
+| Tests | `pnpm test` / `pnpm test:pg`（一次性 PG16 容器对拍） |
+| Gates | `pnpm typecheck` + `pnpm test` + `pnpm test:pg` + `pnpm check:im` + `pnpm check:soul` + `pnpm check:tape-renderer`（新增） |
+| Do NOT | worker 不执行 git 写命令（主会话统一提交）；qm 仓只读（平移来源）；canonical `aa` 仓只读，产出全在 `repos/qm-next` 新仓 |
+
+#### Linkage (The Pin)
+
+| Concept | Files | Lines | Synonyms |
+|---------|-------|-------|----------|
+| renderer projection 平移源 | repos/qm/src/harness/tape-projection.ts | 1-539 | projectTapeEntries, createTranscriptSource, searchRowsFromEntries |
+| runtime recovery 平移源 | repos/qm/src/harness/runtime-recovery.ts | 1-33 | recoveredRuntime |
+| tape spec 平移源 | repos/qm/docs/session-tape-spec.md | 1-320 | session tape, fold(tape, audience) |
+| 字节对拍测试套件 | repos/qm/test/tape-projection.test.ts | 1-1211 | coverage gap, coarse run, mirror |
+| 字节对拍闸门 | repos/qm/test/tape-parity-gate.test.ts | 1-45 | fold === forRender |
+| qm-next 既有 tape schema | repos/qm-next/packages/store/src/schema.ts | 75,81 | session_tape DDL |
+| qm-next tape 读写（PG） | repos/qm-next/packages/store/src/postgres-session-store.ts | 263,281,304,309,527 | tape append, getTape |
+| qm-next tape 读写（memory） | repos/qm-next/packages/store/src/memory-session-store.ts | 54,168,187,338 | tape Map |
+| qm-next getTape 契约 | repos/qm-next/packages/types/src/session-store.ts | 198 | getTape signature |
+| qm-next harness-facing fold（已对位） | repos/qm-next/packages/harness-pi/src/tape-fold.ts | 1-260 | foldTape, lintFold, healFoldInterrupt |
+| capability token 当前实现 | repos/qm-next/packages/auth/src/capability-token.ts | 1-104 | 无压缩 |
+| task-protection 当前实现 | repos/qm-next/packages/runs/src/task-protection.ts | - | lease, single-process |
+| ADR-0017（加密前置） | repos/qm-next/docs/adr/0017-oauth-token-encryption-at-rest.md | - | oauth token encryption |
+| ADR-0018（frame composer） | repos/qm-next/docs/adr/0018-soul-layer-is-composed-protocol-frames.md | 1-36 | 16 段顺序组装 |
+| ADR-0020（本批新草） | repos/qm-next/docs/adr/0020-background-ownership-types.md | - | Ownership 类型 |
+| parity-deviations（本批新增） | repos/qm-next/docs/parity-deviations.md | 末尾追加 | #56 #57 #58 #59 #60 |
+
+#### Decision Log
+
+- 2026-09-26 上游同步决策（commit `8adee4b`）：qm 上游 415 commits，按主题分类后只采纳"与 qm-next 战略一致"的部分；不采纳 Slack/钉钉/企微/Fly-AWS/Porter 等战略外项
+- 2026-09-26 优化决策（commit `3d956f1`）：执行 3 项（renderer 投影 + token 压缩 + ownership 类型）+ 延后 6 项（model gateway / telemetry / 4 项 P2）+ 不做 6 项（P3 全部）+ closed 2 项（P0-2.3 / P0-2.4）
+- 2026-09-26 端口定位：M-Tape-1 落 `packages/store/src/tape-projection.ts`（renderer 投影是 store 层职责），不与 `harness-pi/tape-fold.ts`（harness-facing）重复
+- 2026-09-26 capability token 压缩默认 opt-in：`packages/auth/config/compress-tokens: true` 显式启用，避免静默改线上协议
+- 2026-09-26 ownership 仅类型层纪律：不写 PG twin / memory twin / reaper 集成；stub 函数 throw "not yet implemented"；现有 caller 编译通过即可
+- 2026-09-26 tape retirement 不在本批：qm-next v1 决策明确不做冻结 + 退役；接口预留但实现延后
+- 2026-09-26 不写 parity-deviations for telemetry：telemetry 是新方向，不是 qm parity 项
+- 2026-09-26 tag 链：commit `3d956f1`（决策记录）→ lane A 收口 → lane B 收口 → lane C 收口 → 汇合打 tag `optim-2026-09`
+
+#### Surprises & Discoveries
+
+- qm `tape-projection.ts` 539L 中有大量 `unknown` cast（qm 风格）；qm-next strict typecheck 必须收敛到具体 union 类型
+- qm-next 当前有 `foldTape`（harness-pi 260L）但无 `projectTapeEntries`；两者职责不同：fold → model 输入，project → renderer 输入
+- `Ownership` 抽象在单进程 Cordis 下没必要；但 P5 21.0 worker 拆分时是硬需求 → 先定抽象避免 21.0 启动时拆 task-protection 重写
+- qm 上游 `tape-projection.test.ts` 1211L 是 qm 最大单文件测试套件；本批只取 50 行种子用例，剩余作为 M-Tape-3.5 长期补
+
+#### Sub-plans / Lanes
+
+| 车道 | 内容 | 估时 | 入口 | 出口 |
+|------|------|----:|------|------|
+| **A** | M-Tape-0..3（renderer 投影接通） | ~3.5d | `tasks/tasks-qm-post-soul.md` ## A | `pnpm check:tape-renderer` 绿 |
+| **B** | Capability token 压缩 | ~0.5d | `tasks/tasks-qm-post-soul.md` ## B | opt-in 配置双向 PG 兼容绿 |
+| **C** | Background ownership 类型层 | ~1d | `tasks/tasks-qm-post-soul.md` ## C | 类型契约编译通过 + ADR-0020 落盘 |
+| **D** | 汇合（文档 + tag） | ~0.5d | `tasks/tasks-qm-post-soul.md` ## D | tag `optim-2026-09` |
+
+#### Progress
+
+- [ ] (2026-09-26) 决策记录 commit `3d956f1`；PRD + tasks 文件落盘（commit 待打）
+- [ ] Phase A.0 M-Tape-0 Spec 落盘 + parity 登记 ~0.5d
+- [ ] Phase A.1 M-Tape-1 Projection + TranscriptSource ~1.5d
+- [ ] Phase A.2 M-Tape-2 Runtime Recovery ~0.5d
+- [ ] Phase A.3 M-Tape-3 渲染路径接通 + 字节对拍闸门 ~1d
+- [ ] Phase B Capability Token 压缩 ~0.5d（可与 A.2/A.3 并行）
+- [ ] Phase C Background Ownership 类型层 ~1d（可与 A.2/A.3 并行）
+- [ ] Phase D 汇合（文档收口 + tag `optim-2026-09`）~0.5d
+
 ## Completed Plans
+
+<!-- Move completed plans here with Outcomes & Retrospective -->
 
 <!-- Move completed plans here with Outcomes & Retrospective -->
 
