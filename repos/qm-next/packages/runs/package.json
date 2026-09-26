@@ -10,6 +10,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@qm/model": "workspace:^",
     "@qm/store": "workspace:^",
     "@qm/types": "workspace:^",
     "pg": "^8.13.0"

@@ -6,7 +6,9 @@
  * config itself arrives through the cordis profile (composition root).
  */
 import { defaultModelForHarness, isHarnessId, modelSupportedByHarness } from '@qm/model'
-import { NonRetryableTurnError } from '@qm/types'
+import { NonRetryableTurnError, type RuntimeChoice } from '@qm/types'
+
+export type { RuntimeChoice }
 
 export interface RuntimeRouteTarget {
   harness?: string
@@ -20,11 +22,6 @@ export interface RuntimeRouteConfig {
   default?: RuntimeRouteTarget
   /** Per-scope overrides keyed by ScopeId. */
   scopes?: Record<string, RuntimeRouteTarget>
-}
-
-export interface RuntimeChoice {
-  harnessId: string
-  modelId: string
 }
 
 export interface ResolveRuntimeChoiceOptions {

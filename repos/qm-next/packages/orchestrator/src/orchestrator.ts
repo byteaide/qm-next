@@ -19,13 +19,14 @@ import type {
   Orchestrator,
   OrchestratorDeps,
   PendingApproval,
+  RuntimeChoice,
   Session,
   SessionEntry,
   TurnInput,
   TurnResolution,
   TurnResult,
 } from '@qm/types'
-import { redactSecrets } from '@qm/runs'
+import { recoveredRuntime, redactSecrets } from '@qm/runs'
 import { createMemoryAdmissionRecordStore, runAdmissionWaterfall } from '@qm/admission'
 import type { AdmissionRecordStore } from '@qm/admission'
 import { buildStagePorts } from './admission-integration.ts'
@@ -97,6 +98,23 @@ export class OrchestratorService extends Service implements Orchestrator {
     let harness
     let choiceModel: string | undefined
     try {
+      // M-Tape-2 (2026-09-26): recover the previous turn's engine/model
+      // selection from the most recent `tool='runtime'` `tool_result`
+      // row that matches the current Run's `runId` + `actorId`. When the
+      // configured router leaves a field undecided, the recovered value
+      // fills it in — so a reaped-run resume picks up the same harness +
+      // model the original turn used (qm-verbatim `recoveredRuntime`).
+      // Best-effort: a recovery miss or read error must NOT break the
+      // turn; it just falls back to the configured choice alone.
+      let recovered: RuntimeChoice | undefined
+      if (input.runId && input.actor?.id) {
+        try {
+          const history = await deps.sessions.getEntries(session.id)
+          recovered = recoveredRuntime(history, input.runId, input.actor.id)
+        } catch {
+          recovered = undefined
+        }
+      }
       const configured = deps.harness as Partial<
         import('./router.ts').ConfiguredHarnessRegistry
       >
@@ -104,8 +122,8 @@ export class OrchestratorService extends Service implements Orchestrator {
         ...(input.harness ? { harness: input.harness } : {}),
         ...(input.model ? { model: input.model } : {}),
       })
-      harness = deps.harness.resolve(choice?.harnessId ?? input.harness)
-      choiceModel = choice?.modelId
+      harness = deps.harness.resolve(choice?.harnessId ?? recovered?.harnessId ?? input.harness)
+      choiceModel = choice?.modelId ?? recovered?.modelId
     } catch (err) {
       return { status: 'refused', reason: errMessage(err) }
     }

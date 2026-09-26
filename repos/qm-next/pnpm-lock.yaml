@@ -735,6 +735,9 @@ importers:
 
   packages/runs:
     dependencies:
+      '@qm/model':
+        specifier: workspace:^
+        version: link:../model
       '@qm/store':
         specifier: workspace:^
         version: link:../store

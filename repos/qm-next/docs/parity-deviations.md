@@ -1187,6 +1187,10 @@ UI，模型视图与 UI 视图字节同源（`pnpm check:tape-renderer` 守门�
   qm-next 落 `packages/runs/src/runtime-recovery.ts`。orchestrator
   `resolveChoice` 之前 fallback：找到则与 `choice?.harnessId` 取并集；
   qm-next orchestrator 入口 `packages/orchestrator/src/orchestrator.ts:107` 周边。
+  ✅ 2026-09-26（A.2 落地：`@qm/runs` 加 `@qm/model` 依赖，11 用例测试；
+  orchestrator 在 `resolveChoice` 之前 best-effort 取历史并 union 到选择；
+  `RuntimeChoice` 上移 `@qm/types/runtime-choice.ts` 打破 runs → orchestrator
+  反向依赖）。
 - **#59** capability token 压缩默认 opt-in（lane B）——`packages/auth/src/capability-token.ts`
   加 `compressFlag` + `compressPayload`/`decompressPayload`；payload 字节数 ≥ 1024
   → gzipped base64；`packages/auth/config/compress-tokens: true` 显式启用。
